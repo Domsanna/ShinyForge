@@ -7,7 +7,9 @@ $publish = Join-Path $dist "publish"
 $keptBackup = Join-Path $root "_backup_tools_keep"
 $oldBackup = Join-Path $dist "ShinyForge Portable\Backup Tools"
 if (Test-Path $oldBackup) { if (Test-Path $keptBackup) { Remove-Item $keptBackup -Recurse -Force }; Move-Item $oldBackup $keptBackup }
-if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+# rd is more reliable than Remove-Item for ~15,000 sprite files (antivirus / indexer can hold a folder briefly).
+for ($i = 0; $i -lt 5 -and (Test-Path $dist); $i++) { cmd /c "rd /s /q `"$dist`" 2>nul"; if (Test-Path $dist) { Start-Sleep 3 } }
+if (Test-Path $dist) { throw "Couldn't delete $dist - close any program or Explorer window using it and try again." }
 
 # Build number = how many changes (git commits) ShinyForge has gone through. Version = 1.0.<build>.
 $git = (Get-Command git -ErrorAction SilentlyContinue).Source
