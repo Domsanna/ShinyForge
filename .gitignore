@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+dist/
+_backup_tools_keep/
+build.log
+*.user
+.vs/
+
+# Download caches used by the asset tools
+tools/_csv_cache/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local data the Python bot writes while hunting (never part of the source)
+PythonBot/encounters.csv
+PythonBot/stats.json
+PythonBot/calibration.json
+PythonBot/bot_status.json
+PythonBot/bot_warnings.log
+PythonBot/shinyforge.json
+PythonBot/pause.flag
+PythonBot/references/
+PythonBot/shinies/
+PythonBot/unknown/
+PythonBot/snapshot.png
+
+# Local developer notes
+HANDOFF.md

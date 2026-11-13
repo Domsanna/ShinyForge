@@ -1,0 +1,90 @@
+# ============================================================
+#  Deoxys shiny hunting bot - settings
+#  (calibration results are stored separately in calibration.json)
+# ============================================================
+
+controller:
+  # How button presses reach the Switch:
+  #   sysbotbase -> WiFi, needs a Switch with custom firmware + sys-botbase
+  #   nxbt       -> Bluetooth, via bridge/nxbt_bridge.py running on a
+  #                 Raspberry Pi / Linux machine (works on an unmodded Switch)
+  #   dryrun     -> just print the presses (testing)
+  type: sysbotbase
+  host: 192.168.0.100     # <-- CHANGE to your Switch's IP (System Settings > Internet)
+  port: 6000             # sysbotbase uses 6000, the nxbt bridge uses 7000
+
+hunt:
+  # auto    - detects the game and where you stand: at a legendary/static spot (Birth Island,
+  #           Navel Rock, Seafoam B4F, Power Plant, Mt. Ember, Cerulean Cave, Snorlax routes)
+  #           it soft resets; anywhere else it walks for wild encounters and runs from them.
+  # static  - soft reset in front of any static Pokemon (save in front of it first)
+  # wild    - walk back and forth in grass / a cave / on water; run from non-matches
+  # fishing - use the rod registered to fishing_button; run from non-matches
+  # vision  - the original screen-based Deoxys bot (uses the capture/calibration below)
+  # Legendary/mythical Pokemon are NEVER run from: a static one switches to soft resets,
+  # a roaming beast (Raikou/Entei/Suicune) stops the bot. Shiny -> always stops.
+  mode: auto
+  walk_axis: horizontal       # wild: horizontal (left/right) or vertical (up/down)
+  walk_hold: 0.3              # wild: seconds each direction is held (~1-2 steps)
+  fishing_button: Y           # fishing: button the rod is registered to
+  target_species: []          # also stop on these species, e.g. [Snorlax, Chansey]
+  intro_skip_delay: 2.5       # static: seconds after the reset before skipping the intro
+  intro_skip_presses: 3       # static: A presses to get through the intro to the title
+  intro_skip_interval: 1.2
+  flee_timeout: 60
+
+capture:
+  # Where the game picture comes from (Streamlabs Desktop):
+  #   virtualcam -> Streamlabs "Start Virtual Camera" (recommended)
+  #   window     -> screenshot of the Streamlabs window (keep it visible)
+  #   screen     -> screenshot of a whole monitor
+  type: virtualcam
+  camera_index: 0        # run "python -m shinybot cameras" to find the right one
+  width: 1280
+  height: 720
+  window_title: Streamlabs
+  monitor: 1
+
+sprite: assets/shiny_deoxys.png
+
+timing:
+  reset_buttons: [A, B, X, Y]   # soft reset combo for FireRed/LeafGreen on Switch
+  reset_hold: 1.5               # seconds to hold the combo (0.6 s is often too short and gets ignored;
+                                # the memory hunter checks every reset and retries with longer holds)
+  # If a title screen reference was calibrated, the bot waits until it sees it
+  # (up to title_timeout seconds). Otherwise it just waits reset_to_title seconds.
+  reset_to_title: 10.0
+  title_timeout: 45.0
+  skip_intro: true              # tap A through the intro movie (needs a title reference)
+  intro_skip_delay: 2.0         # seconds after the reset before the first skip tap
+  intro_skip_interval: 1.0      # seconds between skip taps
+  title_delay_min: 1.0          # random delay on the title screen (seconds)
+  title_delay_max: 5.0
+  press_hold: 0.15              # how long each A press is held (shorter gets dropped over WiFi)
+  a_interval: 0.6               # seconds between A presses while mashing
+  min_check_delay: 4.0          # without a battle reference: start judging the
+                                # sprite this many seconds after leaving the title
+  battle_timeout: 40.0          # give up on an attempt after this many seconds
+
+detection:
+  shiny_threshold: 0.90    # template similarity to the shiny PNG that counts as shiny
+  yellow_min_frac: 0.15    # shiny-yellow pixels (fraction of sprite) that counts as shiny
+  yellow_margin: 0.10      # ...and it must be this much above a normal Deoxys
+  yellow_min_sat: 110
+  yellow_min_val: 110
+  normal_threshold: 0.80   # similarity to the normal-Deoxys reference
+  battle_threshold: 0.80   # similarity to the battle HP-box reference
+  title_threshold: 0.80    # similarity to the title-screen reference
+  confirm_frames: 3        # frames in a row needed before deciding
+
+on_shiny:
+  beep: true
+  stop_on_unknown: false   # true = also stop when the bot can't tell what it saw
+
+memory:
+  # Reads the wild Pokemon's level, HP, stats, IVs, EVs, nature... from the Switch's
+  # RAM through sys-botbase and logs them every encounter (console + encounters.csv).
+  # Also a 3rd shiny check: if the game's own data says shiny, the bot stops.
+  enabled: true
+
+show_preview: true          # live window showing what the bot sees

@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShinyForge User Guide</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --panel: #ffffff; --panel2: #eef1f8; --text: #1b1f2a; --muted: #5b6475; --line: #dde2ec;
+    --accent: #6d5dfc; --accent2: #12b5cb; --gold: #b7791f; --good: #1f9d55; --warn: #b45309; --bad: #c0392b;
+    --code: #eef0f6; --shadow: 0 1px 2px rgba(20,25,40,.06), 0 4px 16px rgba(20,25,40,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12141b; --panel: #1a1d27; --panel2: #222634; --text: #e7e9f0; --muted: #9aa3b5; --line: #2c3142;
+      --accent: #8f83ff; --accent2: #3fd0e3; --gold: #f2c14e; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --code: #232838; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12141b; --panel: #1a1d27; --panel2: #222634; --text: #e7e9f0; --muted: #9aa3b5; --line: #2c3142;
+    --accent: #8f83ff; --accent2: #3fd0e3; --gold: #f2c14e; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --code: #232838; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  a { color: var(--accent); }
+  .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+  nav.toc { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 24px 18px 40px; border-right: 1px solid var(--line); }
+  nav.toc .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; margin-bottom: 18px; }
+  nav.toc .brand img { width: 34px; height: 34px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+  nav.toc li { margin: 1px 0; }
+  nav.toc a { display: block; padding: 5px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 14.5px; }
+  nav.toc a:hover { background: var(--panel2); }
+  nav.toc .sub a { padding-left: 24px; color: var(--muted); font-size: 13.5px; }
+  main { padding: 32px 40px 80px; min-width: 0; }
+  header.hero { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-radius: 18px; padding: 34px 34px 30px; margin-bottom: 30px; }
+  header.hero h1 { margin: 0 0 6px; font-size: 36px; line-height: 1.15; }
+  header.hero p { margin: 0; font-size: 17px; opacity: .95; max-width: 760px; }
+  header.hero .meta { margin-top: 14px; font-size: 13.5px; opacity: .85; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 26px 30px; margin: 0 0 22px; box-shadow: var(--shadow); }
+  h2 { margin: 0 0 14px; font-size: 25px; display: flex; align-items: center; gap: 10px; }
+  h2 .num { display: inline-grid; place-items: center; min-width: 34px; height: 34px; border-radius: 10px; background: var(--panel2); color: var(--accent); font-size: 16px; }
+  h3 { margin: 26px 0 8px; font-size: 19px; }
+  h4 { margin: 18px 0 6px; font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  p, li { max-width: 78ch; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code, kbd { font-family: Consolas, "Cascadia Mono", monospace; font-size: .9em; background: var(--code); padding: 1px 6px; border-radius: 5px; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 10px; overflow-x: auto; font-size: 14px; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { background: var(--panel2); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+  .callout { border-left: 4px solid var(--accent); background: var(--panel2); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 14px 0; }
+  .callout.tip { border-color: var(--good); }
+  .callout.warn { border-color: var(--warn); }
+  .callout.stop { border-color: var(--bad); }
+  .callout strong:first-child { display: block; margin-bottom: 2px; }
+  .steps { counter-reset: step; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: step; position: relative; padding-left: 44px; margin: 12px 0; }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 14px 0; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--panel2); }
+  .card b { display: block; margin-bottom: 4px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); vertical-align: 2px; }
+  .badge.off { color: var(--warn); border-color: var(--warn); }
+  .badge.on { color: var(--good); border-color: var(--good); }
+  .credits td:first-child { font-weight: 600; white-space: nowrap; }
+  .theme-toggle { margin-top: 18px; font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  footer { color: var(--muted); font-size: 13.5px; text-align: center; padding: 10px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 16px; }
+    nav.toc .sub { display: none; }
+    main { padding: 16px; }
+    section { padding: 18px 16px; }
+    header.hero { padding: 24px 20px; }
+    header.hero h1 { font-size: 28px; }
+  }
+  @media print {
+    nav.toc, .theme-toggle { display: none; }
+    .layout { display: block; }
+    section { break-inside: avoid-page; box-shadow: none; }
+    header.hero { color: #000; background: none; border: 1px solid #ccc; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="Contents">
+  <div class="brand"><img src="Assets/ShinyForge.png" alt="" onerror="this.remove()"> ShinyForge</div>
+  <ol>
+    <li><a href="#welcome">1. Welcome</a></li>
+    <li><a href="#install">2. Installing</a></li>
+    <li><a href="#quickstart">3. Quick start</a></li>
+    <li><a href="#tour">4. A tour of the window</a></li>
+    <li><a href="#hunt">5. Shiny hunting</a></li>
+    <li class="sub"><a href="#hunt-switch">Switch: FireRed / LeafGreen</a></li>
+    <li class="sub"><a href="#hunt-sysbot">Switch: other games</a></li>
+    <li class="sub"><a href="#hunt-3ds">Nintendo 3DS</a></li>
+    <li><a href="#options">6. Hunt options</a></li>
+    <li class="sub"><a href="#stop-rules">Stop rules</a></li>
+    <li class="sub"><a href="#auto-catch">Auto-catch</a></li>
+    <li class="sub"><a href="#rng">Shiny RNG</a></li>
+    <li><a href="#record">7. Recording &amp; shiny clips</a></li>
+    <li><a href="#tracker">8. Pokédex tracker</a></li>
+    <li><a href="#saves">9. Saves, HOME folder &amp; Game Info</a></li>
+    <li><a href="#livingdex">10. Living Dex planner</a></li>
+    <li><a href="#stats">11. Hunt statistics</a></li>
+    <li><a href="#notify">12. Phone &amp; Discord alerts</a></li>
+    <li><a href="#overlay">13. Stream overlay &amp; phone remote</a></li>
+    <li><a href="#safety">14. Safety features</a></li>
+    <li><a href="#tools">15. Tools &amp; updates</a></li>
+    <li class="sub"><a href="#updates">Updating ShinyForge</a></li>
+    <li><a href="#hardware">16. Switch &amp; 3DS setup</a></li>
+    <li><a href="#pythonbot">17. The Python bot (advanced)</a></li>
+    <li><a href="#files">18. Where your files live</a></li>
+    <li><a href="#trouble">19. Troubleshooting</a></li>
+    <li><a href="#credits">20. Credits &amp; thanks</a></li>
+  </ol>
+  <button class="theme-toggle" type="button" id="themeToggle">Switch light / dark</button>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>ShinyForge User Guide</h1>
+  <p>Your all-in-one companion for shiny hunting, recording, collection tracking and save management on the Nintendo Switch and Nintendo 3DS.</p>
+  <div class="meta">Version 1.0 · For Windows 10 / 11 (64-bit) · <a style="color:#fff" href="https://github.com/Domsanna/ShinyForge">github.com/Domsanna/ShinyForge</a></div>
+</header>
+
+<!-- ============================================================ 1 -->
+<section id="welcome">
+  <h2><span class="num">1</span> Welcome</h2>
+  <p>Welcome! ShinyForge puts all the tools a Pokémon collector uses into one friendly window. Pick your console, pick your game, and everything for that game is on one page.</p>
+  <div class="grid">
+    <div class="card"><b>✨ Automatic shiny hunting</b><p>Soft resets, wild encounters and fishing on the Switch and 3DS. It stops the moment a shiny (or anything you asked for) appears.</p></div>
+    <div class="card"><b>🎥 Recording &amp; clips</b><p>Gap-free recordings split into numbered files, plus an automatic clip of every shiny.</p></div>
+    <div class="card"><b>📋 Pokédex tracker</b><p>Updates your Excel Pokédex spreadsheet from your save, and has a Pokédex window with each game's own sprites.</p></div>
+    <div class="card"><b>💾 Saves &amp; Game Info</b><p>Exports every Pokémon from a save into a folder ready for Pokémon HOME tools, with a readable Game Info report.</p></div>
+    <div class="card"><b>🧬 Living Dex planner</b><p>Combines all your saves and shows which species you own, where, and what's still missing.</p></div>
+    <div class="card"><b>📈 Statistics &amp; alerts</b><p>Odds, encounter rate and time estimates, plus phone and Discord alerts, a stream overlay and a phone remote.</p></div>
+  </div>
+  <div class="callout tip"><strong>Good to know</strong>Nothing risky happens unless you turn it on. Shiny RNG manipulation and auto-catch are <b>off</b> until you switch them on yourself. ShinyForge never changes your save files: it reads copies and makes backups before touching a spreadsheet.</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="install">
+  <h2><span class="num">2</span> Installing</h2>
+  <p>ShinyForge comes in two versions. Both have the same features. The only difference is where your settings and data are kept.</p>
+  <div class="table-wrap"><table>
+    <tr><th></th><th>Installer <code>ShinyForge-Setup.exe</code></th><th>Portable <code>ShinyForge Portable</code> folder / zip</th></tr>
+    <tr><td>Best for</td><td>Your main PC</td><td>A USB stick or external drive, or trying it without installing</td></tr>
+    <tr><td>Installs to</td><td><code>%LocalAppData%\Programs\ShinyForge</code> (no admin rights needed)</td><td>Wherever you unzip it</td></tr>
+    <tr><td>Settings &amp; data</td><td><code>%AppData%\ShinyForge</code></td><td>The <code>Data</code> folder next to <code>ShinyForge.exe</code></td></tr>
+    <tr><td>Pokédex spreadsheets</td><td><code>Documents\ShinyForge\Spreadsheets</code></td><td>The <code>Spreadsheets</code> folder next to the program</td></tr>
+    <tr><td>Backup Tools folder</td><td><code>Documents\ShinyForge\Backup Tools</code></td><td>The <code>Backup Tools</code> folder next to the program</td></tr>
+  </table></div>
+  <h3>Installer</h3>
+  <ol class="steps">
+    <li>Double-click <code>ShinyForge-Setup.exe</code>. If Windows SmartScreen shows "Windows protected your PC", click <b>More info → Run anyway</b>. This happens because the program isn't code-signed.</li>
+    <li>Follow the wizard. You can add a desktop shortcut.</li>
+    <li>ShinyForge, this guide and your spreadsheet folder are added to the Start menu.</li>
+  </ol>
+  <div class="callout"><strong>Your spreadsheets are safe</strong>The installer only copies a spreadsheet if it isn't already there, so reinstalling or updating never overwrites your progress. Uninstalling keeps your spreadsheets and Backup Tools folder.</div>
+  <h3>Portable</h3>
+  <ol class="steps">
+    <li>Unzip <code>ShinyForge-Portable.zip</code> anywhere, or copy the whole <code>ShinyForge Portable</code> folder.</li>
+    <li>Run <code>ShinyForge.exe</code>. The <code>portable.flag</code> file tells it to keep everything inside its own folder.</li>
+    <li>To move to another PC, copy the whole folder. Your settings, hunt logs and backups go with it.</li>
+  </ol>
+  <h3>What else you might need</h3>
+  <p>ShinyForge checks for these at start-up and offers to install anything missing. You only need the ones for the features you use.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Program</th><th>Needed for</th></tr>
+    <tr><td>FFmpeg</td><td>Recording and shiny clips</td></tr>
+    <tr><td>Python 3 (with OpenCV, NumPy, mss, PyYAML)</td><td>The FireRed/LeafGreen Switch hunter</td></tr>
+    <tr><td>SysBot.exe (Sys-EncounterBot.NET)</td><td>Hunting in Let's Go, Sword/Shield and BD/SP</td></tr>
+    <tr><td>PKHeX</td><td>The <b>Open in PKHeX</b> button (save reading is built in)</td></tr>
+    <tr><td>Microsoft Excel</td><td>Updating the Pokédex tracker spreadsheets</td></tr>
+    <tr><td>3DS Capture / Streamlabs Desktop</td><td>Showing and recording your 3DS / Switch on the PC</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="quickstart">
+  <h2><span class="num">3</span> Quick start</h2>
+  <ol class="steps">
+    <li><b>Open ShinyForge</b> and pick <b>Nintendo Switch</b> or <b>Nintendo 3DS</b>.</li>
+    <li>If a yellow banner says programs are missing, click <b>Review</b> → <b>Install all</b>.</li>
+    <li><b>Click your game.</b> Its page has four cards: <i>Shiny Hunt</i>, <i>Record Gameplay</i>, <i>Collection Tracker</i> and <i>Pokémon HOME folder + Game Info</i>.</li>
+    <li>For hunting, make sure your console is set up (see <a href="#hardware">Switch &amp; 3DS setup</a>). Stand in front of the Pokémon, <b>save in-game</b>, then click <b>Start hunting</b>.</li>
+    <li>Optional: open <b>Settings</b> and add a Discord webhook or ntfy topic so your phone buzzes when a shiny appears. Use <b>Test notification</b> to check it works.</li>
+  </ol>
+  <div class="callout tip"><strong>Tip</strong>Click <b>Guide</b> in the top bar any time to open this page.</div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="tour">
+  <h2><span class="num">4</span> A tour of the window</h2>
+  <h3>Top bar</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td><b>Back</b></td><td>Goes back to the game list or the console choice.</td></tr>
+    <tr><td><b>Guide</b></td><td>Opens this user guide in your default web browser.</td></tr>
+    <tr><td><b>Hunt stats</b></td><td>Statistics for your current and past hunts (see <a href="#stats">Hunt statistics</a>).</td></tr>
+    <tr><td><b>Living Dex</b></td><td>Your whole collection across every save (see <a href="#livingdex">Living Dex planner</a>).</td></tr>
+    <tr><td><b>Tools &amp; Updates</b></td><td>Installs and updates the helper programs (see <a href="#tools">Tools &amp; updates</a>).</td></tr>
+    <tr><td><b>Settings</b></td><td>Console IP addresses, folders, notifications, safety, clips, overlay and remote.</td></tr>
+  </table></div>
+  <h3>Game list</h3>
+  <p>Games are grouped by console (Game Boy through Switch). A ★ on a tile means automatic shiny hunting is available for that game.</p>
+  <h3>Status bar</h3>
+  <p>The bottom bar shows what ShinyForge is doing. It also shows your version and build number, whether you're in <b>installed</b> or <b>portable</b> mode, and a <b>system check</b> light. Green means everything that's running works. Click it to see details (see <a href="#safety">Safety features</a>).</p>
+  <h3>Banners</h3>
+  <p>A coloured banner under the top bar tells you about anything that needs attention, like a missing program or a hunt that stopped. Each banner has a button that takes you to the fix.</p>
+</section>
+
+<!-- ============================================================ 5 -->
+<section id="hunt">
+  <h2><span class="num">5</span> Shiny hunting</h2>
+  <p>The <b>Shiny Hunt (automatic)</b> card on a game's page offers the right bot for that game. Every bot does the same basic job: it plays the encounter over and over, checks every Pokémon, and <b>stops all input when it finds a shiny</b> so you can catch it.</p>
+  <div class="callout warn"><strong>Before every hunt</strong>Stand in front of the Pokémon (or in the grass or water) and <b>save in-game</b>. Soft resets go back to your last save.</div>
+
+  <h3 id="hunt-switch">Switch: FireRed / LeafGreen</h3>
+  <p>Choose <b>ShinyForge hunter (Python)</b> (recommended) or <b>SysBot.exe – FRLG_EncounterBot</b>. Both use the same hunting logic.</p>
+  <ul>
+    <li><b>Auto mode</b> reads the game's memory to see where you are.
+      <ul>
+        <li>At a legendary or static spot (Deoxys, the legendary birds, Mewtwo, Lugia, Ho-Oh, Snorlax), it soft resets with a random 1–5 second wait on the title screen, so every attempt is different.</li>
+        <li>Anywhere else, it walks for wild encounters and runs from ordinary Pokémon. It <b>never runs from a legendary</b>.</li>
+      </ul></li>
+    <li>Every encounter is logged with its species, level, IVs, EVs, nature, Hidden Power, PID and shiny value. The log is used by <a href="#stats">Hunt statistics</a>.</li>
+    <li>Use <b>Pause / Resume</b> to stop after the current attempt and carry on later. <b>Stop Python hunter</b> ends the hunt.</li>
+    <li><b>Hunt options</b> sets stop rules, auto-catch and shiny RNG. <b>Statistics</b> opens this hunt's numbers.</li>
+  </ul>
+  <div class="callout"><strong>Wild hunting tip</strong>Lead with a Pokémon that's faster or higher level than the wild ones, or one holding a Smoke Ball. Failed escapes cost HP, and the bot stops if your lead faints.</div>
+
+  <h3 id="hunt-sysbot">Switch: Let's Go, Sword/Shield, Brilliant Diamond/Shining Pearl</h3>
+  <p>These games use <b>SysBot.exe</b> (Sys-EncounterBot.NET). ShinyForge writes your Switch's address into its settings and opens it with the right routine already selected. Press <b>Start All</b> in the SysBot window to begin.</p>
+  <ul>
+    <li><b>Let's Go</b>: LGPE_EncounterBot (stationary Pokémon, gifts, trades, GO Park).</li>
+    <li><b>Sword/Shield</b>: SWSH_EncounterBot (resets, Pokémon in a line, the legendary dogs, Keldeo, Max Lair, eggs).</li>
+    <li><b>BD/SP</b>: the BDSP_RNG tool.</li>
+  </ul>
+  <p>Legends: Arceus, Scarlet/Violet and Legends: Z-A don't have a hunting bot yet. Recording, tracking and save export still work for them.</p>
+
+  <h3 id="hunt-3ds">Nintendo 3DS: X/Y, Omega Ruby/Alpha Sapphire, Sun/Moon, Ultra Sun/Ultra Moon</h3>
+  <p>ShinyForge controls your 3DS over WiFi through Luma3DS's Rosalina menu (see <a href="#hardware">setup</a>), so no extra hardware is needed.</p>
+  <ol class="steps">
+    <li>Click <b>Test connection</b>. Enter your 3DS's IP address if asked. ShinyForge should say which game is running and show your trainer name.</li>
+    <li>Pick a <b>Mode</b>:
+      <ul>
+        <li><b>Auto</b> soft resets for legendaries and walks for wild encounters.</li>
+        <li><b>Soft reset</b> is for static and legendary Pokémon.</li>
+        <li><b>Wild encounters</b> walks and runs from each battle.</li>
+      </ul></li>
+    <li>For walking, pick <b>Left / Right</b> or <b>Up / Down</b>, then click <b>Start hunting</b>. Every encounter appears in the log on the card.</li>
+  </ol>
+  <p><b>Stop rules</b> and <b>Statistics</b> work for 3DS hunts too.</p>
+  <div class="callout"><strong>Other handheld games</strong>DS and GBA games run in a special compatibility mode on the 3DS where Luma3DS's WiFi tools aren't available, so they can't be hunted automatically. Game Boy / Game Boy Color Virtual Console games aren't supported for hunting yet. Recording, tracking and save export work for all of them.</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="options">
+  <h2><span class="num">6</span> Hunt options</h2>
+  <p>Open <b>Hunt options</b> from the Shiny Hunt card. The 3DS calls this <b>Stop rules</b>. Your choices are saved and given to the bot the next time it starts. If a hunt is already running, it uses the new options after you restart it (<b>Stop</b>, then <b>Start hunting</b>).</p>
+
+  <h3 id="stop-rules">Stop on more than shinies</h3>
+  <p>The bot always stops on a shiny. It can also stop on any of these:</p>
+  <ul>
+    <li><b>Species</b>: a comma-separated list, e.g. <code>Pikachu, Abra</code>.</li>
+    <li><b>Natures</b>: tick the ones you want, e.g. Adamant or Timid.</li>
+    <li><b>Minimum IV total</b> (out of 186), and/or <b>minimum IVs per stat</b>.</li>
+    <li><b>Require all</b>: when ticked, every rule you set must match. When it's off, any one rule is enough.</li>
+  </ul>
+
+  <h3 id="auto-catch">Auto-catch <span class="badge off">off by default</span></h3>
+  <p>When it finds a shiny (or a stop-rule match), the bot can throw balls for you. It goes FIGHT → BAG → Poké Balls → your chosen slot.</p>
+  <ul>
+    <li><b>Off</b>: the bot stops and leaves the battle to you.</li>
+    <li><b>Non-legendary only</b> or <b>Everything</b>.</li>
+    <li><b>Ball slot</b>: the position in your Poké Balls pocket. Slot 1 is the top of the list.</li>
+    <li><b>Max balls</b>: stops trying after this many throws.</li>
+  </ul>
+  <div class="callout warn"><strong>Check your ball slot</strong>If a Master Ball is at the top of your Poké Balls pocket, slot 1 will throw it. After a successful catch, the bot stops and reminds you to <b>save the game yourself</b>. It never saves for you.</div>
+
+  <h3 id="rng">Shiny RNG manipulation <span class="badge off">off by default</span></h3>
+  <p>FireRed/LeafGreen on the Switch only. Instead of resetting over and over, the hunter reads the game's random number generator live and times its A press so the Pokémon <i>should</i> be shiny.</p>
+  <ul>
+    <li>Works for static encounters: Deoxys, Mewtwo, the birds, Lugia, Ho-Oh and Snorlax.</li>
+    <li>Turning it on asks you to confirm first. It's always your choice.</li>
+    <li>You can also ask for natures and minimum IVs. The more you ask for, the longer it takes to find a matching frame.</li>
+    <li>A press can land a frame or two off. That's normal: the bot adjusts its timing and tries again.</li>
+  </ul>
+  <div class="callout"><strong>Fair play</strong>RNG manipulation is a well-known technique, but some communities and events don't accept RNG'd Pokémon. That's why ShinyForge never uses it unless you turn it on.</div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="record">
+  <h2><span class="num">7</span> Recording &amp; shiny clips</h2>
+  <h3>Record Gameplay</h3>
+  <p>Records your game continuously in numbered files (<code>Recording_0001.mp4</code>, <code>Recording_0002.mp4</code>…) with no gap between them. Long hunts stay in easy-to-handle pieces.</p>
+  <ul>
+    <li><b>Video</b>:
+      <ul>
+        <li>3DS: the <i>3DS Capture – Top</i> or <i>Bottom</i> window.</li>
+        <li>Switch: your capture card (e.g. "Game Capture") or the Streamlabs Desktop window.</li>
+      </ul></li>
+    <li><b>Audio</b>: your capture card's audio, or <i>no audio</i>.</li>
+    <li><b>Segment length</b>: 5–30 minutes per file.</li>
+    <li><b>Folder</b>: where the files go. A new recording carries on the numbering.</li>
+    <li>On 3DS game pages, <b>Open 3DS Capture</b> launches the capture program.</li>
+  </ul>
+  <h3>Shiny clips <span class="badge on">on by default</span></h3>
+  <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>. The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
+  <ul>
+    <li>Uses the capture source chosen on the <b>Record Gameplay</b> card.</li>
+    <li>Change the length (20–300 seconds) or turn it off in <b>Settings → Shiny clips</b>.</li>
+    <li>It pauses while a full recording is running, since that recording already has the moment.</li>
+  </ul>
+  <p>The hunter also saves a screenshot taken straight from the Switch, so you get a picture even without a capture card.</p>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="tracker">
+  <h2><span class="num">8</span> Pokédex tracker</h2>
+  <p>The <b>Collection Tracker → Pokédex spreadsheet</b> card keeps your Excel Pokédex tracker up to date.</p>
+  <ul>
+    <li><b>Auto-recognize</b> finds the right tracker for this game. Your bundled spreadsheets are in a folder named like <code>Gen 3\(10) Fire Red\…</code>. You can also pick one with <b>Choose spreadsheet</b>, or open it with <b>Open</b>.</li>
+    <li><b>Save file</b>: ShinyForge finds your save automatically, or you can choose one. For FireRed/LeafGreen on the Switch, it can also read your party and boxes <b>live from the Switch</b>.</li>
+    <li><b>Sync now</b> marks <i>In Box</i>, <i>OT</i> (caught by you) and <i>Shiny</i> as <b>Y</b> for every Pokémon you own.
+      <ul>
+        <li>It only ever adds a Y. It never removes your own ticks.</li>
+        <li>Your spreadsheet is backed up first.</li>
+      </ul></li>
+  </ul>
+  <div class="callout"><strong>Excel needed</strong>Syncing uses Microsoft Excel in the background, so Excel must be installed. Close the tracker in Excel before syncing.</div>
+  <h3>Pokédex window (pop-out)</h3>
+  <p>Click <b>Pokédex (pop-out)</b> for a full Pokédex of the game in its own window.</p>
+  <ul>
+    <li>Uses <b>that game's own sprites</b>: Game Boy sprites for Red/Blue, Emerald sprites for Emerald, and so on.</li>
+    <li>Pokémon you own are shown in colour. Missing ones appear as silhouettes.</li>
+    <li>Includes forms, regional variants and visible female differences, where the game has them.</li>
+    <li>Click a Pokémon for its info panel: types, where to find it in this game, how it evolves, and links to Bulbapedia and Serebii.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ 9 -->
+<section id="saves">
+  <h2><span class="num">9</span> Saves, HOME folder &amp; Game Info</h2>
+  <p>The <b>Pokémon HOME folder + Game Info</b> card works with your exported save files.</p>
+  <ol class="steps">
+    <li><b>Browse</b> to the folder where this game's save files are kept (e.g. backups from Checkpoint or JKSV), then click <b>Find save</b>. Sub-folders are searched too.</li>
+    <li><b>Export Pokémon + Game Info</b> writes every Pokémon in the save to its own file. They're sorted into a folder you can use with Pokémon HOME transfer tools and PKHeX.</li>
+    <li><b>View Game Info</b> shows a readable report:
+      <ul>
+        <li>Trainer name and IDs, play time and money.</li>
+        <li>Pokédex counts, party, box totals and every shiny.</li>
+      </ul></li>
+    <li><b>Open in PKHeX</b> opens the save in PKHeX, if it's installed.</li>
+  </ol>
+  <p>ShinyForge reads saves from every main-series game from Red/Blue to Legends: Z-A, using PKHeX's core library. It only reads them and never writes to them.</p>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="livingdex">
+  <h2><span class="num">10</span> Living Dex planner</h2>
+  <p>Click <b>Living Dex</b> in the top bar. ShinyForge reads the saves you've set up for every game and builds one list of all 1,025 species:</p>
+  <ul>
+    <li>Which species you own, and <b>in which game</b>.</li>
+    <li>Which ones you have as <b>shiny</b>.</li>
+    <li>What's still missing, so you know what to hunt next.</li>
+  </ul>
+  <p>Click <b>Rescan saves</b> after you've played or added a new save.</p>
+</section>
+
+<!-- ============================================================ 11 -->
+<section id="stats">
+  <h2><span class="num">11</span> Hunt statistics</h2>
+  <p>Open <b>Hunt stats</b> from the top bar, or <b>Statistics</b> on a hunt card. Pick a hunt log at the top.</p>
+  <ul>
+    <li><b>Encounters</b> in the current hunt, counted since your last shiny.</li>
+    <li><b>Shiny odds</b>: 1 in 8,192 up to Gen 5 and 1 in 4,096 from Gen 6. Tick <b>Shiny Charm</b> if you have it (Gen 5 and later).</li>
+    <li><b>Chance you'd have found one by now</b>, plus how many encounters it takes for 50% and 90% of hunters to find one.</li>
+    <li><b>Speed</b> (encounters per hour) and <b>time to 90%</b>.</li>
+    <li>Best IVs this hunt, the last encounter, most common natures, species seen and shinies found.</li>
+    <li>A <b>24-hour chart</b> of encounters per hour, which makes it easy to spot when a hunt stopped.</li>
+  </ul>
+  <p>The window refreshes itself every 10 seconds. <b>Open log</b> opens the raw CSV file.</p>
+</section>
+
+<!-- ============================================================ 12 -->
+<section id="notify">
+  <h2><span class="num">12</span> Phone &amp; Discord alerts</h2>
+  <p>Get a message the moment a shiny appears, or if something goes wrong while you're away. Set it up in <b>Settings → Notifications</b>.</p>
+  <h3>Discord</h3>
+  <ol class="steps">
+    <li>In your Discord server: <b>Server Settings → Integrations → Webhooks → New Webhook</b>. Pick a channel and click <b>Copy Webhook URL</b>.</li>
+    <li>Paste it into <b>Discord webhook URL</b>. Optionally turn on <b>@everyone on a shiny</b>.</li>
+  </ol>
+  <h3>Phone push with ntfy (free, no account)</h3>
+  <ol class="steps">
+    <li>Install the <b>ntfy</b> app (Android or iPhone).</li>
+    <li>Subscribe to a topic name that's hard to guess, e.g. <code>shinyforge-7f3k2q</code>. Anyone who knows the name can read the messages.</li>
+    <li>Type the same name into <b>ntfy topic</b>. Leave the server as <code>https://ntfy.sh</code> unless you run your own.</li>
+  </ol>
+  <h3>What gets sent</h3>
+  <ul>
+    <li><b>Shiny / stop-rule found</b>, with a screenshot when one is available.</li>
+    <li><b>Problems</b> found by the system check, e.g. "the Switch stopped answering". Tick <b>warnings too</b> if you also want minor warnings.</li>
+  </ul>
+  <p>Click <b>Test notification</b> to check it works. The same message is never sent more than once every 5 minutes, so a problem can't flood your phone.</p>
+</section>
+
+<!-- ============================================================ 13 -->
+<section id="overlay">
+  <h2><span class="num">13</span> Stream overlay &amp; phone remote</h2>
+  <p>Both are turned on in <b>Settings → Stream overlay &amp; phone remote</b>. Click <b>Overlay / remote links…</b> to see and copy your addresses.</p>
+  <h3>Stream overlay <span class="badge off">off by default</span></h3>
+  <ul>
+    <li>In Streamlabs or OBS, add a <b>Browser Source</b> with the address <code>http://localhost:8765/overlay</code>. It shows the Pokémon's sprite, the encounter count, the odds, your chance so far, encounters per hour, shinies found and time hunting. It updates every 2 seconds.</li>
+    <li>Prefer text? Text sources can read the files in <code>Data\Overlay</code>, which update automatically.</li>
+  </ul>
+  <h3>Phone remote <span class="badge off">off by default</span></h3>
+  <ul>
+    <li>Open the remote address (e.g. <code>http://192.168.0.20:8765/remote?pin=1234</code>) on a phone connected to the <b>same home WiFi</b>.</li>
+    <li>You'll see the hunt status and a live screenshot from the Switch, with <b>Start</b>, <b>Pause</b>, <b>Resume</b> and <b>Stop</b> buttons.</li>
+    <li>The page is protected by a <b>PIN</b> (change it in Settings), and it only works on your own network.</li>
+    <li>The first time, Windows asks whether ShinyForge may use the network. Choose <b>Allow</b> for <i>private</i> networks.</li>
+  </ul>
+  <p>The port (8765) can be changed in Settings if another program already uses it.</p>
+</section>
+
+<!-- ============================================================ 14 -->
+<section id="safety">
+  <h2><span class="num">14</span> Safety features</h2>
+  <div class="grid">
+    <div class="card"><b>System check (every minute)</b><p>Checks that everything running still works: hunts, recordings, clip buffer, console connections, disk space and data folders. Problems show in the status bar and a banner, and go to your phone if you set that up. Click the status-bar light for details, <b>Check now</b> or <b>Open log</b>.</p></div>
+    <div class="card"><b>Same-Pokémon guard</b><p>If the hunter sees exactly the same Pokémon twice in a row, the reset didn't register. It warns you, holds the reset buttons longer and checks that the game really restarted. If it happens 3 times in a row, ShinyForge restarts the hunter automatically (up to 3 times), then stops and tells you.</p></div>
+    <div class="card"><b>Console address changed?</b><p>Before a hunt starts, and whenever a running hunt loses contact for several minutes, ShinyForge checks that the Switch or 3DS still answers. If it doesn't, it asks for the new IP address and carries on.</p></div>
+    <div class="card"><b>Keep the PC awake</b><p>While a hunt or recording runs, Windows won't go to sleep (the screen can still turn off). If the PC sleeps anyway, for example when a laptop lid is closed, you'll be told.</p></div>
+    <div class="card"><b>Automatic backups</b><p>Before ShinyForge updates a spreadsheet or exports a save, it backs up the file (only if it changed). It keeps 20 save backups and 3 spreadsheet backups by default. Restore any of them from <b>Settings → Backups…</b>, which first backs up the current file too.</p></div>
+    <div class="card"><b>Nothing risky by default</b><p>RNG manipulation and auto-catch are off until you turn them on. Saves are only read, and the bot never saves your game.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 15 -->
+<section id="tools">
+  <h2><span class="num">15</span> Tools &amp; updates</h2>
+  <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, and where.</p>
+  <ul>
+    <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
+    <li><b>Check for updates</b> compares your versions with the latest ones. Turn the automatic check on or off in <b>Settings → Updates</b>.</li>
+  </ul>
+  <h3 id="updates">Updating ShinyForge</h3>
+  <p>Every version has a <b>build number</b>, which counts the changes ShinyForge has gone through. You'll see it at the bottom-right of the window, e.g. <code>v1.0 (build 3)</code>. A higher build is a newer version.</p>
+  <ul>
+    <li>When ShinyForge starts, it checks the <a href="https://github.com/Domsanna/ShinyForge/releases">ShinyForge GitHub page</a> for a newer release. If there is one, a window shows <b>what's new</b> with these options:
+      <ul>
+        <li><b>Download and install</b>: the <i>installed</i> version downloads the new installer, which closes ShinyForge, updates it and starts it again. The <i>portable</i> version downloads the new zip and swaps in the new program files. Your <code>Data</code>, <code>Spreadsheets</code> and <code>Backup Tools</code> folders are kept.</li>
+        <li><b>View on GitHub</b>: opens the release page.</li>
+        <li><b>Skip this version</b> or <b>Later</b>.</li>
+      </ul></li>
+    <li>Check any time in <b>Tools &amp; Updates</b>: the top row shows your version and build, with a <b>Check now</b> button.</li>
+    <li>Turn the automatic check off in <b>Settings → Updates</b>.</li>
+  </ul>
+  <h3>The Backup Tools folder</h3>
+  <p>If a program isn't installed on the PC, ShinyForge also looks in the <b>Backup Tools</b> folder (sub-folders too). Copy FFmpeg, PKHeX, SysBot, 3DS Capture or a portable Python into it, and ShinyForge finds them on any PC. This is handy for the portable version on a USB drive.</p>
+  <p>Settings also has <b>Create portable copy…</b>, which makes a portable ShinyForge with your settings, ready to take to another PC.</p>
+</section>
+
+<!-- ============================================================ 16 -->
+<section id="hardware">
+  <h2><span class="num">16</span> Switch &amp; 3DS setup</h2>
+  <div class="callout warn"><strong>Homebrew notice</strong>Automatic hunting needs custom firmware on your console. Only use it on hardware you own, keep a backup of your saves, and play offline when using homebrew.</div>
+  <h3>Nintendo Switch (sys-botbase)</h3>
+  <ol class="steps">
+    <li>Your Switch needs to be running <b>Atmosphère</b> custom firmware.</li>
+    <li>Download <b>sys-botbase</b> from its official page, <a href="https://github.com/olliz0r/sys-botbase/releases">github.com/olliz0r/sys-botbase/releases</a>. Copy its <code>atmosphere</code> folder to the root of your SD card, which puts it in <code>atmosphere/contents/430000000000000B/</code>. Then reboot.</li>
+    <li>On the Switch, find its IP address in <b>System Settings → Internet</b>.</li>
+    <li>Enter the address in ShinyForge under <b>Settings → Switch IP address</b> (port <code>6000</code>). If you start a hunt without it, ShinyForge asks for it.</li>
+    <li>Keep the Switch and PC on the same network. Turn off the Switch's sleep mode while hunting.</li>
+  </ol>
+  <h3>Nintendo 3DS (Luma3DS / Rosalina)</h3>
+  <ol class="steps">
+    <li>Your 3DS needs <b>Luma3DS</b> custom firmware, on the same WiFi as your PC.</li>
+    <li>Start the game and load your save.</li>
+    <li>Open the Rosalina menu with <kbd>L</kbd> + <kbd>D-Pad Down</kbd> + <kbd>Select</kbd>.
+      <ul>
+        <li>Turn on <b>InputRedirection</b>.</li>
+        <li>Open <b>Debugger options → Enable debugger</b>.</li>
+      </ul></li>
+    <li>Find the 3DS's IP address (Rosalina shows it). Enter it when ShinyForge asks, then click <b>Test connection</b>.</li>
+  </ol>
+  <p>For recording, use a 3DS with a capture board and the <b>3DS Capture</b> program, or any capture card that shows up on your PC.</p>
+</section>
+
+<!-- ============================================================ 17 -->
+<section id="pythonbot">
+  <h2><span class="num">17</span> The Python bot (advanced)</h2>
+  <p>The FireRed/LeafGreen hunter is a Python program that ships with ShinyForge, in the <code>PythonBot</code> folder next to <code>ShinyForge.exe</code>. You can point <b>Settings → Python hunting bot folder</b> at another copy. ShinyForge starts it, passes your settings to it, and watches it for you, so most people never need to touch it. If you're curious:</p>
+  <ul>
+    <li><code>config.yaml</code> holds the bot's own settings: controller type and address, hunting mode, timings and detection thresholds. ShinyForge keeps the Switch address in it up to date.</li>
+    <li><code>shinyforge.json</code> is written by ShinyForge with your Hunt options and alert settings. The bot reads it when it starts.</li>
+    <li><code>encounters.csv</code> is the encounter log, and <code>stats.json</code> is the running counter.</li>
+    <li><code>start_hunt.bat</code> starts the bot without ShinyForge.</li>
+  </ul>
+  <h4>Command line</h4>
+<pre><code>python -m shinybot hunt            start hunting
+python -m shinybot press A         send a button press to the Switch (test the connection)
+python -m shinybot calibrate       set-up for the screen-based "vision" mode
+python -m shinybot cameras         list capture cameras (vision mode)
+python -m shinybot snapshot        save one captured frame
+python -m shinybot test IMG...     run the shiny detector on screenshots</code></pre>
+  <h4>Hunting modes (<code>hunt: mode</code> in config.yaml)</h4>
+  <ul>
+    <li><b>auto</b> (default) picks static or wild by where you're standing.</li>
+    <li><b>static</b>, <b>wild</b> or <b>fishing</b> force one behaviour.</li>
+    <li><b>rng</b> is the shiny RNG mode. Turn it on in Hunt options rather than here.</li>
+    <li><b>vision</b> is the original screen-watching Deoxys bot. It uses a capture card instead of reading memory.</li>
+  </ul>
+  <p>Instead of sys-botbase, the bot can also use a <b>Raspberry Pi as a wireless Pro Controller</b> (NXBT) for an unmodified Switch. Copy <code>bridge/nxbt_bridge.py</code> to the Pi, then set <code>controller: type: nxbt</code>. Memory reading needs sys-botbase, so this works with vision mode. The bot's <code>README.md</code> has the details.</p>
+</section>
+
+<!-- ============================================================ 18 -->
+<section id="files">
+  <h2><span class="num">18</span> Where your files live</h2>
+  <p>"Data folder" means <code>%AppData%\ShinyForge</code> (installed) or <code>Data</code> next to the program (portable).</p>
+  <div class="table-wrap"><table>
+    <tr><th>What</th><th>Where</th></tr>
+    <tr><td>Settings</td><td><code>Data folder\settings.json</code></td></tr>
+    <tr><td>Program log</td><td><code>Data folder\shinyforge.log</code> (also under <b>System check → Open log</b>)</td></tr>
+    <tr><td>Backups</td><td><code>Data folder\Backups\Saves</code> and <code>…\Spreadsheets</code></td></tr>
+    <tr><td>Shiny clips</td><td>The game's recording folder, or <code>Data folder\Shiny Clips</code></td></tr>
+    <tr><td>Overlay text files</td><td><code>Data folder\Overlay</code></td></tr>
+    <tr><td>Downloaded tools</td><td><code>Data folder\Tools</code></td></tr>
+    <tr><td>3DS encounter log</td><td><code>3ds_encounters.csv</code> in the data folder</td></tr>
+    <tr><td>Switch encounter log</td><td><code>encounters.csv</code> in the Python bot folder (<code>PythonBot</code> next to the program)</td></tr>
+    <tr><td>Pokédex spreadsheets</td><td><code>Documents\ShinyForge\Spreadsheets</code> (installed) or <code>Spreadsheets</code> (portable)</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ 19 -->
+<section id="trouble">
+  <h2><span class="num">19</span> Troubleshooting</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Problem</th><th>Try this</th></tr>
+    <tr><td>"Couldn't connect to sys-botbase"</td><td>Is the Switch on, awake and on the same network? Check its IP in System Settings → Internet. Make sure sys-botbase is installed and the Switch was rebooted after installing it.</td></tr>
+    <tr><td>The same Pokémon keeps appearing</td><td>The soft reset isn't registering. The same-Pokémon guard fixes this automatically. If it keeps happening, close other programs that use sys-botbase, then restart the Switch.</td></tr>
+    <tr><td>3DS: "Couldn't connect to the 3DS debugger"</td><td>In Rosalina, choose Debugger options → Enable debugger. Turn InputRedirection on as well. Check the IP address.</td></tr>
+    <tr><td>Buttons don't respond on the 3DS</td><td>InputRedirection is off, or the 3DS went to sleep. Turn it on again in Rosalina.</td></tr>
+    <tr><td>Recording or clips don't start</td><td>Install FFmpeg from Tools &amp; Updates. Choose the right video source, and make sure no other program is using the capture card.</td></tr>
+    <tr><td>Tracker sync fails</td><td>Excel must be installed, and the tracker must be closed in Excel. If something goes wrong, restore the spreadsheet from Settings → Backups.</td></tr>
+    <tr><td>No save found</td><td>Point the card at the folder that holds the exported save (e.g. your Checkpoint/JKSV backup folder). Sub-folders are searched.</td></tr>
+    <tr><td>The phone remote doesn't load</td><td>The phone must be on the same WiFi. Allow ShinyForge in the Windows firewall for private networks. Check the PIN in the address.</td></tr>
+    <tr><td>No notifications</td><td>Use Test notification in Settings. Check the webhook URL, or that the ntfy topic name matches exactly.</td></tr>
+    <tr><td>RNG mode keeps missing</td><td>A miss of a frame or two is normal, and the bot adjusts its timing. Fewer nature or IV requirements make matching frames more common.</td></tr>
+  </table></div>
+  <p>When in doubt, open the status-bar <b>system check</b>. It usually says exactly what's wrong and what to do.</p>
+</section>
+
+<!-- ============================================================ 20 -->
+<section id="credits">
+  <h2><span class="num">20</span> Credits &amp; thanks</h2>
+  <p>ShinyForge stands on the shoulders of a generous community. A huge thank-you to everyone below. Each project stays the property of its authors and is used under its own license. Please support them!</p>
+
+  <h3>Built into ShinyForge</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>PKHeX.Core</td><td>Kurt (kwsch) and the PKHeX contributors. GPL-3.0</td><td>Reading every save file, Pokémon data, Pokédex, evolution and location data</td></tr>
+    <tr><td>.NET &amp; Windows Forms</td><td>Microsoft and the .NET Foundation. MIT</td><td>The application framework</td></tr>
+    <tr><td>System.Management</td><td>Microsoft. MIT</td><td>Detecting devices and running programs</td></tr>
+    <tr><td>PokeAPI &amp; PokeAPI/sprites</td><td>The PokeAPI contributors</td><td>Pokédex data tables and the per-game sprite and artwork collections</td></tr>
+    <tr><td>Pokédex Tracker spreadsheets</td><td>Dom, the creator of ShinyForge</td><td>The bundled Excel trackers for every game</td></tr>
+  </table></div>
+
+  <h3>Hunting &amp; console tools</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>sys-botbase</td><td>olliz0r and contributors</td><td>Talking to the Switch over WiFi: buttons, memory and screenshots</td></tr>
+    <tr><td>Atmosphère</td><td>SciresM and the Atmosphère-NX contributors. GPL-2.0</td><td>Switch custom firmware that runs sys-botbase</td></tr>
+    <tr><td>SysBot.NET</td><td>Kurt (kwsch) and contributors. AGPL-3.0</td><td>The bot framework behind SysBot.exe</td></tr>
+    <tr><td>Sys-EncounterBot.NET</td><td>Manu098vm and contributors (a SysBot.NET fork)</td><td>Encounter bots for Let's Go, Sword/Shield, BD/SP, plus the FRLG routine</td></tr>
+    <tr><td>FRLG RAM research</td><td>Lusamine (SysBot.NET <i>moarencounterbots</i>), also used by LegoFigure11's GRASS</td><td>FireRed/LeafGreen memory locations for the Switch</td></tr>
+    <tr><td>Luma3DS &amp; Rosalina</td><td>AuroraWright, TuxSH and contributors. GPL-3.0</td><td>3DS custom firmware: InputRedirection and the debugger used for 3DS hunting</td></tr>
+    <tr><td>3DSShinyHunter</td><td>SirSnorealot. GPL-2.0</td><td>Reference for the InputRedirection and debugger protocols and 3DS memory layout</td></tr>
+    <tr><td>PKMN-NTR</td><td>drgoku282 and contributors</td><td>3DS game memory offsets</td></tr>
+    <tr><td>Pokebot-3ds</td><td>SHGliscor</td><td>Reference for 3DS hunting</td></tr>
+    <tr><td>NXBT</td><td>Brikwerk. MIT</td><td>Optional Raspberry Pi Bluetooth controller bridge</td></tr>
+    <tr><td>Gen 3 RNG research</td><td>The Pokémon RNG research community</td><td>Method 1 PID/IV generation behind the optional shiny RNG mode</td></tr>
+  </table></div>
+
+  <h3>Recording, capture &amp; Python</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>FFmpeg</td><td>The FFmpeg developers. LGPL/GPL. Windows builds by Gyan Doshi (gyan.dev)</td><td>Recording, segmenting and shiny clips</td></tr>
+    <tr><td>3DS Capture</td><td>Loopy (3dscapture.com)</td><td>Showing the 3DS screens on the PC</td></tr>
+    <tr><td>Streamlabs Desktop</td><td>Streamlabs</td><td>Switch capture and streaming</td></tr>
+    <tr><td>OBS Studio</td><td>The OBS Project. GPL-2.0</td><td>Works with the stream overlay</td></tr>
+    <tr><td>Python</td><td>Python Software Foundation. PSF License</td><td>Runs the Switch hunter</td></tr>
+    <tr><td>python-build-standalone</td><td>Gregory Szorc, now maintained by Astral</td><td>The portable Python in the Backup Tools folder</td></tr>
+    <tr><td>OpenCV</td><td>The OpenCV team. Apache-2.0</td><td>Image matching in vision mode</td></tr>
+    <tr><td>NumPy</td><td>The NumPy developers. BSD-3-Clause</td><td>Image maths</td></tr>
+    <tr><td>python-mss</td><td>Mickaël Schoentgen (BoboTiG). MIT</td><td>Screen capture in vision mode</td></tr>
+    <tr><td>PyYAML</td><td>Kirill Simonov and the PyYAML contributors. MIT</td><td>Reading <code>config.yaml</code></td></tr>
+  </table></div>
+
+  <h3>Services &amp; other tools</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>PKHeX (app)</td><td>Kurt (kwsch), hosted by Project Pokémon</td><td>The <b>Open in PKHeX</b> button</td></tr>
+    <tr><td>ntfy</td><td>Philipp C. Heckel (binwiederhier). Apache-2.0 / GPL-2.0</td><td>Free phone push notifications</td></tr>
+    <tr><td>Discord webhooks</td><td>Discord Inc.</td><td>Discord alerts</td></tr>
+    <tr><td>Microsoft Excel</td><td>Microsoft</td><td>Updating the tracker spreadsheets</td></tr>
+    <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>Linked from the Pokédex info panel</td></tr>
+    <tr><td>Inno Setup</td><td>Jordan Russell and Martijn Laan</td><td>The Windows installer</td></tr>
+    <tr><td>Segoe UI &amp; Segoe Fluent Icons</td><td>Microsoft (part of Windows)</td><td>Fonts and icons</td></tr>
+  </table></div>
+
+  <div class="callout"><strong>Trademarks</strong>Pokémon and all related names, characters and images are © Nintendo, Creatures Inc. and GAME FREAK inc. Nintendo Switch and Nintendo 3DS are trademarks of Nintendo. ShinyForge is a free fan-made tool. It is not affiliated with, endorsed or sponsored by Nintendo, The Pokémon Company, Creatures Inc. or GAME FREAK inc. Sprites are used for identification in a non-commercial tool.</div>
+</section>
+
+<footer>ShinyForge · Happy hunting! ✨</footer>
+</main>
+</div>
+<script>
+  (function () {
+    var root = document.documentElement, key = "shinyforge-guide-theme";
+    try { var saved = localStorage.getItem(key); if (saved) root.setAttribute("data-theme", saved); } catch (e) {}
+    document.getElementById("themeToggle").addEventListener("click", function () {
+      var dark = root.getAttribute("data-theme") ? root.getAttribute("data-theme") === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      var next = dark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(key, next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>
