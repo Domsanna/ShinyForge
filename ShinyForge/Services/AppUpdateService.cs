@@ -84,26 +84,37 @@ public static class AppUpdateService
         var zipFile = Path.Combine(dir, "ShinyForge-Portable.zip");
         await DownloadAsync(r.ZipUrl, zipFile, r.ZipSize, progress, token);
         progress("Unpacking...");
-        var unpack = Path.Combine(dir, "unpacked");
+        var script = await Task.Run(() => PreparePortableUpdate(zipFile, dir, AppPaths.AppDir, Environment.ProcessId), token);
+        progress("Restarting ShinyForge to finish the update...");
+        Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Minimized });
+        return true;
+    }
+
+    /// <summary>
+    /// Unpacks a portable zip into <paramref name="workDir"/> and writes apply_update.cmd, which waits for process
+    /// <paramref name="waitForPid"/> to exit, copies the new program files into <paramref name="appDir"/> (keeping the
+    /// Data, Backup Tools and Spreadsheets folders and portable.flag) and starts ShinyForge again. Returns the script path.
+    /// </summary>
+    public static string PreparePortableUpdate(string zipFile, string workDir, string appDir, int waitForPid, bool restart = true)
+    {
+        var unpack = Path.Combine(workDir, "unpacked");
         if (Directory.Exists(unpack)) Directory.Delete(unpack, true);
-        await Task.Run(() => ZipFile.ExtractToDirectory(zipFile, unpack), token);
+        ZipFile.ExtractToDirectory(zipFile, unpack);
         // The zip contains a "ShinyForge Portable" folder.
         var newApp = Directory.EnumerateFiles(unpack, "ShinyForge.exe", SearchOption.AllDirectories).Select(Path.GetDirectoryName).FirstOrDefault()
                      ?? throw new IOException("The downloaded zip doesn't contain ShinyForge.exe.");
-        var appDir = AppPaths.AppDir.TrimEnd('\\');
-        var script = Path.Combine(dir, "apply_update.cmd");
-        // Waits for ShinyForge to close, copies the new program files over (keeping the user's folders), restarts it.
+        appDir = appDir.TrimEnd('\\');
+        var script = Path.Combine(workDir, "apply_update.cmd");
         File.WriteAllText(script,
             "@echo off\r\n" +
             "title ShinyForge update\r\n" +
             "echo Updating ShinyForge - please wait...\r\n" +
-            $":wait\r\ntasklist /FI \"PID eq {Environment.ProcessId}\" | find \"{Environment.ProcessId}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
-            $"robocopy \"{newApp}\" \"{appDir}\" /E /XD Data \"Backup Tools\" Spreadsheets /XF portable.flag /NFL /NDL /NJH /NJS /NP\r\n" +
+            $":wait\r\ntasklist /FI \"PID eq {waitForPid}\" /NH | find \" {waitForPid} \" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
+            $"robocopy \"{newApp}\" \"{appDir}\" /E /XD Data \"Backup Tools\" Spreadsheets /XF portable.flag /R:5 /W:2 /NFL /NDL /NJH /NJS /NP\r\n" +
             "if %ERRORLEVEL% GEQ 8 (echo The update could not be copied. & pause & exit /b 1)\r\n" +
-            $"start \"\" \"{Path.Combine(appDir, "ShinyForge.exe")}\"\r\n");
-        progress("Restarting ShinyForge to finish the update...");
-        Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Minimized });
-        return true;
+            (restart ? $"start \"\" \"{Path.Combine(appDir, "ShinyForge.exe")}\"\r\n" : "") +
+            "exit /b 0\r\n");
+        return script;
     }
 
     private static async Task DownloadAsync(string url, string file, long expected, Action<string> progress, CancellationToken token)

@@ -417,6 +417,43 @@ if (tests.Contains("update"))
     var cmd = Browser.DefaultBrowserCommand();
     Console.WriteLine($"   default browser: {cmd}");
     Check(cmd != null && !cmd.Contains("iexplore", StringComparison.OrdinalIgnoreCase), "default web browser found (not the .html file handler)");
+
+    // Portable self-update, for real: an old copy gets the new program files, the user's folders stay as they were.
+    var upd = Path.Combine(work, "update_test");
+    if (Directory.Exists(upd)) Directory.Delete(upd, true);
+    var appDir = Path.Combine(upd, "ShinyForge Portable");
+    Directory.CreateDirectory(Path.Combine(appDir, "Data"));
+    Directory.CreateDirectory(Path.Combine(appDir, "Backup Tools"));
+    File.WriteAllText(Path.Combine(appDir, "ShinyForge.exe"), "OLD");
+    File.WriteAllText(Path.Combine(appDir, "portable.flag"), "mine");
+    File.WriteAllText(Path.Combine(appDir, "Data", "settings.json"), "my settings");
+    File.WriteAllText(Path.Combine(appDir, "Backup Tools", "tool.txt"), "my tool");
+    var newDir = Path.Combine(upd, "new", "ShinyForge Portable");
+    Directory.CreateDirectory(Path.Combine(newDir, "Data"));
+    Directory.CreateDirectory(Path.Combine(newDir, "PythonBot"));
+    File.WriteAllText(Path.Combine(newDir, "ShinyForge.exe"), "NEW");
+    File.WriteAllText(Path.Combine(newDir, "PythonBot", "start_hunt.bat"), "new bot");
+    File.WriteAllText(Path.Combine(newDir, "portable.flag"), "from zip");
+    File.WriteAllText(Path.Combine(newDir, "Data", "settings.json"), "SHOULD NOT OVERWRITE");
+    var zip = Path.Combine(upd, "ShinyForge-Portable.zip");
+    System.IO.Compression.ZipFile.CreateFromDirectory(Path.GetDirectoryName(newDir)!, zip);
+    using (var gone = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit") { CreateNoWindow = true })!) gone.WaitForExit();
+    var deadPid = 999_999; // no such process: the script must not wait
+    var script = AppUpdateService.PreparePortableUpdate(zip, Path.Combine(upd, "work"), appDir, deadPid, restart: false);
+    using (var run = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { CreateNoWindow = true, UseShellExecute = false })!)
+        Check(run.WaitForExit(60_000) && run.ExitCode == 0, $"update script ran (exit {(run.HasExited ? run.ExitCode : -1)})");
+    Check(File.ReadAllText(Path.Combine(appDir, "ShinyForge.exe")) == "NEW", "program files replaced");
+    Check(File.Exists(Path.Combine(appDir, "PythonBot", "start_hunt.bat")), "new files added");
+    Check(File.ReadAllText(Path.Combine(appDir, "Data", "settings.json")) == "my settings", "Data folder kept");
+    Check(File.ReadAllText(Path.Combine(appDir, "portable.flag")) == "mine" && File.Exists(Path.Combine(appDir, "Backup Tools", "tool.txt")), "portable.flag and Backup Tools kept");
+}
+
+if (tests.Contains("updatelive"))
+{
+    var rel = await AppUpdateService.CheckAsync();
+    Console.WriteLine($"   GitHub latest: {rel?.Tag} build {rel?.Build}, setup {rel?.SetupSize / 1048576} MB, zip {rel?.ZipSize / 1048576} MB, page {rel?.PageUrl}");
+    Check(rel != null && rel.SetupUrl != null && rel.ZipUrl != null, "latest release found on GitHub with both downloads");
+    Check(rel != null && rel.IsNewer == (rel.Version > ShinyForge.Core.AppInfo.Comparable), $"this copy ({ShinyForge.Core.AppInfo.Display}) compares correctly");
 }
 
 if (tests.Contains("health"))
