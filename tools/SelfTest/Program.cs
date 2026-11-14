@@ -657,6 +657,23 @@ if (tests.Contains("checkpoint"))
     }
 }
 
+if (tests.Contains("sheetsdl"))
+{
+    // The published tracker list and a real download (the smallest tracker) into a test folder.
+    var entries = await SheetsDownloadService.ManifestAsync();
+    Check(entries.Count >= 38, $"tracker list on GitHub: {entries.Count} trackers, {entries.Sum(e => e.Size) / 1048576} MB");
+    var missingGames = GameCatalog.All.Where(g => !string.IsNullOrWhiteSpace(g.Spreadsheet) && SheetsDownloadService.EntryFor(g, entries) == null).Select(g => g.Id).ToList();
+    Check(missingGames.Count == 0, "every game with a tracker name has a published tracker" + (missingGames.Count > 0 ? ": missing " + string.Join(", ", missingGames) : ""));
+    var smallest = entries.OrderBy(e => e.Size).First();
+    var root = Path.Combine(work, "sheets_dl");
+    if (Directory.Exists(root)) Directory.Delete(root, true);
+    var path = await SheetsDownloadService.DownloadAsync(smallest, _ => { }, root);
+    Check(File.Exists(path) && new FileInfo(path).Length == smallest.Size, $"downloaded and checksum-verified: {Path.GetRelativePath(root, path)} ({smallest.Size / 1024} KB)");
+    File.WriteAllText(path, "my progress");
+    var again = await SheetsDownloadService.DownloadAsync(smallest, _ => { }, root);
+    Check(File.ReadAllText(again) == "my progress", "an existing tracker is never overwritten");
+}
+
 if (tests.Contains("updatelive"))
 {
     var rel = await AppUpdateService.CheckAsync();
