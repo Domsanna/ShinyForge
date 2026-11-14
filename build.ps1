@@ -42,25 +42,44 @@ if (Test-Path $keptBackup) {
     Move-Item $keptBackup (Join-Path $portable "Backup Tools")
 }
 
-# Pokédex tracker spreadsheets bundled with both versions (Gen N\(n) Name\Name Pokedex Tracker.xlsm).
-# Source: $env:SHINYFORGE_SHEETS or Desktop\Bot Spreadsheets. Staged in dist\Spreadsheets for the installer and copied
-# into the portable folder (not into the zip - they are ~1.3 GB).
+# Pokédex tracker spreadsheets (Gen N\(n) Name\Name Pokedex Tracker.xlsm). They are NOT inside the installer (together
+# they're over GitHub's 2 GB file limit): each one is published as its own file, tracker-<n>.xlsm, in the
+# "spreadsheets-1" release, listed in spreadsheets.json. The installer downloads the ones the user doesn't have yet,
+# and ShinyForge downloads a single tracker on demand. dist\sheets holds hard links to the originals (no copies).
+# Source: $env:SHINYFORGE_SHEETS or Desktop\Bot Spreadsheets.
 $sheetsSrc = if ($env:SHINYFORGE_SHEETS) { $env:SHINYFORGE_SHEETS } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "Bot Spreadsheets" }
-$sheets = Join-Path $dist "Spreadsheets"
+$sheetsOut = New-Item -ItemType Directory -Force (Join-Path $dist "sheets")
+$manifest = @()
+$pascal = @("procedure AddSheets;", "begin")
 if (Test-Path $sheetsSrc) {
-    robocopy $sheetsSrc $sheets *.xlsm *.xlsx /S /XF "~$*" /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "copying spreadsheets failed ($LASTEXITCODE)" }
-    robocopy $sheets (Join-Path $portable "Spreadsheets") /E /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "copying spreadsheets to portable failed ($LASTEXITCODE)" }
-    $global:LASTEXITCODE = 0
-} else {
-    Write-Warning "Spreadsheet folder $sheetsSrc not found - building without bundled spreadsheets."
-    New-Item -ItemType Directory -Force $sheets | Out-Null
-}
+    foreach ($f in Get-ChildItem $sheetsSrc -Recurse -File -Include *.xlsm, *.xlsx | Where-Object { -not $_.Name.StartsWith('~$') } | Sort-Object FullName) {
+        if ($f.Directory.Name -notmatch '^\((\d+)\)') { Write-Warning "Skipping $($f.FullName) (folder isn't named '(n) Game')"; continue }
+        $asset = "tracker-{0:00}{1}" -f [int]$Matches[1], $f.Extension.ToLowerInvariant()
+        $rel = $f.FullName.Substring($sheetsSrc.TrimEnd('\').Length + 1)
+        $link = Join-Path $sheetsOut $asset
+        try { New-Item -ItemType HardLink -Path $link -Target $f.FullName | Out-Null } catch { Copy-Item $f.FullName $link }
+        $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $manifest += [pscustomobject]@{ Asset = $asset; Path = $rel; Sha256 = $sha; Size = $f.Length }
+        $pascal += "  AddSheet('$asset', '$($rel.Replace("'", "''"))', '$sha');"
+    }
+} else { Write-Warning "Spreadsheet folder $sheetsSrc not found - no tracker list for the installer." }
+$pascal += "end;"
+[IO.File]::WriteAllText((Join-Path $sheetsOut "spreadsheets.json"), (ConvertTo-Json @($manifest) -Depth 3), (New-Object Text.UTF8Encoding $false))
+Set-Content (Join-Path $dist "sheets_files.iss") $pascal -Encoding utf8
+Write-Host ("{0} trackers listed ({1:N0} MB)" -f $manifest.Count, (($manifest | Measure-Object -Property Size -Sum).Sum / 1MB))
 
 # Installer.
 $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($iscc) { & $iscc /Q "/DAppVersion=$version" (Join-Path $root "installer\ShinyForge.iss"); if ($LASTEXITCODE -ne 0) { throw "installer failed" } }
+if ($iscc) {
+    # Antivirus can hold the new setup file for a moment ("EndUpdateResource failed"): try up to 3 times.
+    for ($try = 1; $try -le 3; $try++) {
+        & $iscc /Q "/DAppVersion=$version" (Join-Path $root "installer\ShinyForge.iss")
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($try -eq 3) { throw "installer failed" }
+        Write-Warning "Installer build failed (try $try) - retrying in 20 s."
+        Start-Sleep 20
+    }
+}
 else { Write-Warning "Inno Setup not found - installer skipped." }
 
 Get-ChildItem $dist -File | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}}

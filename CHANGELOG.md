@@ -2,6 +2,17 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 6)
+
+### Changed
+- **One-file installer.** `ShinyForge-Setup.exe` is a single ~130 MB download again (no `.bin` parts). The Pokédex tracker spreadsheets are published as separate files in the `spreadsheets-1` release. The installer downloads the ones you don't have yet, each checked against its SHA-256; you can skip the step. Existing trackers are never overwritten.
+
+### New
+- **Download tracker** on a game's tracker card when its spreadsheet is missing (portable copies, a skipped installer download). It fetches just that game's tracker.
+
+### Fixed
+- The installer step of `build.ps1` failed when Windows' antivirus briefly held the new setup file. It's now simply rerun.
+
 ## 1.0 (build 4)
 
 ### New

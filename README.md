@@ -50,7 +50,7 @@
 
 Get the newest version from **[Releases](https://github.com/Domsanna/ShinyForge/releases/latest)**:
 
-- **`ShinyForge-Setup.exe` + `ShinyForge-Setup-1.bin`, `-2.bin`**: the installer. It includes all the Pokédex tracker spreadsheets and needs no admin rights. Download all the parts into the same folder (the setup is over GitHub's 2 GB per-file limit).
+- **`ShinyForge-Setup.exe`**: the installer, one file, no admin rights needed. While installing, it downloads the Pokédex tracker spreadsheets you don't have yet from this page (about 2.2 GB in total, each file checksum-verified). You can skip that step.
 - **`ShinyForge-Portable.zip`**: unzip and run. Everything stays in its folder, so it works from a USB drive.
 
 ShinyForge checks this page for new versions when it starts. You can also check from **Tools & Updates**. Updates download only the program files (~150 MB), and your settings, spreadsheets and saves are kept. See the [changelog](CHANGELOG.md).

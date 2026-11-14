@@ -599,7 +599,9 @@ public sealed class GamePage : UserControl
         var dex = new FancyButton("Pokédex (pop-out)", Theme.GlyphSparkle, Theme.Accent2);
         dex.Click += (_, _) => OpenDex();
         card.Body.Controls.Add(Row(change, autoSheet, openSheet));
-        card.Body.Controls.Add(Row(dex));
+        _downloadSheet = new FancyButton("Download tracker", Theme.GlyphDownload, Theme.Accent) { Visible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet) };
+        _downloadSheet.Click += async (_, _) => await DownloadTracker();
+        card.Body.Controls.Add(Row(dex, _downloadSheet));
 
         var sources = new List<string> { "Save file" };
         if (_game.Bot == BotKind.FrlgSwitch)
@@ -644,6 +646,28 @@ public sealed class GamePage : UserControl
         var wb = SpreadsheetService.FindWorkbook(_game);
         _sheetLabel.Text = SpreadsheetService.Describe(_game, wb);
         _sheetLabel.ForeColor = wb != null ? Theme.Text : Theme.Warn;
+        _downloadSheet.Visible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet);
+    }
+
+    private FancyButton _downloadSheet = null!;
+
+    /// <summary>Downloads this game's Pokédex tracker from ShinyForge's GitHub page (when the installer's download was skipped, or portable).</summary>
+    private async Task DownloadTracker()
+    {
+        _downloadSheet.Enabled = false;
+        try
+        {
+            _sheetLabel.ForeColor = Theme.Muted;
+            _sheetLabel.Text = "Looking up the tracker on ShinyForge's GitHub page...";
+            var entry = SheetsDownloadService.EntryFor(_game, await SheetsDownloadService.ManifestAsync());
+            if (entry == null) { _sheetLabel.Text = $"No published tracker for Pokémon {_game.Title} was found."; return; }
+            if (MessageBox.Show(FindForm(), $"Download the Pokémon {_game.Title} tracker ({entry.Size / 1048576.0:N0} MB) into\n{SpreadsheetService.BundledRoot}?",
+                    "Pokédex tracker", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { RefreshSheetLabel(); return; }
+            var path = await SheetsDownloadService.DownloadAsync(entry, s => Ui(() => _sheetLabel.Text = s));
+            Status("Tracker downloaded: " + path);
+        }
+        catch (Exception ex) { MessageBox.Show(FindForm(), "Couldn't download the tracker: " + ex.Message, "Pokédex tracker"); }
+        finally { _downloadSheet.Enabled = true; RefreshSheetLabel(); }
     }
 
     private DexForm? _dexForm;

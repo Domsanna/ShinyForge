@@ -43,6 +43,13 @@ public static class SpreadsheetService
         return $"Spreadsheet (auto-recognized, {where}): {Path.GetFileName(wb)}";
     }
 
+    /// <summary>"(25) Sun" → "Sun": a tracker folder's game name without its number.</summary>
+    public static string LabelOf(string folderName)
+    {
+        var close = folderName.IndexOf(')');
+        return close >= 0 ? folderName[(close + 1)..] : folderName;
+    }
+
     private static string? FindIn(Game game, string root)
     {
         if (string.IsNullOrWhiteSpace(game.Spreadsheet) || string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -50,10 +57,7 @@ public static class SpreadsheetService
         var want = Collection.Normalize(game.Spreadsheet);
         foreach (var dir in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories))
         {
-            var name = Path.GetFileName(dir);
-            var close = name.IndexOf(')');
-            var label = close >= 0 ? name[(close + 1)..] : name;
-            if (Collection.Normalize(label) != want)
+            if (Collection.Normalize(LabelOf(Path.GetFileName(dir))) != want)
                 continue;
             var file = Directory.EnumerateFiles(dir, "*.xls*").FirstOrDefault(f => !Path.GetFileName(f).StartsWith("~$"));
             if (file != null)
