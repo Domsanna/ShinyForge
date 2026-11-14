@@ -2,6 +2,33 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 8)
+
+### New
+- **macOS and Linux versions.** The same ShinyForge with a new [Avalonia](https://avaloniaui.net) interface, built on the same code as the Windows version.
+  - **macOS** (13+, Apple silicon and Intel): `ShinyForge.app` (zip, drag to Applications), plus a portable zip.
+  - **Linux** (x64): a `.deb` package (Ubuntu / Debian / Mint, with a menu entry and the `shinyforge` command), plus a portable `.tar.gz`.
+  - **Works there:** hunting with the FireRed/LeafGreen Python hunter and the 3DS bot, recording and shiny clips, the Pokédex window and trackers, Checkpoint saves, HOME export and Game Info, Living Dex, statistics, alerts, overlay and remote, backups, the system check, and wireless trades (pokeldn's macOS / Linux builds, ESP32-S3 on `/dev/ttyACM*` / `/dev/cu.usbmodem*`).
+  - **Windows-only:** Excel tracker sync, SysBot.exe, the PKHeX program, 3DS Capture and Streamlabs.
+- **Shared services work on all three systems:**
+  - Data folders follow each system's conventions.
+  - Recording uses AVFoundation on macOS, and V4L2 / X11 / PulseAudio on Linux.
+  - Keep-awake uses `caffeinate` on macOS and `systemd-inhibit` on Linux.
+  - FFmpeg and Python install with Homebrew on macOS; on Linux, ShinyForge shows the exact `apt` command.
+  - pokeldn and esptool downloads are picked per system.
+  - Alert sounds, web pages and folders open the native way.
+- **Tests:** `tools/XTest` runs the shared services on macOS / Linux. On Ubuntu it passes, including:
+  - recording the screen into segments;
+  - reading and exporting saves;
+  - finding Checkpoint saves;
+  - downloading trackers;
+  - installing and starting pokeldn and esptool.
+
+  The macOS / Linux app can also save a screenshot of every page and window (`--screenshot`).
+
+### Changed
+- The Python hunter's window capture (vision mode) gives a clear message on macOS / Linux instead of failing; memory hunting works everywhere.
+
 ## 1.0 (build 6)
 
 ### Changed

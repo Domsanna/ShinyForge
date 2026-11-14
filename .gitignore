@@ -29,3 +29,6 @@ PythonBot/snapshot.png
 
 # Local developer notes
 HANDOFF.md
+
+# macOS / Linux build output
+dist-unix/

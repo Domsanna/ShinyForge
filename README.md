@@ -5,7 +5,7 @@
 <h1 align="center">ShinyForge</h1>
 
 <p align="center">
-  All-in-one Pokémon companion for Windows: automatic shiny hunting, gameplay recording,<br>
+  All-in-one Pokémon companion for Windows, macOS and Linux: automatic shiny hunting, gameplay recording,<br>
   Pokédex tracking and save management for the <b>Nintendo Switch</b> and <b>Nintendo 3DS</b>.
 </p>
 
@@ -13,7 +13,7 @@
   <a href="https://github.com/Domsanna/ShinyForge/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Domsanna/ShinyForge?label=download&color=6d5dfc"></a>
   <a href="https://github.com/Domsanna/ShinyForge/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Domsanna/ShinyForge/total?color=12b5cb"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/github/license/Domsanna/ShinyForge?color=1f9d55"></a>
-  <img alt="Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-informational">
+  <img alt="Windows | macOS | Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4">
 </p>
 
@@ -50,12 +50,25 @@
 
 Get the newest version from **[Releases](https://github.com/Domsanna/ShinyForge/releases/latest)**:
 
+**Windows**
 - **`ShinyForge-Setup.exe`**: the installer, one file, no admin rights needed. While installing, it downloads the Pokédex tracker spreadsheets you don't have yet from this page (about 2.2 GB in total, each file checksum-verified). You can skip that step.
 - **`ShinyForge-Portable.zip`**: unzip and run. Everything stays in its folder, so it works from a USB drive.
 
 ShinyForge checks this page for new versions when it starts. You can also check from **Tools & Updates**. Updates download only the program files (~150 MB), and your settings, spreadsheets and saves are kept. See the [changelog](CHANGELOG.md).
 
-**Platforms:** Windows 10/11 only. A macOS or Linux version would need a complete rewrite of the interface, which uses Windows Forms, Excel automation and Windows capture and USB APIs. pokeldn itself runs on macOS and Linux.
+**macOS** (13 or newer)
+- **`ShinyForge-macOS-arm64.zip`** (Apple silicon) or **`ShinyForge-macOS-x64.zip`** (Intel): unzip and drag ShinyForge.app to Applications. The app isn't from a registered Apple developer, so the first time open **System Settings → Privacy & Security → Open Anyway**.
+- **`ShinyForge-macOS-…-Portable.zip`**: the app with a `portable.flag`, for a USB drive.
+
+**Linux** (x64)
+- **`shinyforge_…_amd64.deb`**: Ubuntu / Debian / Mint (`sudo apt install ./shinyforge_…_amd64.deb`). Adds a menu entry and the `shinyforge` command.
+- **`ShinyForge-Linux-x64-Portable.tar.gz`**: any distribution. Unpack and run `./ShinyForge`.
+
+On macOS and Linux everything works except the Windows-only parts:
+- **Spreadsheet sync** drives Microsoft Excel on Windows.
+- **SysBot.exe**, the **PKHeX** program, **3DS Capture** and **Streamlabs** are Windows programs.
+
+See the user guide for details.
 
 > Windows SmartScreen may warn that the program is unrecognised, because it isn't code-signed. Click **More info → Run anyway**.
 
@@ -77,7 +90,10 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download), [Inno Setup 6
 git clone --recurse-submodules https://github.com/Domsanna/ShinyForge.git
 cd ShinyForge
 .\build.ps1        # → dist\ShinyForge-Setup.exe, dist\ShinyForge-Portable.zip
+.\build-unix.ps1   # → dist-unix\ macOS .app zips, Linux .deb and .tar.gz (needs WSL with Ubuntu)
 ```
+
+The Windows version uses Windows Forms (`ShinyForge/`). The macOS / Linux version uses an [Avalonia](https://avaloniaui.net) interface (`ShinyForge.Desktop/`) over the same `Core` and `Services` code. `tools/XTest` checks the shared services on macOS / Linux.
 
 Or double-click `Install tools and build.bat`, which installs the SDK and Inno Setup with winget and then builds.
 
@@ -86,6 +102,7 @@ Or double-click `Install tools and build.bat`, which installs the SDK and Inno S
 | Folder | Contents |
 |---|---|
 | `ShinyForge/` | The WinForms app (`Core`, `Services`, `UI`, `Assets`) and the user guide |
+| `ShinyForge.Desktop/` | The macOS / Linux app (Avalonia), sharing `ShinyForge/Core` and `ShinyForge/Services` |
 | `PythonBot/` | The FireRed/LeafGreen Switch hunter (Python), bundled with the app |
 | `external/pokeldn/` | [pokeldn](https://github.com/Decryptu/pokeldn) (git submodule, AGPL-3.0). ShinyForge uses its official release builds |
 | `installer/` | Inno Setup script |
@@ -107,6 +124,8 @@ ShinyForge is built on the work of many people. Thank you!
 - **[NXBT](https://github.com/Brikwerk/nxbt)**: Brikwerk. Optional Raspberry Pi controller bridge.
 - **[pokeldn](https://github.com/Decryptu/pokeldn)**: Decryptu and contributors, built on MercuryEnigma's and tornadus' frlg-ldn-trade and kinnay's LDN library. Wireless trades and Mystery Gift.
 - **[esptool](https://github.com/espressif/esptool)** and **ESP-IDF**: Espressif Systems. Firmware installation.
+- **[Avalonia](https://github.com/AvaloniaUI/Avalonia)**: AvaloniaUI OÜ and contributors. The macOS / Linux interface. **SkiaSharp** and **HarfBuzzSharp** (Microsoft / Mono) for its drawing.
+- **[rcodesign](https://github.com/indygreg/apple-platform-rs)**: Gregory Szorc. Signs the macOS app.
 - **[Checkpoint](https://github.com/BernardoGiordano/Checkpoint)**: Bernardo Giordano (FlagBrew). The save backups ShinyForge reads.
 - **[PokeAPI](https://github.com/PokeAPI/pokeapi)** and **[PokeAPI/sprites](https://github.com/PokeAPI/sprites)**: Pokédex data and sprites.
 - **[FFmpeg](https://ffmpeg.org)**, with Windows builds by [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).

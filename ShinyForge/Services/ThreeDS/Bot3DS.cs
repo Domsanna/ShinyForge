@@ -295,7 +295,7 @@ public sealed class Bot3DS
         {
             Say(pk.IsShiny ? $"★ SHINY {SpeciesName.GetSpeciesName(pk.Species, 2)} after {_count} encounters!"
                            : $"Stopping: {SpeciesName.GetSpeciesName(pk.Species, 2)} {rule}.");
-            try { System.Media.SystemSounds.Exclamation.Play(); } catch { }
+            Sounds.Play();
             return true;
         }
         _ = legendary;

@@ -12,7 +12,11 @@ public static class HuntService
     // PokeRoutineType values in Sys-EncounterBot (incl. the FRLG routine added there).
     private const int LGPE = 2, SWSH = 4, BDSP = 6, FRLG = 7;
 
-    public static List<HuntOption> OptionsFor(Game game) => game.Bot switch
+    /// <summary>The bots for a game on this OS (SysBot.exe is a Windows program, so its options are Windows-only).</summary>
+    public static List<HuntOption> OptionsFor(Game game) =>
+        AllOptionsFor(game).Where(o => o.Key != "sysbot" || OsInfo.IsWindows).ToList();
+
+    private static List<HuntOption> AllOptionsFor(Game game) => game.Bot switch
     {
         BotKind.FrlgSwitch => new()
         {
@@ -30,6 +34,9 @@ public static class HuntService
 
     public static string UnsupportedReason(Game game) => game.Platform switch
     {
+        Platform.Switch when game.Bot is BotKind.SysBotLGPE or BotKind.SysBotSWSH or BotKind.SysBotBDSP && !OsInfo.IsWindows =>
+            "This game's hunting bot (Sys-EncounterBot / SysBot.exe) runs only on Windows. Recording, collection tracking, " +
+            "save export and wireless trades all work here.",
         Platform.Switch => "No automatic hunting bot exists for this game yet. Recording, collection tracking and save export all work.",
         Platform.NDS or Platform.GBA =>
             "A 3DS runs DS and GBA games in a special compatibility mode where Luma3DS's tools (input redirection, memory access) " +
@@ -101,7 +108,7 @@ public static class HuntService
     public static string StatusLine()
     {
         if (BotDir is not { } d) return "No hunt set up.";
-        var running = Process.GetProcessesByName("python").Any(p => CommandLineContains(p, "shinybot"));
+        var running = PythonProcesses().Any(p => CommandLineContains(p, "shinybot"));
         var state = "";
         try
         {
@@ -192,6 +199,23 @@ public static class HuntService
             var bat = Path.Combine(botDir, "start_hunt.bat");
             if (IsPythonHuntRunning())
                 throw new InvalidOperationException("The Python hunter is already running.");
+            if (!OsInfo.IsWindows)
+            {
+                // macOS / Linux: python3 -m shinybot hunt, its console output kept in hunt_console.log in the bot folder.
+                var py = DependencyService.PathOf("Python 3") ?? throw new FileNotFoundException("Python 3 wasn't found - install it first (Tools & Updates).");
+                var unix = new ProcessStartInfo(py) { WorkingDirectory = botDir, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+                foreach (var a in new[] { "-u", "-m", "shinybot", "hunt" }) unix.ArgumentList.Add(a);
+                var log = new StreamWriter(Path.Combine(botDir, "hunt_console.log"), append: true) { AutoFlush = true };
+                log.WriteLine($"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} hunt started by ShinyForge ====");
+                PythonHunt = Process.Start(unix)!;
+                PythonHunt.OutputDataReceived += (_, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
+                PythonHunt.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
+                PythonHunt.EnableRaisingEvents = true;
+                PythonHunt.Exited += (_, _) => { lock (log) log.Dispose(); };
+                PythonHunt.BeginOutputReadLine();
+                PythonHunt.BeginErrorReadLine();
+                return;
+            }
             var psi = new ProcessStartInfo("cmd.exe", $"/c \"{bat}\"") { WorkingDirectory = botDir, UseShellExecute = true };
             var python = DependencyService.PathOf("Python 3");
             if (python != null && AppPaths.IsInBackupTools(python))
@@ -205,6 +229,8 @@ public static class HuntService
             return;
         }
 
+        if (!OsInfo.IsWindows)
+            throw new PlatformNotSupportedException("SysBot.exe (Sys-EncounterBot) runs only on Windows.");
         var sysbot = DependencyService.PathOf("SysBot.exe")
             ?? throw new FileNotFoundException($"SysBot.exe wasn't found on this PC or in the Backup Tools folder ({AppPaths.BackupToolsDir}). Set its path in Settings.", s.SysBotPath);
         var routine = game.Bot switch { BotKind.SysBotLGPE => LGPE, BotKind.SysBotSWSH => SWSH, BotKind.SysBotBDSP => BDSP, _ => FRLG };
@@ -236,7 +262,12 @@ public static class HuntService
     }
 
     public static bool IsPythonHuntRunning() =>
-        (PythonHunt is { HasExited: false }) || Process.GetProcessesByName("python").Any(p => CommandLineContains(p, "shinybot"));
+        (PythonHunt is { HasExited: false }) || PythonProcesses().Any(p => CommandLineContains(p, "shinybot"));
+
+    /// <summary>python / python3 / python3.12 ... processes.</summary>
+    private static IEnumerable<Process> PythonProcesses() =>
+        OsInfo.IsWindows ? Process.GetProcessesByName("python")
+            : Process.GetProcesses().Where(p => { try { return p.ProcessName.StartsWith("python", StringComparison.OrdinalIgnoreCase); } catch { return false; } });
 
     /// <summary>
     /// Health check for the Python hunter (every minute while it's in use):
@@ -348,13 +379,29 @@ public static class HuntService
     public static void StopPythonHunt()
     {
         _stopRequested = true;
-        foreach (var p in Process.GetProcessesByName("python").Where(p => CommandLineContains(p, "shinybot")))
+        foreach (var p in PythonProcesses().Where(p => CommandLineContains(p, "shinybot")))
             try { p.Kill(entireProcessTree: true); } catch { }
         try { PythonHunt?.Kill(entireProcessTree: true); } catch { }
     }
 
     private static bool CommandLineContains(Process p, string text)
     {
+        if (OsInfo.IsLinux)
+        {
+            try { return File.ReadAllText($"/proc/{p.Id}/cmdline").Replace('\0', ' ').Contains(text, StringComparison.OrdinalIgnoreCase); }
+            catch { return false; }
+        }
+        if (OsInfo.IsMac)
+        {
+            try
+            {
+                using var ps = Process.Start(new ProcessStartInfo("ps", $"-o command= -p {p.Id}") { RedirectStandardOutput = true, UseShellExecute = false })!;
+                var cmd = ps.StandardOutput.ReadToEnd();
+                ps.WaitForExit(3000);
+                return cmd.Contains(text, StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
         try
         {
             using var searcher = new System.Management.ManagementObjectSearcher($"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {p.Id}");

@@ -65,6 +65,12 @@ public static class AppUpdateService
     /// <summary>Downloads the program files and starts the update. Returns true when ShinyForge should now close so it can finish.</summary>
     public static async Task<bool> InstallAsync(AppRelease r, Action<string> progress, CancellationToken token = default)
     {
+        if (!OsInfo.IsWindows)
+        {
+            // macOS / Linux: the release page has the .app / AppImage / packages - the user downloads the one they use.
+            OsInfo.Open(r.PageUrl);
+            return false;
+        }
         var dir = Path.Combine(Path.GetTempPath(), "ShinyForgeUpdate", r.Tag);
         Directory.CreateDirectory(dir);
         if (r.ZipUrl == null) throw new IOException("This release has no program download (ShinyForge-Portable.zip) - get it from the release page.");

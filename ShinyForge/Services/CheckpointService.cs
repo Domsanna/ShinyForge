@@ -39,7 +39,7 @@ public static class CheckpointService
     /// <summary>The "saves" folders on this PC: every ready drive's 3ds/ and switch/ Checkpoint folders, plus the one chosen in Settings.</summary>
     public static List<string> FindRoots(bool switchGame)
     {
-        var sub = switchGame ? @"switch\Checkpoint\saves" : @"3ds\Checkpoint\saves";
+        var sub = switchGame ? Path.Combine("switch", "Checkpoint", "saves") : Path.Combine("3ds", "Checkpoint", "saves");
         var roots = new List<string>();
         var chosen = AppSettings.Current.CheckpointFolder;
         if (!string.IsNullOrWhiteSpace(chosen) && Directory.Exists(chosen))

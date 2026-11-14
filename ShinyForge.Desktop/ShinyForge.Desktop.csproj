@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ShinyForge for macOS and Linux: an Avalonia interface over the same Core and Services as the Windows app. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ShinyForge</AssemblyName>
+    <RootNamespace>ShinyForge</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>ShinyForge</Product>
+    <ApplicationIcon>..\ShinyForge\Assets\ShinyForge.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- shared with the Windows app -->
+    <Compile Include="..\ShinyForge\Core\**\*.cs" LinkBase="Core" />
+    <Compile Include="..\ShinyForge\Services\**\*.cs" LinkBase="Services" />
+    <None Include="..\ShinyForge\Assets\**\*" LinkBase="Assets" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\ShinyForge\ShinyForge User Guide.html" Link="ShinyForge User Guide.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <PackageReference Include="PKHeX.Core" Version="26.10.18" />
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

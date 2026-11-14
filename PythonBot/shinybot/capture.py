@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
 import time
 from ctypes import wintypes
@@ -126,6 +127,8 @@ def make_source(cfg: dict):
     if kind == "virtualcam":
         return VirtualCamSource(cfg.get("camera_index", 0), cfg.get("width", 1280), cfg.get("height", 720))
     if kind == "window":
+        if sys.platform != "win32":
+            raise RuntimeError("Window capture works on Windows only - use capture type 'virtualcam' (a capture card / OBS virtual camera) or 'screen'.")
         return WindowSource(cfg.get("window_title", "Streamlabs"))
     if kind == "screen":
         return ScreenSource(cfg.get("monitor", 1))

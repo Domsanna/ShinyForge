@@ -40,7 +40,25 @@ public static class DependencyService
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     static DependencyService() => Http.DefaultRequestHeaders.UserAgent.ParseAdd("ShinyForge/1.0");
 
-    public static readonly List<Dependency> All = new()
+    /// <summary>The outside programs for this OS.</summary>
+    public static readonly List<Dependency> All = OsInfo.IsWindows ? WindowsTools() : UnixTools();
+
+    /// <summary>macOS / Linux: the tools that exist there (PKHeX, Excel, SysBot and 3DS Capture are Windows programs).</summary>
+    private static List<Dependency> UnixTools() => new()
+    {
+        new() { Name = "FFmpeg", Purpose = "Records gameplay in timed segments", ExeNames = new[] { "ffmpeg" },
+                ManualUrl = OsInfo.IsMac ? "https://formulae.brew.sh/formula/ffmpeg" : "https://ffmpeg.org/download.html#build-linux", Locate = RecordingService.FindFfmpeg },
+        new() { Name = "Python 3", Purpose = "Runs the ShinyForge Python hunting bot (Switch FireRed/LeafGreen)", For3DS = false, ExeNames = new[] { "python3" },
+                ManualUrl = "https://www.python.org/downloads/", Locate = FindPython },
+        new() { Name = "pokeldn", Purpose = "Wireless trades and Mystery Gift with Switch games through an ESP32-S3 board (Decryptu/pokeldn)", For3DS = false,
+                ExeNames = new[] { "pokeldn" }, OnlyAfterSetup = true, ManualUrl = "https://github.com/Decryptu/pokeldn/releases/latest",
+                Locate = PokeldnService.FindApp },
+        new() { Name = "esptool", Purpose = "Espressif's tool that installs the pokeldn radio firmware on the ESP32-S3", For3DS = false,
+                ExeNames = new[] { "esptool" }, OnlyAfterSetup = true, ManualUrl = "https://github.com/espressif/esptool/releases/latest",
+                Locate = () => PokeldnService.FindEsptool() is { } e && !AppPaths.IsInBackupTools(e) ? e : null },
+    };
+
+    private static List<Dependency> WindowsTools() => new()
     {
         new() { Name = "FFmpeg", Purpose = "Records gameplay in timed segments", WingetId = "Gyan.FFmpeg", ExeNames = new[] { "ffmpeg.exe" },
                 ManualUrl = "https://www.gyan.dev/ffmpeg/builds/", Locate = RecordingService.FindFfmpeg },
@@ -98,6 +116,7 @@ public static class DependencyService
 
     public static string? FindPython()
     {
+        if (!OsInfo.IsWindows) return OsInfo.Which("python3") ?? OsInfo.Which("python");
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
         {
             try
@@ -125,7 +144,8 @@ public static class DependencyService
     /// <summary>Path of a tool by name (computer first, then the Backup Tools folder), or null.</summary>
     public static string? PathOf(string name)
     {
-        var d = All.First(x => x.Name == name);
+        var d = All.FirstOrDefault(x => x.Name == name);
+        if (d == null) return null; // not a tool on this OS
         Refresh(d);
         return d.Path;
     }
@@ -145,6 +165,8 @@ public static class DependencyService
     /// <summary>Installs automatically. Returns a message for the user.</summary>
     public static async Task<string> Install(Dependency d, Action<string> progress)
     {
+        if (!OsInfo.IsWindows && d.Name is "FFmpeg" or "Python 3")
+            return await InstallUnixPackage(d, progress);
         if (d.WingetId != null)
         {
             var output = await RunWinget($"install --id {d.WingetId} --exact", progress);
@@ -275,7 +297,38 @@ public static class DependencyService
     public static void OpenUrl(string? url)
     {
         if (!string.IsNullOrEmpty(url))
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            OsInfo.Open(url);
+    }
+
+    /// <summary>
+    /// macOS: installs FFmpeg / Python with Homebrew if it's there. Linux: system packages need the user's password, so
+    /// the exact command is returned for them to run (ShinyForge never asks for or types passwords).
+    /// </summary>
+    private static async Task<string> InstallUnixPackage(Dependency d, Action<string> progress)
+    {
+        var pkg = d.Name == "FFmpeg" ? "ffmpeg" : "python3";
+        if (OsInfo.IsMac)
+        {
+            var brew = OsInfo.Which("brew");
+            if (brew == null)
+            {
+                OpenUrl("https://brew.sh");
+                return $"{d.Name}: install Homebrew first (its page was opened), then run:  brew install {(pkg == "python3" ? "python" : pkg)}";
+            }
+            progress($"brew install {pkg}...");
+            var psi = new ProcessStartInfo(brew) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            psi.ArgumentList.Add("install");
+            psi.ArgumentList.Add(pkg == "python3" ? "python" : pkg);
+            using var p = Process.Start(psi)!;
+            var output = await p.StandardOutput.ReadToEndAsync() + await p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            Refresh(d);
+            return d.State == DepState.Ok ? $"{d.Name} installed with Homebrew." : $"{d.Name}: brew finished - {LastLine(output)}";
+        }
+        var cmd = File.Exists("/usr/bin/apt") ? $"sudo apt install {pkg}" : File.Exists("/usr/bin/dnf") ? $"sudo dnf install {pkg}"
+                : File.Exists("/usr/bin/pacman") ? $"sudo pacman -S {(pkg == "python3" ? "python" : pkg)}" : $"install the '{pkg}' package with your package manager";
+        return $"{d.Name}: run this in a terminal (it asks for your password), then click Check for updates:\n\n    {cmd}" +
+               (pkg == "python3" ? "\n\nThe hunter also needs:  python3 -m pip install -r requirements.txt  (in the PythonBot folder)" : "");
     }
 
     private static string LastLine(string s) => s.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim() ?? "";
@@ -288,7 +341,8 @@ public static class DependencyService
         var list = new List<UpdateInfo>();
         foreach (var d in All) Refresh(d);
 
-        // winget-managed tools.
+        // winget-managed tools (Windows).
+        if (OsInfo.IsWindows)
         try
         {
             // Plain listing ("winget upgrade" with no install flags): a table of Name / Id / Version / Available.
@@ -313,7 +367,8 @@ public static class DependencyService
         }
         catch (Exception e) { AppPaths.Log("winget upgrade check failed: " + e.Message); }
 
-        // PKHeX app vs. latest release tag.
+        // PKHeX app vs. latest release tag (Windows).
+        if (OsInfo.IsWindows)
         try
         {
             var latest = (await Http.GetFromJsonAsync<JsonObject>("https://api.github.com/repos/kwsch/PKHeX/releases/latest"))?["tag_name"]?.ToString();

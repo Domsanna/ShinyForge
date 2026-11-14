@@ -68,8 +68,14 @@ public static class SpreadsheetService
 
     public sealed record Result(int MarkedInBox, int MarkedOT, int MarkedShiny, int Sheets, List<string> Notes);
 
+    /// <summary>Updating a tracker drives Microsoft Excel (COM), which exists only on Windows.</summary>
+    public static bool CanUpdate => OperatingSystem.IsWindows();
+
     public static Result Update(string workbookPath, Collection owned, Action<string> progress)
     {
+        if (!CanUpdate)
+            throw new PlatformNotSupportedException("Updating a Pokédex tracker uses Microsoft Excel on Windows, which keeps the trackers' macros and pictures intact. " +
+                                                    "On macOS and Linux you can open the tracker and read your collection in ShinyForge's Pokédex window.");
         var notes = new List<string>();
         int inBox = 0, ot = 0, shiny = 0, sheets = 0;
         var type = Type.GetTypeFromProgID("Excel.Application")

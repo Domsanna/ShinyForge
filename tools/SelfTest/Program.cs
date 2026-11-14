@@ -860,7 +860,7 @@ if (tests.Contains("features"))
     s.Hunt = System.Text.Json.JsonSerializer.Deserialize<HuntOptions>(keepHunt)!;
 
     // ---- shiny clip buffer
-    ApplicationConfiguration.Initialize();
+    try { ApplicationConfiguration.Initialize(); } catch (InvalidOperationException) { /* already set up by an earlier test mode */ }
     var win = new Form { Text = "ShinyForgeClipTest", Size = new Size(320, 240), StartPosition = FormStartPosition.Manual, Location = new Point(60, 60), BackColor = Color.SeaGreen };
     win.Show(); Application.DoEvents();
     var clipOut = Path.Combine(work, "clips"); if (Directory.Exists(clipOut)) Directory.Delete(clipOut, true);

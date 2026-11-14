@@ -135,7 +135,7 @@
 <header class="hero">
   <h1>ShinyForge User Guide</h1>
   <p>Your all-in-one companion for shiny hunting, recording, collection tracking and save management on the Nintendo Switch and Nintendo 3DS.</p>
-  <div class="meta">Version 1.0 · For Windows 10 / 11 (64-bit) · <a style="color:#fff" href="https://github.com/Domsanna/ShinyForge">github.com/Domsanna/ShinyForge</a></div>
+  <div class="meta">Version 1.0 · For Windows 10 / 11, macOS 13+ (Apple silicon and Intel) and Linux (x64) · <a style="color:#fff" href="https://github.com/Domsanna/ShinyForge">github.com/Domsanna/ShinyForge</a></div>
 </header>
 
 <!-- ============================================================ 1 -->
@@ -180,6 +180,29 @@
     <li>Run <code>ShinyForge.exe</code>. The <code>portable.flag</code> file tells it to keep everything inside its own folder.</li>
     <li>To move to another PC, copy the whole folder. Your settings, hunt logs and backups go with it.</li>
   </ol>
+  <h3 id="mac">macOS</h3>
+  <ol class="steps">
+    <li>Download <code>ShinyForge-macOS-arm64.zip</code> for an Apple silicon Mac (M1 and newer), or <code>ShinyForge-macOS-x64.zip</code> for an Intel Mac. Double-click it to unzip, then drag <b>ShinyForge.app</b> into <b>Applications</b>.</li>
+    <li>The first time, macOS says it can't check the app, because ShinyForge isn't from a registered Apple developer. Close the message, open <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>. You only do this once.</li>
+    <li>Recording from a capture card asks for camera (and microphone) permission the first time. Allow it.</li>
+    <li>Portable: <code>ShinyForge-macOS-…-Portable.zip</code> holds the app and a <code>portable.flag</code>. Keep them together, for example on a USB drive.</li>
+  </ol>
+  <h3 id="linux">Linux</h3>
+  <ol class="steps">
+    <li>Ubuntu, Debian, Mint and others: download <code>shinyforge_…_amd64.deb</code> and install it with the software installer, or with <code>sudo apt install ./shinyforge_…_amd64.deb</code>. ShinyForge appears in the app menu, and the <code>shinyforge</code> command starts it.</li>
+    <li>Any distribution: unpack <code>ShinyForge-Linux-x64-Portable.tar.gz</code> and run <code>./ShinyForge</code> in the <i>ShinyForge Portable</i> folder.</li>
+    <li>For recording and the hunter: <code>sudo apt install ffmpeg python3 python3-opencv python3-numpy python3-yaml</code>, and <code>python3 -m pip install mss</code>.</li>
+    <li>For the ESP32-S3 board (wireless trades), add yourself to the <code>dialout</code> group once (<code>sudo usermod -aG dialout $USER</code>), then log out and back in.</li>
+  </ol>
+  <h3 id="platforms">What's different on macOS and Linux</h3>
+  <p>The same ShinyForge, with the same pages and features, plus these differences:</p>
+  <ul>
+    <li><b>Pokédex tracker sync</b> uses Microsoft Excel on Windows, which keeps the trackers' macros and pictures intact, so <b>Sync</b> is Windows-only. On macOS and Linux you can still find, download and open the trackers, and use the Pokédex window.</li>
+    <li><b>SysBot.exe</b> (hunting in Let's Go, Sword/Shield and BD/SP), the <b>PKHeX</b> program, <b>3DS Capture</b> and <b>Streamlabs</b> are Windows programs, so they're left out there. The FireRed/LeafGreen hunter, the 3DS bot, Checkpoint saves, saves and Game Info, wireless trades, statistics, alerts, overlay and remote all work.</li>
+    <li><b>Recording</b> uses AVFoundation on macOS (capture cards, cameras and the screen) and V4L2 capture devices, the X11 screen and PulseAudio on Linux.</li>
+    <li><b>Keep the computer awake</b> uses <code>caffeinate</code> on macOS and <code>systemd-inhibit</code> on Linux.</li>
+    <li><b>Updates:</b> when a new version comes out, ShinyForge opens its release page, where you download the macOS or Linux build.</li>
+  </ul>
   <h3>What else you might need</h3>
   <p>ShinyForge checks for these at start-up and offers to install anything missing. You only need the ones for the features you use.</p>
   <div class="table-wrap"><table>
@@ -574,7 +597,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
 <!-- ============================================================ 18 -->
 <section id="files">
   <h2><span class="num">19</span> Where your files live</h2>
-  <p>"Data folder" means <code>%AppData%\ShinyForge</code> (installed) or <code>Data</code> next to the program (portable).</p>
+  <p>"Data folder" means <code>%AppData%\ShinyForge</code> on Windows, <code>~/Library/Application Support/ShinyForge</code> on macOS, <code>~/.local/share/ShinyForge</code> on Linux, or <code>Data</code> next to the program (portable). "Documents" is your Documents folder on each system.</p>
   <div class="table-wrap"><table>
     <tr><th>What</th><th>Where</th></tr>
     <tr><td>Settings</td><td><code>Data folder\settings.json</code></td></tr>
@@ -617,6 +640,14 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
 <section id="credits">
   <h2><span class="num">21</span> Credits &amp; thanks</h2>
   <p>ShinyForge stands on the shoulders of a generous community. A huge thank-you to everyone below. Each project stays the property of its authors and is used under its own license. Please support them!</p>
+
+  <h3>macOS and Linux version</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>Avalonia</td><td>AvaloniaUI OÜ and contributors. MIT</td><td>The cross-platform window toolkit of the macOS / Linux version</td></tr>
+    <tr><td>SkiaSharp &amp; HarfBuzzSharp</td><td>Microsoft and the Mono project (Skia by Google, HarfBuzz by its authors). MIT</td><td>Drawing and text on macOS and Linux</td></tr>
+    <tr><td>rcodesign (apple-codesign)</td><td>Gregory Szorc. MPL-2.0</td><td>Signing the macOS app (ad-hoc) while building it on Linux</td></tr>
+  </table></div>
 
   <h3>Built into ShinyForge</h3>
   <div class="table-wrap"><table class="credits">

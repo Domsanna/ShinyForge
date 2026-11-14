@@ -41,7 +41,18 @@ public static class PokeldnService
 {
     public const string Repo = "Decryptu/pokeldn";
     public const string EsptoolRepo = "espressif/esptool";
-    public const string AppAsset = "pokeldn-windows-x64.zip";
+    /// <summary>The pokeldn download for this OS and processor.</summary>
+    public static string AppAsset =>
+        OsInfo.IsWindows ? "pokeldn-windows-x64.zip"
+        : OsInfo.IsMac ? (System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "pokeldn-macos-arm64.zip" : "pokeldn-macos-x64.zip")
+        : "pokeldn-linux-x64.tar.gz";
+    /// <summary>The program inside it: pokeldn.exe, pokeldn.app (macOS) or pokeldn (Linux).</summary>
+    private static string AppFile => OsInfo.IsWindows ? "pokeldn.exe" : OsInfo.IsMac ? "pokeldn.app" : "pokeldn";
+    /// <summary>esptool's download for this OS ("windows-amd64.zip", "macos-arm64.tar.gz", "linux-amd64.tar.gz").</summary>
+    private static string EsptoolAssetSuffix =>
+        OsInfo.IsWindows ? "windows-amd64.zip"
+        : OsInfo.IsMac ? (System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "macos-arm64.tar.gz" : "macos-amd64.tar.gz")
+        : System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "linux-aarch64.tar.gz" : "linux-amd64.tar.gz";
     public const string FirmwareAsset = "pokeldn-radio-s3.bin";
     /// <summary>Entries pokeldn's radio needs in prod.keys (pokeldn docs: ldn.KEYS_NEEDED).</summary>
     public static readonly string[] KeysNeeded = { "aes_kek_generation_source", "aes_key_generation_source", "master_key_00", "master_key_12" };
@@ -59,21 +70,33 @@ public static class PokeldnService
     public static string FirmwareDir => Path.Combine(AppPaths.ToolsDir, "pokeldn-firmware");
     public static string EsptoolDir => Path.Combine(AppPaths.ToolsDir, "esptool");
     /// <summary>pokeldn's own data folder (settings.json with the prod.keys path).</summary>
-    public static string PokeldnDataDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "pokeldn");
+    public static string PokeldnDataDir => Path.Combine(OsInfo.DataRoot, "pokeldn");
 
     public static string? FindApp()
     {
         if (File.Exists(AppSettings.Current.PokeldnPath)) return AppSettings.Current.PokeldnPath;
-        var local = Path.Combine(AppDir, "pokeldn.exe");
+        if (OsInfo.IsMac)
+        {
+            // an app bundle is a folder
+            foreach (var root in new[] { AppDir, AppPaths.BackupToolsDir, "/Applications" })
+                try
+                {
+                    if (Directory.Exists(root) && Directory.EnumerateDirectories(root, "pokeldn.app", new System.IO.EnumerationOptions { RecurseSubdirectories = root != "/Applications", MaxRecursionDepth = 4, IgnoreInaccessible = true }).FirstOrDefault() is { } app)
+                        return app;
+                }
+                catch { }
+            return null;
+        }
+        var local = Path.Combine(AppDir, AppFile);
         if (File.Exists(local)) return local;
-        if (Directory.Exists(AppDir) && Directory.EnumerateFiles(AppDir, "pokeldn.exe", SearchOption.AllDirectories).FirstOrDefault() is { } nested) return nested;
-        return AppPaths.FindInBackupTools("pokeldn.exe");
+        if (Directory.Exists(AppDir) && Directory.EnumerateFiles(AppDir, AppFile, SearchOption.AllDirectories).FirstOrDefault() is { } nested) return nested;
+        return AppPaths.FindInBackupTools(AppFile);
     }
 
     public static string? FindEsptool()
     {
-        if (Directory.Exists(EsptoolDir) && Directory.EnumerateFiles(EsptoolDir, "esptool.exe", SearchOption.AllDirectories).FirstOrDefault() is { } e) return e;
-        return AppPaths.FindInBackupTools("esptool.exe");
+        if (Directory.Exists(EsptoolDir) && Directory.EnumerateFiles(EsptoolDir, OsInfo.Exe("esptool"), SearchOption.AllDirectories).FirstOrDefault() is { } e) return e;
+        return AppPaths.FindInBackupTools(OsInfo.Exe("esptool")) ?? (OsInfo.IsWindows ? null : OsInfo.Which("esptool"));
     }
 
     /// <summary>The newest S3 radio firmware file ShinyForge has (Tools, then Backup Tools).</summary>
@@ -87,7 +110,7 @@ public static class PokeldnService
     public static string? InstalledAppTag(string? exe)
     {
         if (exe == null) return null;
-        var marker = Path.Combine(Path.GetDirectoryName(exe)!, "shinyforge-version.txt");
+        var marker = Path.Combine(Path.GetDirectoryName(exe.TrimEnd(Path.DirectorySeparatorChar))!, "shinyforge-version.txt");
         return File.Exists(marker) ? File.ReadAllText(marker).Trim() : null;
     }
 
@@ -150,7 +173,7 @@ public static class PokeldnService
         progress("Looking up the latest pokeldn release...");
         var rel = await LatestAsync();
         if (rel.AppUrl == null || rel.SumsUrl == null)
-            throw new IOException($"pokeldn {rel.Tag} has no Windows download or checksums - get it from {rel.PageUrl}.");
+            throw new IOException($"pokeldn {rel.Tag} has no {OsInfo.Name} download or checksums - get it from {rel.PageUrl}.");
         var sums = ParseSums(await Http.GetStringAsync(rel.SumsUrl));
         var tmp = Path.Combine(Path.GetTempPath(), "ShinyForge-pokeldn-" + rel.Tag);
         Directory.CreateDirectory(tmp);
@@ -160,12 +183,21 @@ public static class PokeldnService
         progress("Unpacking pokeldn...");
         var unpack = Path.Combine(tmp, "app");
         if (Directory.Exists(unpack)) Directory.Delete(unpack, true);
-        ZipFile.ExtractToDirectory(zip, unpack);
-        var exe = Directory.EnumerateFiles(unpack, "pokeldn.exe", SearchOption.AllDirectories).FirstOrDefault()
-                  ?? throw new IOException("The pokeldn download doesn't contain pokeldn.exe.");
-        var appRoot = Path.GetDirectoryName(exe)!;
+        await Unpack(zip, unpack);
         if (Directory.Exists(AppDir)) Directory.Delete(AppDir, true);
-        Directory.Move(appRoot, AppDir);
+        if (OsInfo.IsMac)
+        {
+            var bundle = Directory.EnumerateDirectories(unpack, "pokeldn.app", SearchOption.AllDirectories).FirstOrDefault()
+                         ?? throw new IOException("The pokeldn download doesn't contain pokeldn.app.");
+            Directory.CreateDirectory(AppDir);
+            Directory.Move(bundle, Path.Combine(AppDir, "pokeldn.app"));
+        }
+        else
+        {
+            var exe = Directory.EnumerateFiles(unpack, AppFile, SearchOption.AllDirectories).FirstOrDefault()
+                      ?? throw new IOException($"The pokeldn download doesn't contain {AppFile}.");
+            Directory.Move(Path.GetDirectoryName(exe)!, AppDir);
+        }
         File.WriteAllText(Path.Combine(AppDir, "shinyforge-version.txt"), rel.Tag);
         AppSettings.Current.PokeldnPath = "";
         AppSettings.Current.Save();
@@ -188,8 +220,8 @@ public static class PokeldnService
         var j = await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{EsptoolRepo}/releases/latest")
                 ?? throw new IOException("GitHub didn't return the esptool release.");
         var tag = j["tag_name"]?.ToString() ?? "";
-        var asset = (j["assets"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(a => a["name"]?.ToString().EndsWith("windows-amd64.zip") == true)
-                    ?? throw new IOException("The esptool release has no Windows download.");
+        var asset = (j["assets"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(a => a["name"]?.ToString().EndsWith(EsptoolAssetSuffix) == true)
+                    ?? throw new IOException($"The esptool release has no {OsInfo.Name} download.");
         var tmp = Path.Combine(Path.GetTempPath(), "ShinyForge-esptool-" + tag);
         Directory.CreateDirectory(tmp);
         var zip = Path.Combine(tmp, asset["name"]!.ToString());
@@ -198,9 +230,32 @@ public static class PokeldnService
         await DownloadVerified(asset["browser_download_url"]!.ToString(), zip, digest?.StartsWith("sha256:") == true ? digest[7..].ToLowerInvariant() : null, progress, $"esptool {tag}");
         progress("Unpacking esptool...");
         if (Directory.Exists(EsptoolDir)) Directory.Delete(EsptoolDir, true);
-        ZipFile.ExtractToDirectory(zip, EsptoolDir);
+        await Unpack(zip, EsptoolDir);
         try { Directory.Delete(tmp, true); } catch { }
         return FindEsptool() is { } exe ? $"esptool {tag} installed ({exe})." : "esptool was unpacked but esptool.exe wasn't found.";
+    }
+
+    /// <summary>
+    /// Unpacks a .zip or .tar.gz. On macOS "ditto" keeps app bundles intact (symbolic links, permissions); tar keeps
+    /// Linux/macOS file permissions.
+    /// </summary>
+    private static async Task Unpack(string archive, string dest)
+    {
+        Directory.CreateDirectory(dest);
+        if (OsInfo.IsWindows && archive.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            ZipFile.ExtractToDirectory(archive, dest);
+            return;
+        }
+        var psi = OsInfo.IsMac && archive.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            ? new ProcessStartInfo("ditto") { ArgumentList = { "-x", "-k", archive, dest } }
+            : new ProcessStartInfo("tar") { ArgumentList = { archive.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? "-xf" : "-xzf", archive, "-C", dest } };
+        psi.UseShellExecute = false;
+        psi.RedirectStandardError = true;
+        using var p = Process.Start(psi)!;
+        var err = await p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0) throw new IOException($"Unpacking {Path.GetFileName(archive)} failed: {err.Trim()}");
     }
 
     // ------------------------------------------------------------------ the board
@@ -208,6 +263,34 @@ public static class PokeldnService
     public static List<UsbBoard> FindBoards()
     {
         var list = new List<UsbBoard>();
+        if (OsInfo.IsLinux)
+        {
+            // /dev/ttyACM* (native USB) and /dev/ttyUSB* (bridges); the USB ids come from sysfs.
+            foreach (var dev in Directory.EnumerateFiles("/dev").Where(d => Path.GetFileName(d).StartsWith("ttyACM") || Path.GetFileName(d).StartsWith("ttyUSB")).Order())
+            {
+                string Id(string f)
+                {
+                    foreach (var up in new[] { "..", "../.." })
+                        try { return File.ReadAllText(Path.Combine("/sys/class/tty", Path.GetFileName(dev), "device", up, f)).Trim().ToUpperInvariant(); } catch { }
+                    return "";
+                }
+                var vid = Id("idVendor");
+                if (vid is "303A" or "10C4" or "1A86") list.Add(new UsbBoard(dev, Id("product") is { Length: > 0 } n ? n : Path.GetFileName(dev), vid, Id("idProduct")));
+            }
+            return list.OrderByDescending(b => b.NativeUsb).ToList();
+        }
+        if (OsInfo.IsMac)
+        {
+            // macOS names the port after the driver: cu.usbmodem* = native USB (ESP32-S3), cu.usbserial / SLAB / wchusbserial = bridges.
+            foreach (var dev in Directory.EnumerateFiles("/dev", "cu.*").Order())
+            {
+                var n = Path.GetFileName(dev);
+                if (n.StartsWith("cu.usbmodem")) list.Add(new UsbBoard(dev, n, "303A", ""));
+                else if (n.StartsWith("cu.SLAB") || n.StartsWith("cu.usbserial")) list.Add(new UsbBoard(dev, n, "10C4", ""));
+                else if (n.StartsWith("cu.wchusbserial")) list.Add(new UsbBoard(dev, n, "1A86", ""));
+            }
+            return list.OrderByDescending(b => b.NativeUsb).ToList();
+        }
         try
         {
             using var q = new ManagementObjectSearcher("SELECT Name, PNPDeviceID FROM Win32_PnPEntity WHERE Name LIKE '%(COM%'");
@@ -353,7 +436,8 @@ public static class PokeldnService
     public static void Launch()
     {
         var exe = FindApp() ?? throw new IOException("pokeldn isn't installed yet.");
-        Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
+        if (OsInfo.IsMac) { Process.Start(new ProcessStartInfo("open") { ArgumentList = { exe }, UseShellExecute = false }); return; }
+        Process.Start(new ProcessStartInfo(exe) { UseShellExecute = OsInfo.IsWindows, WorkingDirectory = Path.GetDirectoryName(exe)! });
     }
 
     // ------------------------------------------------------------------ serial framing (pokeldn docs: Serial protocol)

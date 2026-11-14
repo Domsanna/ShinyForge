@@ -29,12 +29,38 @@ public static class PowerGuard
         _thread = new Thread(Loop) { IsBackground = true, Name = "PowerGuard" };
         _thread.Start();
         _timer = new System.Threading.Timer(_ => Wake.Set(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
-        SystemEvents.PowerModeChanged += (_, e) =>
+        if (OperatingSystem.IsWindows())
+            SystemEvents.PowerModeChanged += (_, e) =>
+            {
+                if (e.Mode == PowerModes.Resume && HeldFor != null)
+                    HealthMonitor.Report("Keep awake", HealthState.Error,
+                        $"The PC went to sleep while {HeldFor} was running - check the power settings (a laptop lid or the power button can still force sleep).");
+            };
+    }
+
+    private static System.Diagnostics.Process? _inhibitor;
+
+    /// <summary>Windows: SetThreadExecutionState. macOS: caffeinate -i. Linux: systemd-inhibit --what=sleep. (Each until released.)</summary>
+    private static void Hold(bool on, string reason)
+    {
+        if (OperatingSystem.IsWindows())
         {
-            if (e.Mode == PowerModes.Resume && HeldFor != null)
-                HealthMonitor.Report("Keep awake", HealthState.Error,
-                    $"The PC went to sleep while {HeldFor} was running - check Windows' power settings (a laptop lid or the power button can still force sleep).");
-        };
+            SetThreadExecutionState(on ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED : ES_CONTINUOUS);
+            return;
+        }
+        try { if (_inhibitor is { HasExited: false }) _inhibitor.Kill(); } catch { }
+        _inhibitor = null;
+        if (!on) return;
+        try
+        {
+            var psi = OperatingSystem.IsMacOS()
+                ? new System.Diagnostics.ProcessStartInfo("caffeinate", $"-i -w {Environment.ProcessId}")
+                : new System.Diagnostics.ProcessStartInfo("systemd-inhibit", $"--what=sleep:idle --who=ShinyForge --why=\"{reason.Replace("\"", "")}\" --mode=block sleep infinity");
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            _inhibitor = System.Diagnostics.Process.Start(psi);
+        }
+        catch (Exception e) { AppPaths.Log("Keep awake isn't available here: " + e.Message); }
     }
 
     private static void Loop()
@@ -46,13 +72,13 @@ public static class PowerGuard
             try { reason = AppSettings.Current.KeepAwake ? BusyReason() : null; } catch { }
             if (reason != null && !_held)
             {
-                SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
+                Hold(true, reason);
                 _held = true;
                 AppPaths.Log("Keep awake ON: " + reason);
             }
             else if (reason == null && _held)
             {
-                SetThreadExecutionState(ES_CONTINUOUS);
+                Hold(false, "");
                 _held = false;
                 AppPaths.Log("Keep awake OFF");
             }

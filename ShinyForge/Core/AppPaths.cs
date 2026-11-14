@@ -1,18 +1,22 @@
 namespace ShinyForge.Core;
 
 /// <summary>
-/// Where ShinyForge keeps its data. Portable mode (a "portable.flag" file next to ShinyForge.exe) keeps
-/// everything inside the program folder so it can live on a flash drive / external SSD; otherwise data
-/// goes to %AppData%\ShinyForge.
+/// Where ShinyForge keeps its data. Portable mode (a "portable.flag" file next to ShinyForge.exe - on macOS next to
+/// ShinyForge.app) keeps everything inside the program folder so it can live on a flash drive / external SSD; otherwise
+/// data goes to %AppData%\ShinyForge (Windows), ~/Library/Application Support/ShinyForge (macOS) or
+/// ~/.local/share/ShinyForge (Linux).
 /// </summary>
 public static class AppPaths
 {
+    /// <summary>The program's own files (Assets, PythonBot, the guide...).</summary>
     public static string AppDir { get; } = AppContext.BaseDirectory;
-    public static bool IsPortable { get; } = File.Exists(Path.Combine(AppDir, "portable.flag"));
+    /// <summary>The folder the user sees the program in (next to ShinyForge.exe / ShinyForge.app): portable data goes here.</summary>
+    public static string LaunchDir { get; } = OsInfo.LaunchDir;
+    public static bool IsPortable { get; } = File.Exists(Path.Combine(LaunchDir, "portable.flag"));
 
     public static string DataDir { get; } = Ensure(IsPortable
-        ? Path.Combine(AppDir, "Data")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShinyForge"));
+        ? Path.Combine(LaunchDir, "Data")
+        : Path.Combine(OsInfo.DataRoot, "ShinyForge"));
 
     public static string SettingsFile => Path.Combine(DataDir, "settings.json");
     public static string ToolsDir => Ensure(Path.Combine(DataDir, "Tools"));
@@ -24,16 +28,16 @@ public static class AppPaths
     /// installed: Documents\ShinyForge\Backup Tools (easy to find).
     /// </summary>
     public static string BackupToolsDir { get; } = IsPortable
-        ? Path.Combine(AppDir, "Backup Tools")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShinyForge", "Backup Tools");
+        ? Path.Combine(LaunchDir, "Backup Tools")
+        : Path.Combine(OsInfo.DocumentsDir, "ShinyForge", "Backup Tools");
 
     /// <summary>
     /// Copies of saves ShinyForge took from Checkpoint (and their Pokémon HOME exports): portable = next to ShinyForge.exe,
     /// installed = Documents\ShinyForge\Saves. Saves are always copied here first - ShinyForge never writes to the SD card.
     /// </summary>
     public static string SavesDir { get; } = IsPortable
-        ? Path.Combine(AppDir, "Saves")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShinyForge", "Saves");
+        ? Path.Combine(LaunchDir, "Saves")
+        : Path.Combine(OsInfo.DocumentsDir, "ShinyForge", "Saves");
 
     /// <summary>Creates the backup folder and its README (safe to call every start).</summary>
     public static void EnsureBackupToolsDir()
@@ -48,6 +52,7 @@ public static class AppPaths
                     "==============================\r\n\r\n" +
                     "Every time ShinyForge starts it first looks for the programs it needs on this computer.\r\n" +
                     "Anything it can't find there, it looks for in THIS folder (including sub-folders).\r\n\r\n" +
+                    (OsInfo.IsWindows ? "" : "On macOS and Linux: FFmpeg, Python 3, pokeldn and esptool (the program files without .exe).\r\n") +
                     "Put the program folders (unzipped) or files in here, for example:\r\n" +
                     "  FFmpeg            ...\\ffmpeg.exe\r\n" +
                     "  PKHeX             ...\\PKHeX.exe\r\n" +
@@ -82,19 +87,38 @@ public static class AppPaths
     /// <summary>The ShinyForge Python bot folder: the one set in Settings, else a copy in the Backup Tools folder.</summary>
     public static string? FindPythonBotFolder(string configured)
     {
-        static bool IsBot(string dir) => File.Exists(Path.Combine(dir, "start_hunt.bat")) && Directory.Exists(Path.Combine(dir, "shinybot"));
+        static bool IsBot(string dir) => Directory.Exists(Path.Combine(dir, "shinybot")) && File.Exists(Path.Combine(dir, "config.yaml"));
         if (!string.IsNullOrWhiteSpace(configured) && IsBot(configured)) return configured;
         var bundled = Path.Combine(AppDir, "PythonBot"); // shipped with ShinyForge
-        if (IsBot(bundled)) return bundled;
-        var bat = FindInBackupTools("start_hunt.bat");
-        if (bat != null && IsBot(Path.GetDirectoryName(bat)!)) return Path.GetDirectoryName(bat);
+        if (IsBot(bundled))
+        {
+            // Installed macOS / Linux apps live in read-only places (/opt, an .app bundle): the hunter runs from a copy in
+            // the data folder, where it can write its logs. Program files are refreshed from each new version; the
+            // user's config.yaml and logs are kept.
+            if (OsInfo.IsWindows || IsPortable) return bundled;
+            var working = Path.Combine(DataDir, "PythonBot");
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(bundled, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(bundled, file);
+                    if (rel.Contains("__pycache__")) continue;
+                    var target = Path.Combine(working, rel);
+                    if (File.Exists(target) && (rel == "config.yaml" || File.GetLastWriteTimeUtc(target) >= File.GetLastWriteTimeUtc(file))) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(file, target, true);
+                }
+                return working;
+            }
+            catch (Exception e) { Log("Copying the Python hunter to the data folder failed: " + e.Message); return bundled; }
+        }
         if (!Directory.Exists(BackupToolsDir)) return null;
         var opts = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, MaxRecursionDepth = 8 };
-        return Directory.EnumerateFiles(BackupToolsDir, "start_hunt.bat", opts).Select(Path.GetDirectoryName).FirstOrDefault(d => d != null && IsBot(d));
+        return Directory.EnumerateFiles(BackupToolsDir, "config.yaml", opts).Select(Path.GetDirectoryName).FirstOrDefault(d => d != null && IsBot(d));
     }
 
     public static bool IsInBackupTools(string? path) =>
-        path != null && Path.GetFullPath(path).StartsWith(Path.GetFullPath(BackupToolsDir), StringComparison.OrdinalIgnoreCase);
+        path != null && Path.GetFullPath(path).StartsWith(Path.GetFullPath(BackupToolsDir), OsInfo.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     public static string AssetsDir => Path.Combine(AppDir, "Assets");
     public static string ArtDir => Path.Combine(AssetsDir, "Art");
     /// <summary>Drop official game logo images here (named by game id, e.g. "gba_firered.png" or "sw_scarlet.png") to show them on the tiles.</summary>

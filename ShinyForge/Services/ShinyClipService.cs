@@ -31,12 +31,8 @@ public sealed class ShinyClipService
         Directory.CreateDirectory(_dir);
         var seconds = Math.Clamp(AppSettings.Current.ShinyClipSeconds, 20, 300);
         var wrap = seconds / 10 + 2;
-        string input = source.StartsWith(RecordingService.WindowPrefix)
-            ? $"-f gdigrab -framerate 30 -draw_mouse 0 -i title=\"{source[RecordingService.WindowPrefix.Length..]}\""
-            : $"-f dshow -rtbufsize 256M -i video=\"{(source.StartsWith(RecordingService.DevicePrefix) ? source[RecordingService.DevicePrefix.Length..] : source)}\"";
-        var hasAudio = !string.IsNullOrWhiteSpace(audio) && audio != RecordingService.NoAudio;
-        if (hasAudio) input += $" -f dshow -rtbufsize 128M -i audio=\"{audio}\"";
-        var args = $"-hide_banner -loglevel error -y {input} -map 0:v{(hasAudio ? " -map 1:a" : "")} -c:v libx264 -preset veryfast -crf 23 " +
+        var (input, maps, hasAudio) = RecordingService.BuildInput(source, audio, bigBuffers: false);
+        var args = $"-hide_banner -loglevel error -y {input} {maps} -c:v libx264 -preset veryfast -crf 23 " +
                    "-pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -g 60 " + (hasAudio ? "-c:a aac -b:a 128k " : "") +
                    $"-f segment -segment_time 10 -segment_wrap {wrap} -reset_timestamps 1 \"{Path.Combine(_dir, "buf%03d.ts")}\"";
         try

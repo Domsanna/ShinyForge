@@ -24,42 +24,101 @@ public sealed class RecordingService
         var configured = AppSettings.Current.FfmpegPath;
         if (File.Exists(configured))
             return configured;
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-        {
-            try
-            {
-                var p = Path.Combine(dir.Trim(), "ffmpeg.exe");
-                if (File.Exists(p)) return p;
-            }
-            catch { }
-        }
+        if (OsInfo.Which("ffmpeg") is { } onPath)
+            return onPath;
         var winget = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WinGet", "Packages");
-        if (Directory.Exists(winget))
+        if (OsInfo.IsWindows && Directory.Exists(winget))
         {
             var hit = Directory.EnumerateDirectories(winget, "Gyan.FFmpeg*")
                 .SelectMany(d => Directory.EnumerateFiles(d, "ffmpeg.exe", SearchOption.AllDirectories)).FirstOrDefault();
             if (hit != null) return hit;
         }
-        var local = Path.Combine(AppPaths.ToolsDir, "ffmpeg", "ffmpeg.exe");
-        return File.Exists(local) ? local : AppPaths.FindInBackupTools("ffmpeg.exe");
+        var local = Path.Combine(AppPaths.ToolsDir, "ffmpeg", OsInfo.Exe("ffmpeg"));
+        return File.Exists(local) ? local : AppPaths.FindInBackupTools(OsInfo.Exe("ffmpeg"));
     }
 
-    /// <summary>Video and audio capture devices (DirectShow) reported by ffmpeg.</summary>
+    /// <summary>
+    /// Video and audio capture devices reported by ffmpeg: DirectShow on Windows, AVFoundation on macOS (capture cards,
+    /// cameras and "Capture screen N"), V4L2 devices + the X11 screen and PulseAudio sources on Linux.
+    /// </summary>
     public static (List<string> Video, List<string> Audio) ListDevices()
     {
         var video = new List<string>();
         var audio = new List<string>();
         var ff = FindFfmpeg();
+        if (OsInfo.IsLinux)
+        {
+            try { video.AddRange(Directory.EnumerateFiles("/dev", "video*").Order().Select(d => $"{d} ({V4lName(d)})")); } catch { }
+            if (Environment.GetEnvironmentVariable("DISPLAY") is { Length: > 0 } display) video.Add($"{LinuxScreen} {display}");
+            audio.Add("default");
+            try
+            {
+                using var pa = Process.Start(new ProcessStartInfo("pactl", "list short sources") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+                foreach (var line in pa.StandardOutput.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    if (line.Split('\t') is { Length: > 1 } cols) audio.Add(cols[1]);
+                pa.WaitForExit(5000);
+            }
+            catch { /* no PulseAudio / PipeWire tools */ }
+            return (video, audio);
+        }
         if (ff == null)
             return (video, audio);
-        var psi = new ProcessStartInfo(ff, "-hide_banner -list_devices true -f dshow -i dummy")
+        var psi = new ProcessStartInfo(ff, OsInfo.IsMac ? "-hide_banner -f avfoundation -list_devices true -i \"\"" : "-hide_banner -list_devices true -f dshow -i dummy")
         { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
         using var p = Process.Start(psi)!;
         var text = p.StandardError.ReadToEnd();
         p.WaitForExit(10000);
+        if (OsInfo.IsMac)
+        {
+            // [AVFoundation indev @ 0x...] AVFoundation video devices:  /  [0] FaceTime HD Camera  /  ... audio devices:
+            var list = video;
+            foreach (var line in text.Split('\n'))
+            {
+                if (line.Contains("video devices")) list = video;
+                else if (line.Contains("audio devices")) list = audio;
+                else if (Regex.Match(line, @"\]\s\[(\d+)\]\s(.+)$") is { Success: true } m) list.Add(m.Groups[2].Value.Trim());
+            }
+            return (video, audio);
+        }
         foreach (Match m in Regex.Matches(text, "\"([^\"]+)\" \\((video|audio)\\)"))
             (m.Groups[2].Value == "video" ? video : audio).Add(m.Groups[1].Value);
         return (video, audio);
+    }
+
+    /// <summary>Linux: the X11 screen as a "device" (ffmpeg x11grab).</summary>
+    public const string LinuxScreen = "Screen (X11)";
+
+    private static string V4lName(string dev)
+    {
+        try { return File.ReadAllText($"/sys/class/video4linux/{Path.GetFileName(dev)}/name").Trim(); } catch { return "video device"; }
+    }
+
+    /// <summary>
+    /// ffmpeg input arguments for a capture source and audio device on this OS, and the -map options that go with them.
+    /// <paramref name="bigBuffers"/>: the longer DirectShow buffers used for full recordings on Windows.
+    /// </summary>
+    public static (string Input, string Maps, bool HasAudio) BuildInput(string source, string audio, bool bigBuffers)
+    {
+        var hasAudio = !string.IsNullOrWhiteSpace(audio) && audio != NoAudio;
+        var dev = source.StartsWith(DevicePrefix) ? source[DevicePrefix.Length..] : source;
+        if (OsInfo.IsMac)
+        {
+            // AVFoundation takes video and audio as one input: "video name:audio name".
+            var input = $"-f avfoundation -framerate 30 -capture_cursor 0 -i \"{dev}:{(hasAudio ? audio : "none")}\"";
+            return (input, hasAudio ? "-map 0:v -map 0:a" : "-map 0:v", hasAudio);
+        }
+        if (OsInfo.IsLinux)
+        {
+            var video = dev.StartsWith(LinuxScreen)
+                ? $"-f x11grab -framerate 30 -draw_mouse 0 -i {dev[LinuxScreen.Length..].Trim()}"
+                : $"-f v4l2 -framerate 30 -i {dev.Split(' ')[0]}";
+            return (video + (hasAudio ? $" -f pulse -i \"{audio}\"" : ""), hasAudio ? "-map 0:v -map 1:a" : "-map 0:v", hasAudio);
+        }
+        string win = source.StartsWith(WindowPrefix)
+            ? $"-f gdigrab -framerate 30 -draw_mouse 0 -i title=\"{source[WindowPrefix.Length..]}\""
+            : $"-f dshow -rtbufsize {(bigBuffers ? "512M" : "256M")} -i video=\"{dev}\"";
+        if (hasAudio) win += $" -f dshow -rtbufsize {(bigBuffers ? "256M" : "128M")} -i audio=\"{audio}\"";
+        return (win, hasAudio ? "-map 0:v -map 1:a" : "-map 0:v", hasAudio);
     }
 
     public static int NextNumber(string folder)
@@ -85,23 +144,9 @@ public sealed class RecordingService
         Directory.CreateDirectory(folder);
         int start = NextNumber(folder);
 
-        string input;
-        if (source.StartsWith(WindowPrefix))
-        {
-            var title = source[WindowPrefix.Length..];
-            input = $"-f gdigrab -framerate 30 -draw_mouse 0 -i title=\"{title}\"";
-        }
-        else
-        {
-            var dev = source.StartsWith(DevicePrefix) ? source[DevicePrefix.Length..] : source;
-            input = $"-f dshow -rtbufsize 512M -i video=\"{dev}\"";
-        }
-        var hasAudio = !string.IsNullOrWhiteSpace(audio) && audio != NoAudio;
-        if (hasAudio)
-            input += $" -f dshow -rtbufsize 256M -i audio=\"{audio}\"";
-
+        var (input, maps, hasAudio) = BuildInput(source, audio, bigBuffers: true);
         var output = Path.Combine(folder, "Recording_%04d.mp4");
-        var args = $"-hide_banner -y {input} -map 0:v{(hasAudio ? " -map 1:a" : "")} " +
+        var args = $"-hide_banner -y {input} {maps} " +
                    "-c:v libx264 -preset veryfast -crf 21 -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
                    (hasAudio ? "-c:a aac -b:a 192k " : "") +
                    $"-f segment -segment_time {segmentSeconds} -reset_timestamps 1 -segment_start_number {start} " +

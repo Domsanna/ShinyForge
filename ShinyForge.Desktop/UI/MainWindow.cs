@@ -1,0 +1,315 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
+using ShinyForge.Core;
+using ShinyForge.Services;
+
+namespace ShinyForge.UI;
+
+/// <summary>The main window: header with the tool buttons, a banner for problems/updates, the page area and a status bar.</summary>
+public sealed class MainWindow : Window
+{
+    private readonly ContentControl _content = new();
+    private readonly TextBlock _crumb = Skin.T("", 13, Skin.Muted, wrap: false);
+    private readonly FancyButton _back = new("Back", Skin.GlyphBack, Skin.PanelHi) { IsVisible = false };
+    private readonly TextBlock _status = Skin.T("Ready.", 11.5, Skin.Muted, wrap: false);
+    private readonly TextBlock _health = Skin.T("● Checking...", 11.5, Skin.Muted, wrap: false);
+    private readonly Border _banner = new() { IsVisible = false, Padding = new Thickness(16, 8) };
+    private readonly Stack<(Func<Control> Factory, string Crumb)> _history = new();
+    private bool? _isSwitch;
+    private bool _askingSwitchIp, _closeConfirmed;
+
+    public MainWindow()
+    {
+        Title = "ShinyForge" + (AppPaths.IsPortable ? "  (portable)" : "");
+        Icon = App.Icon;
+        Width = 1320; Height = 920;
+        MinWidth = 1000; MinHeight = 700;
+        Background = Skin.B(Skin.Bg);
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        _status.TextTrimming = TextTrimming.CharacterEllipsis;
+
+        // ---- header
+        var logo = new Image { Width = 42, Height = 42, Source = App.LoadBitmap(Path.Combine(AppPaths.AssetsDir, "ShinyForge.png")) };
+        _back.Click += (_, _) => GoBack();
+        var left = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 14, VerticalAlignment = VerticalAlignment.Center,
+            Children = { logo, Skin.T("ShinyForge", 22, Skin.Text, FontWeight.Bold, false), _back, _crumb },
+        };
+        _crumb.VerticalAlignment = VerticalAlignment.Center;
+        var guide = new FancyButton("Guide", Skin.GlyphHelp, Skin.PanelHi);
+        guide.Click += async (_, _) => await OpenUserGuide();
+        var stats = new FancyButton("Hunt stats", Skin.GlyphInfo, Skin.PanelHi);
+        stats.Click += (_, _) => new HuntStatsWindow().Show(this);
+        var living = new FancyButton("Living Dex", Skin.GlyphSparkle, Skin.Accent2);
+        living.Click += (_, _) => new LivingDexWindow().Show(this);
+        var tools = new FancyButton("Tools & Updates", Skin.GlyphTools, Skin.PanelHi);
+        tools.Click += async (_, _) => await new ToolsWindow(_isSwitch).ShowDialog(this);
+        var settings = new FancyButton("Settings", Skin.GlyphSettings, Skin.PanelHi);
+        settings.Click += async (_, _) => await new SettingsWindow().ShowDialog(this);
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center, Children = { guide, stats, living, tools, settings } };
+        var header = new Border
+        {
+            Background = Skin.B(Skin.Panel), Padding = new Thickness(16, 10), BorderBrush = Skin.B(Skin.Accent), BorderThickness = new Thickness(0, 0, 0, 3),
+            Child = new DockPanel { Children = { right, left } },
+        };
+        DockPanel.SetDock(right, Dock.Right);
+
+        // ---- status bar
+        _health.Cursor = new Cursor(StandardCursorType.Hand);
+        _health.PointerReleased += async (_, _) => { await new HealthWindow().ShowDialog(this); UpdateHealthLabel(); };
+        var mode = Skin.T($"v{AppInfo.Display}  •  {OsInfo.Name}  •  " + (AppPaths.IsPortable ? "Portable mode  •  data stored next to the program" : $"data in {AppPaths.DataDir}"), 11.5, Skin.Muted, wrap: false);
+        var footerRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 24, Children = { _health, mode } };
+        DockPanel.SetDock(footerRight, Dock.Right);
+        var footer = new Border { Background = Skin.B(Skin.Panel), Padding = new Thickness(14, 5), Child = new DockPanel { Children = { footerRight, _status } } };
+
+        var root = new DockPanel();
+        DockPanel.SetDock(header, Dock.Top);
+        DockPanel.SetDock(_banner, Dock.Top);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        root.Children.Add(header);
+        root.Children.Add(_banner);
+        root.Children.Add(footer);
+        root.Children.Add(_content);
+        Content = root;
+
+        // ---- safety checks for the whole program
+        HealthMonitor.Updated += () => Dialogs.Ui(UpdateHealthLabel);
+        HealthMonitor.Problem += item => Dialogs.Ui(() => OnHealthProblem(item));
+        HuntService.SwitchUnreachable += msg => Dialogs.Ui(async () => await AskNewSwitchIp(msg));
+        UpdateHealthLabel();
+
+        Navigate(BuildPlatformPage, "", root: true);
+        Opened += async (_, _) =>
+        {
+            if (App.ScreenshotDir != null) return;
+            await ShowBackupFolderNoticeOnce();
+            await StartupChecks();
+        };
+        Closing += async (_, e) =>
+        {
+            if (_closeConfirmed || _content.Content is not GamePage { IsRecording: true }) return;
+            e.Cancel = true;
+            if (await Dialogs.YesNo(this, "A recording is in progress. Stop it and exit?"))
+            {
+                _closeConfirmed = true;
+                Close();
+            }
+        };
+    }
+
+    public Control? CurrentPage => _content.Content as Control;
+
+    public void SetStatus(string text)
+    {
+        _status.Text = text;
+        ToolTip.SetTip(_status, text);
+    }
+
+    // ================================================================ health / safety
+    private void UpdateHealthLabel()
+    {
+        var state = HealthMonitor.Overall;
+        var n = HealthMonitor.Items.Count(i => i.State != HealthState.Ok);
+        _health.Foreground = Skin.B(state switch { HealthState.Error => Skin.Bad, HealthState.Warning => Skin.Warn, _ => Skin.Good });
+        _health.Text = state == HealthState.Ok
+            ? $"● All systems OK{(HealthMonitor.LastRun == default ? "" : $" (checked {HealthMonitor.LastRun:HH:mm})")}"
+            : $"● {n} problem{(n == 1 ? "" : "s")} - click for details";
+    }
+
+    private void OnHealthProblem(HealthItem item)
+    {
+        SetStatus($"{(item.State == HealthState.Error ? "Problem" : "Warning")} - {item.Feature}: {item.Message}");
+        ShowBanner($"{item.Feature}: {item.Message}", health: true);
+        Sounds.Play(item.State == HealthState.Error ? Sounds.Kind.Error : Sounds.Kind.Alert);
+    }
+
+    /// <summary>The Switch stopped answering during a hunt: ask for its new IP, then restart the hunt with it.</summary>
+    private async Task AskNewSwitchIp(string why)
+    {
+        if (_askingSwitchIp) return;
+        _askingSwitchIp = true;
+        try
+        {
+            if (await IpPrompt.AskSwitch(this, why + " Its IP address may have changed.") != null && HuntService.RestartPythonHunt())
+                SetStatus($"Switch IP set to {AppSettings.Current.SwitchIP} - the Python hunter was restarted.");
+        }
+        finally { _askingSwitchIp = false; }
+    }
+
+    // ================================================================ navigation
+    private Control BuildPlatformPage()
+    {
+        _isSwitch = null;
+        var p = new PlatformPage();
+        p.Chosen += async isSwitch =>
+        {
+            _isSwitch = isSwitch;
+            AppSettings.Current.LastPlatform = isSwitch ? "switch" : "3ds";
+            AppSettings.Current.Save();
+            await CheckPlatformRequirements();
+            // Each console section asks for the console's IP address first (once per run).
+            if (!isSwitch && await IpPrompt.GetOrAsk(this) == null) return;
+            if (isSwitch && await IpPrompt.GetOrAskSwitch(this) == null) return;
+            Navigate(() => BuildGamesPage(isSwitch), isSwitch ? $"Nintendo Switch  ({AppSettings.Current.SwitchIP})" : $"Nintendo 3DS  ({AppSettings.Current.ThreeDSIP})");
+        };
+        return p;
+    }
+
+    private Control BuildGamesPage(bool isSwitch)
+    {
+        _isSwitch = isSwitch;
+        var p = new GamesPage(isSwitch);
+        p.Chosen += game => Navigate(() => BuildGamePage(game), $"{(isSwitch ? "Nintendo Switch" : "Nintendo 3DS")}  ›  Pokémon {game.Title}");
+        return p;
+    }
+
+    private Control BuildGamePage(Game game)
+    {
+        var p = new GamePage(game);
+        p.StatusMessage += SetStatus;
+        return p;
+    }
+
+    public void Navigate(Func<Control> factory, string crumb, bool root = false)
+    {
+        _ = NavigateAsync(factory, crumb, root);
+    }
+
+    private async Task NavigateAsync(Func<Control> factory, string crumb, bool root)
+    {
+        if (_content.Content is GamePage { IsRecording: true } &&
+            !await Dialogs.YesNo(this, "A recording is in progress - leaving this game stops it. Continue?"))
+            return;
+        if (root) _history.Clear();
+        _history.Push((factory, crumb));
+        ShowPage(factory(), crumb);
+    }
+
+    private async void GoBack()
+    {
+        if (_history.Count <= 1) return;
+        if (_content.Content is GamePage { IsRecording: true } &&
+            !await Dialogs.YesNo(this, "A recording is in progress - leaving this game stops it. Continue?"))
+            return;
+        _history.Pop();
+        var (factory, crumb) = _history.Peek();
+        ShowPage(factory(), crumb);
+    }
+
+    private void ShowPage(Control page, string crumb)
+    {
+        if (_content.Content is IDisposable old) old.Dispose();
+        _content.Content = page;
+        _crumb.Text = crumb;
+        _back.IsVisible = _history.Count > 1;
+    }
+
+    /// <summary>Opens the user guide (next to the program) in the default web browser.</summary>
+    private async Task OpenUserGuide()
+    {
+        var path = Path.Combine(AppPaths.AppDir, "ShinyForge User Guide.html");
+        if (!File.Exists(path)) { await Dialogs.Info(this, "The user guide wasn't found next to ShinyForge:\n" + path); return; }
+        try { Browser.Open(path); }
+        catch (Exception ex) { await Dialogs.Info(this, ex.Message); }
+    }
+
+    /// <summary>FFmpeg is needed for recording on every system: offer it once when a console is chosen.</summary>
+    private async Task CheckPlatformRequirements()
+    {
+        foreach (var dep in DependencyService.All.Where(d => d.Name == "FFmpeg"))
+        {
+            DependencyService.Refresh(dep);
+            if (dep.State == DepState.Missing)
+                await ToolsWindow.AskInstall(this, dep);
+        }
+    }
+
+    /// <summary>Tells the user where the Backup Tools folder is - only once per user account.</summary>
+    private async Task ShowBackupFolderNoticeOnce()
+    {
+        var flag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShinyForge", "backup_folder_notice.flag");
+        var seen = File.Exists(flag) || File.Exists(Path.Combine(AppPaths.DataDir, "backup_folder_notice.flag"));
+        try { Directory.CreateDirectory(Path.GetDirectoryName(flag)!); File.WriteAllText(flag, DateTime.Now.ToString("s")); } catch { }
+        if (seen) return;
+        if (await Dialogs.YesNo(this,
+                "ShinyForge has a Backup Tools folder:\n\n" + AppPaths.BackupToolsDir + "\n\n" +
+                "When ShinyForge starts it first looks for the programs it needs (FFmpeg, Python, pokeldn, esptool...) on this computer. " +
+                "Anything it can't find there, it looks for in this folder - so you can copy programs in by hand as a backup.\n\n" +
+                "You can open it any time from Tools & Updates.\n\nOpen the folder now?", "ShinyForge - Backup Tools folder"))
+            ToolsWindow.OpenBackupFolder();
+    }
+
+    /// <summary>Every start: finds the tools, checks for a new ShinyForge and for tool updates.</summary>
+    private async Task StartupChecks()
+    {
+        await Task.Run(() => { foreach (var d in DependencyService.All) DependencyService.Refresh(d); });
+        if (!AppSettings.Current.CheckUpdatesOnStart) return;
+        SetStatus("Checking for updates...");
+        await CheckAppUpdate(quiet: true);
+        SetStatus("Checking for updates...");
+        try
+        {
+            var updates = await DependencyService.CheckUpdates();
+            var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+            ToolsWindow.LastUpdates = updates;
+            if (updates.Count == 0 && missing.Count == 0) { SetStatus("Everything is up to date."); return; }
+            var parts = new List<string>();
+            if (updates.Count > 0) parts.Add($"{updates.Count} update(s) available ({string.Join(", ", updates.Select(u => u.Item))})");
+            if (missing.Count > 0) parts.Add($"{missing.Count} optional tool(s) not installed ({string.Join(", ", missing.Select(m => m.Name))})");
+            ShowBanner(string.Join("   •   ", parts));
+            SetStatus("Update check finished.");
+        }
+        catch (Exception e)
+        {
+            SetStatus("Update check failed (offline?).");
+            AppPaths.Log("Update check: " + e);
+        }
+    }
+
+    /// <summary>Asks GitHub whether a newer ShinyForge was released and offers it.</summary>
+    public async Task CheckAppUpdate(bool quiet)
+    {
+        AppRelease? r;
+        try { r = await AppUpdateService.CheckAsync(); }
+        catch (Exception e)
+        {
+            AppPaths.Log("ShinyForge update check: " + e.Message);
+            if (!quiet) await Dialogs.Info(this, "Couldn't reach GitHub to check for a new version:\n" + e.Message, "ShinyForge update");
+            return;
+        }
+        if (r == null || !r.IsNewer || (quiet && r.Tag == AppSettings.Current.SkippedAppVersion))
+        {
+            if (!quiet) await Dialogs.Info(this, $"You have the newest ShinyForge: {AppInfo.Display}.", "ShinyForge update");
+            return;
+        }
+        await new UpdateWindow(r).ShowDialog(this);
+    }
+
+    private void ShowBanner(string text, bool health = false)
+    {
+        var close = Skin.T("✕", 16, Skin.Muted, wrap: false);
+        close.Cursor = new Cursor(StandardCursorType.Hand);
+        close.PointerReleased += (_, _) => _banner.IsVisible = false;
+        var review = new FancyButton(health ? "Details" : "Review", health ? Skin.GlyphInfo : Skin.GlyphTools, Skin.Accent) { Height = 32 };
+        review.Click += async (_, _) =>
+        {
+            if (health) { await new HealthWindow().ShowDialog(this); UpdateHealthLabel(); return; }
+            await new ToolsWindow(_isSwitch).ShowDialog(this);
+        };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { review, close } };
+        close.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(buttons, Dock.Right);
+        var msg = Skin.T("⚠  " + text, 13, Skin.Text, wrap: false);
+        msg.TextTrimming = TextTrimming.CharacterEllipsis;
+        msg.VerticalAlignment = VerticalAlignment.Center;
+        _banner.Background = Skin.B(health ? Color.FromRgb(80, 30, 30) : Color.FromRgb(60, 45, 10));
+        _banner.Child = new DockPanel { Children = { buttons, msg } };
+        ToolTip.SetTip(msg, text);
+        _banner.IsVisible = true;
+    }
+}

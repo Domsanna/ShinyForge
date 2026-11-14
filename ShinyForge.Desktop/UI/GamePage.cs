@@ -1,0 +1,871 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
+using PKHeX.Core;
+using ShinyForge.Core;
+using ShinyForge.Services;
+using ShinyForge.Services.ThreeDS;
+
+namespace ShinyForge.UI;
+
+/// <summary>One game: shiny hunting, recording, the Pokédex tracker, and saves (HOME folder, Game Info, Checkpoint, wireless trades).</summary>
+public sealed class GamePage : UserControl, IDisposable
+{
+    private readonly Game _game;
+    private readonly GameSettings _gs;
+    private readonly RecordingService _recorder = new();
+    private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly ShinyClipService _clips = new();
+    private FileSystemWatcher? _watcher;
+    private DispatcherTimer? _liveTimer;
+    private DateTime _lastAutoSync = DateTime.MinValue;
+    private bool _syncing, _disposed;
+    private readonly string _healthKey;
+
+    private TextBlock _huntStatus = Skin.T(""), _recStatus = null!, _saveStatus = null!, _sheetLabel = null!, _trackSaveLabel = null!;
+    private TextBox _folderBox = null!, _recFolder = null!;
+    private LogView _trackLog = null!;
+    private ComboBox? _source, _audio;
+    private ComboBox _segments = null!, _trackSource = null!;
+    private FancyButton _recButton = null!, _downloadSheet = null!;
+    private CheckBox _autoMonitor = null!;
+    private FoundSave? _save;
+    private volatile bool _trackLive;
+    private volatile string? _trackError;
+    private DexWindow? _dex;
+
+    public event Action<string>? StatusMessage;
+    public bool IsRecording => _recorder.IsRecording;
+
+    public GamePage(Game game)
+    {
+        _game = game;
+        _gs = AppSettings.Current.For(game.Id);
+        _healthKey = "game-" + game.Id;
+
+        var info = Skin.T($"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
+                           (HuntService.OptionsFor(game).Count > 0 || Games3DS.All.Any(p => p.ShinyForgeId == game.Id) ? "★ Automatic shiny hunting available.\n" : "") +
+                           "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date, back up every Pokémon " +
+                           "from your save into a 'Pokemon Home' folder and get a Game Info report.", 13, Skin.Muted);
+        info.Margin = new Thickness(20, 24, 20, 0);
+        info.MaxWidth = 640;
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 4, 0, 0), Children = { new GameTile(game, large: true), info } };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), RowDefinitions = new RowDefinitions("500,610"), Margin = new Thickness(10, 6, 10, 20) };
+        void Put(Control c, int col, int row) { Grid.SetColumn(c, col); Grid.SetRow(c, row); grid.Children.Add(c); }
+        Put(BuildHuntCard(), 0, 0);
+        Put(BuildRecordCard(), 1, 0);
+        Put(BuildTrackerCard(), 0, 1);
+        Put(BuildSaveCard(), 1, 1);
+        Content = new ScrollViewer { Content = new StackPanel { Children = { header, grid } } };
+
+        _recorder.Status += s => Dialogs.Ui(() => _recStatus.Text = s);
+        _poll.Tick += (_, _) => RefreshHuntStatus();
+        _poll.Start();
+        if (_gs.AutoMonitor && App.ScreenshotDir == null) Dispatcher.UIThread.Post(() => _autoMonitor.IsChecked = true);
+        HealthMonitor.Register(_healthKey, CheckHealth);
+        if (game.Bot == BotKind.FrlgSwitch) HuntService.Found += OnFound;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        HealthMonitor.Unregister(_healthKey);
+        HuntService.Found -= OnFound;
+        _clips.Stop();
+        _recorder.Stop();
+        _hunt3ds?.Cancel();
+        _poll.Stop();
+        _watcher?.Dispose();
+        _liveTimer?.Stop();
+    }
+
+    private IEnumerable<HealthItem> CheckHealth()
+    {
+        var items = new List<HealthItem>();
+        if (_recorder.CheckHealth() is { } r)
+            items.Add(r.Error ? HealthMonitor.Error($"Recording ({_game.Title})", r.Message) : HealthMonitor.Warn($"Recording ({_game.Title})", r.Message));
+        if (_gs.AutoMonitor && !_trackLive && !Directory.Exists(_gs.GameFolder))
+            items.Add(HealthMonitor.Warn($"Collection tracker ({_game.Title})", $"Monitoring is on but the game folder '{_gs.GameFolder}' doesn't exist (drive unplugged?)."));
+        if (_gs.AutoMonitor && _trackLive)
+        {
+            var s = AppSettings.Current;
+            if (!HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 2500))
+                items.Add(HealthMonitor.Error($"Collection tracker ({_game.Title})", $"Live monitoring can't reach the Switch at {s.SwitchIP} - its IP may have changed."));
+        }
+        if (_hunt3ds != null && (DateTime.Now - _last3dsActivity).TotalMinutes > 4)
+            items.Add(HealthMonitor.Warn($"3DS hunt ({_game.Title})", $"No activity from the 3DS bot for {(int)(DateTime.Now - _last3dsActivity).TotalMinutes} minutes - is the game still running?"));
+        if (_trackError != null)
+            items.Add(HealthMonitor.Warn($"Collection tracker ({_game.Title})", "Last sync failed: " + _trackError));
+        if (_clips.Problem() is { } cp)
+        {
+            items.Add(HealthMonitor.Warn($"Shiny clips ({_game.Title})", cp + " - restarting it."));
+            Dialogs.Ui(StartClipBuffer);
+        }
+        return items;
+    }
+
+    // ================================================================ helpers
+    private static TextBlock Info(string t, Color? c = null) { var b = Skin.T(t, 13, c ?? Skin.Muted); b.Margin = new Thickness(0, 4); return b; }
+    private void Status(string s) => StatusMessage?.Invoke(s);
+    private static string? Sel(ComboBox? c) => c?.SelectedItem as string;
+
+    private async Task<bool> EnsureDependency(string name)
+    {
+        var dep = DependencyService.All.FirstOrDefault(d => d.Name == name);
+        if (dep == null) return true; // not a tool on this OS
+        DependencyService.Refresh(dep);
+        if (dep.State != DepState.Missing) return true;
+        await ToolsWindow.AskInstall(this, dep);
+        DependencyService.Refresh(dep);
+        return dep.State != DepState.Missing;
+    }
+
+    // ================================================================ shiny hunt
+    private Card BuildHuntCard()
+    {
+        var card = new Card(Skin.GlyphSparkle, "Shiny Hunt (automatic)");
+        var profile3ds = Games3DS.All.FirstOrDefault(g => g.ShinyForgeId == _game.Id);
+        if (profile3ds != null) { Build3DSHunt(card, profile3ds); return card; }
+        var options = HuntService.OptionsFor(_game);
+        if (options.Count == 0)
+        {
+            card.Body.Children.Add(Info(HuntService.UnsupportedReason(_game)));
+            return card;
+        }
+        var radios = new List<RadioButton>();
+        foreach (var o in options)
+        {
+            var rb = new RadioButton { Content = Skin.T(o.Title, 13.5, Skin.Text, FontWeight.SemiBold), Tag = o.Key, GroupName = "bot-" + _game.Id, IsChecked = radios.Count == 0 || _gs.HuntBot == o.Key };
+            radios.Add(rb);
+            card.Body.Children.Add(rb);
+            var d = Info(o.Description);
+            d.Margin = new Thickness(28, 0, 0, 4);
+            card.Body.Children.Add(d);
+        }
+        card.Body.Children.Add(Info($"Switch: {AppSettings.Current.SwitchIP}:{AppSettings.Current.SwitchPort} (sys-botbase) - change in Settings."));
+        var start = new FancyButton("Start hunting", Skin.GlyphPlay, Skin.Accent);
+        var stop = new FancyButton("Stop Python hunter", Skin.GlyphStop, Skin.StopRed);
+        start.Click += async (_, _) =>
+        {
+            var key = radios.First(r => r.IsChecked == true).Tag as string ?? "";
+            if (key == "python" && !await EnsureDependency("Python 3")) return;
+            if (key == "sysbot" && !await EnsureDependency("SysBot.exe")) return;
+            if (!await IpPrompt.EnsureSwitch(this)) return;
+            try
+            {
+                _gs.HuntBot = key;
+                AppSettings.Current.Save();
+                HuntService.ResetAutoFixes();
+                HuntService.Start(_game, key);
+                Status(key == "python"
+                    ? OsInfo.IsWindows ? "Python hunter started in its own window." : "Python hunter started - its output goes to hunt_console.log in the bot folder."
+                    : "SysBot.exe opened with the routine pre-selected - press Start All there.");
+                if (key == "python") StartClipBuffer();
+            }
+            catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Shiny Hunt"); }
+            RefreshHuntStatus();
+        };
+        stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); };
+        card.Body.Children.Add(options.Any(o => o.Key == "python") ? Skin.Wrap(start, stop) : Skin.Wrap(start));
+        if (_game.Bot == BotKind.FrlgSwitch)
+        {
+            var pause = new FancyButton("Pause / Resume", Skin.GlyphStop, Skin.PanelHi);
+            pause.Click += (_, _) =>
+            {
+                HuntService.SetPaused(!HuntService.IsPaused);
+                Status(HuntService.IsPaused ? "Python hunter will pause after the current attempt." : "Python hunter resumed.");
+                RefreshHuntStatus();
+            };
+            var opts = new FancyButton("Hunt options", Skin.GlyphSettings, Skin.PanelHi);
+            opts.Click += async (_, _) => { await new HuntOptionsWindow(rngAvailable: true).ShowDialog(Dialogs.Owner(this)!); RefreshHuntStatus(); };
+            var stats = new FancyButton("Statistics", Skin.GlyphInfo, Skin.PanelHi);
+            stats.Click += (_, _) => new HuntStatsWindow("Python").Show(Dialogs.Owner(this)!);
+            card.Body.Children.Add(Skin.Wrap(pause, opts, stats));
+        }
+        _huntStatus = Info("", Skin.Good);
+        card.Body.Children.Add(_huntStatus);
+        return card;
+    }
+
+    // ---------------------------------------------------------------- 3DS hunting (Luma3DS)
+    private CancellationTokenSource? _hunt3ds;
+    private DateTime _last3dsActivity = DateTime.Now;
+    private Bot3DS? _bot3ds;
+    private static int _3dsHunts;
+    /// <summary>Is a 3DS hunt running on any game page (for keep-awake)?</summary>
+    public static bool Any3DSHunt => _3dsHunts > 0;
+
+    private void Build3DSHunt(Card card, Game3DS profile)
+    {
+        card.Body.Children.Add(Info("Controls your 3DS over WiFi (Luma3DS: Rosalina → InputRedirection + Debugger options → Enable debugger). Recognises the game, logs every encounter and stops on a shiny."));
+        var mode = Skin.Combo(new[] { "Auto (detects static vs. wild)", "Soft reset (static / legendary)", "Wild encounters (walk + run)" }, null, 330);
+        var axis = Skin.Combo(new[] { "Left / Right", "Up / Down" }, null, 150);
+        card.Body.Children.Add(Skin.Row(Skin.T("Mode", 13, Skin.Text, wrap: false), mode));
+        card.Body.Children.Add(Skin.Row(Skin.T("Walk", 13, Skin.Text, wrap: false), axis));
+        var log = Skin.LogBox(150);
+        void Say(string s) => Dialogs.Ui(() => Skin.Append(log, $"[{DateTime.Now:HH:mm:ss}] {s}"));
+        var start = new FancyButton("Start hunting", Skin.GlyphPlay, Skin.Accent);
+        var stop = new FancyButton("Stop", Skin.GlyphStop, Skin.StopRed) { IsEnabled = false };
+        var test = new FancyButton("Test connection", Skin.GlyphWifi, Skin.PanelHi);
+
+        test.Click += async (_, _) =>
+        {
+            var ip = await IpPrompt.GetChecked3DS(this);
+            if (ip == null) return;
+            Say($"Testing {ip}...");
+            await Task.Run(() =>
+            {
+                var bot = new Bot3DS(new Bot3DSOptions { Host = ip });
+                bot.Log += Say;
+                try
+                {
+                    var g = bot.Connect(profile.ShinyForgeId);
+                    var pk = bot.ReadWild();
+                    Say(pk == null ? "Connected. No wild Pokémon in memory right now." : "Last/current wild Pokémon:\n" + Bot3DS.Format(pk));
+                    if (g.ShinyForgeId != profile.ShinyForgeId) Say($"Note: the 3DS is running {g.Name}, not {_game.Title}.");
+                }
+                catch (Exception ex) { Say("Connection test failed: " + ex.Message); }
+                finally { bot.Close(); }
+            });
+        };
+
+        async Task StartHunt()
+        {
+            var ip = await IpPrompt.GetChecked3DS(this);
+            if (ip == null) return;
+            var options = new Bot3DSOptions
+            {
+                Host = ip,
+                Mode = mode.SelectedIndex switch { 1 => Hunt3DSMode.StaticSoftReset, 2 => Hunt3DSMode.WildWalking, _ => Hunt3DSMode.Auto },
+                WalkHorizontal = axis.SelectedIndex == 0,
+                StopRule = StopRuleFor3DS(),
+            };
+            _bot3ds = new Bot3DS(options);
+            _bot3ds.Log += s => { _last3dsActivity = DateTime.Now; Say(s); };
+            _bot3ds.Warning += w => HealthMonitor.Report($"3DS hunt ({_game.Title})", HealthState.Warning, w);
+            _bot3ds.Encounter += (pk, isStop) =>
+            {
+                if (!isStop) return;
+                var name = SpeciesName.GetSpeciesName(pk.Species, 2);
+                OnFound(name, pk.IsShiny);
+                if (AppSettings.Current.NotifyShiny)
+                    NotifyService.Send((pk.IsShiny ? "✨ Shiny " : "Found ") + name + " on the 3DS!",
+                        $"{_game.Title}: {name} Lv.{pk.CurrentLevel}, {(Nature)pk.Nature}, IVs {pk.IV_HP + pk.IV_ATK + pk.IV_DEF + pk.IV_SPA + pk.IV_SPD + pk.IV_SPE}/186. " +
+                        "The bot stopped - the game is waiting in the battle.", important: true);
+            };
+            WebServer.RemoteAction = what =>
+            {
+                if (what != "stop") return "The phone remote can only stop the 3DS bot.";
+                _hunt3ds?.Cancel();
+                return "Stopping the 3DS hunt.";
+            };
+            WebServer.RemoteStatus = () => $"3DS bot ({_game.Title}): " + (_hunt3ds != null ? "hunting" : "stopped");
+            StartClipBuffer();
+            _hunt3ds = new CancellationTokenSource();
+            var token = _hunt3ds.Token;
+            _last3dsActivity = DateTime.Now;
+            start.IsEnabled = false; stop.IsEnabled = true;
+            Interlocked.Increment(ref _3dsHunts);
+            var bot = _bot3ds;
+            _ = Task.Run(() =>
+            {
+                Exception? failure = null;
+                try { bot.Connect(profile.ShinyForgeId); bot.Run(token); }
+                catch (Exception ex) { failure = ex; Say("Stopped: " + ex.Message); }
+                finally
+                {
+                    bot.Close();
+                    _hunt3ds = null;
+                    Interlocked.Decrement(ref _3dsHunts);
+                    WebServer.RemoteAction = null;
+                    WebServer.RemoteStatus = null;
+                    Dialogs.Ui(() => { start.IsEnabled = true; stop.IsEnabled = false; _clips.Stop(); });
+                }
+                // Lost the 3DS and it no longer answers at that IP: ask for its new address and restart.
+                if (failure is IOException or System.Net.Sockets.SocketException or TimeoutException ||
+                    failure?.InnerException is IOException or System.Net.Sockets.SocketException)
+                {
+                    HealthMonitor.Report($"3DS hunt ({_game.Title})", HealthState.Error, "Lost the connection to the 3DS: " + failure!.Message);
+                    if (!HealthMonitor.CanReach(AppSettings.Current.ThreeDSIP, 4000, 2500))
+                        Dialogs.Ui(async () =>
+                        {
+                            if (await IpPrompt.Ask(this, $"Lost the connection to the 3DS at {AppSettings.Current.ThreeDSIP}. Its IP address may have changed.") != null)
+                                await StartHunt();
+                        });
+                }
+            });
+        }
+        start.Click += async (_, _) => await StartHunt();
+        stop.Click += (_, _) => { _hunt3ds?.Cancel(); Say("Stopping..."); };
+        card.Body.Children.Add(Skin.Wrap(start, stop, test));
+        var rules = new FancyButton("Stop rules", Skin.GlyphSettings, Skin.PanelHi);
+        rules.Click += async (_, _) => await new HuntOptionsWindow(rngAvailable: false).ShowDialog(Dialogs.Owner(this)!);
+        var stats = new FancyButton("Statistics", Skin.GlyphInfo, Skin.PanelHi);
+        stats.Click += (_, _) => new HuntStatsWindow(_game.Title).Show(Dialogs.Owner(this)!);
+        card.Body.Children.Add(Skin.Wrap(rules, stats));
+        card.Body.Children.Add(log);
+        card.Body.Children.Add(Info($"Encounters are logged to {Path.Combine(AppPaths.DataDir, "3ds_encounters.csv")}"));
+    }
+
+    /// <summary>The stop rules from Hunt options, as a check for the 3DS bot (null = shinies only).</summary>
+    private static Func<PKM, string?>? StopRuleFor3DS()
+    {
+        var o = AppSettings.Current.Hunt;
+        if (!o.HasStopRules) return null;
+        var species = o.StopSpecies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        return pk =>
+        {
+            var checks = new List<(string Name, bool Ok)>();
+            var name = SpeciesName.GetSpeciesName(pk.Species, 2);
+            if (species.Count > 0) checks.Add(("species " + name, species.Contains(name, StringComparer.OrdinalIgnoreCase)));
+            var nature = ((Nature)pk.Nature).ToString();
+            if (o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
+            var ivs = new Dictionary<string, int> { ["HP"] = pk.IV_HP, ["Atk"] = pk.IV_ATK, ["Def"] = pk.IV_DEF, ["SpA"] = pk.IV_SPA, ["SpD"] = pk.IV_SPD, ["Spe"] = pk.IV_SPE };
+            if (o.MinIvTotal > 0) checks.Add(($"IV total {ivs.Values.Sum()}", ivs.Values.Sum() >= o.MinIvTotal));
+            foreach (var (k, v) in o.MinIvs.Where(kv => kv.Value > 0)) checks.Add(($"{k} IV {ivs[k]}", ivs[k] >= v));
+            var hits = checks.Where(c => c.Ok).Select(c => c.Name).ToList();
+            var match = o.RequireAll ? hits.Count == checks.Count && checks.Count > 0 : hits.Count > 0;
+            return match ? "matches your stop rules (" + string.Join(", ", hits) + ")" : null;
+        };
+    }
+
+    private void RefreshHuntStatus()
+    {
+        if (_game.Bot != BotKind.FrlgSwitch) return;
+        _ = Task.Run(() =>
+        {
+            var running = HuntService.IsPythonHuntRunning();
+            var o = AppSettings.Current.Hunt;
+            var extras = new List<string>();
+            if (o.RngEnabled) extras.Add("RNG manipulation ON");
+            if (o.AutoCatch != "off") extras.Add("auto-catch " + (o.AutoCatch == "all" ? "everything" : "non-legendary"));
+            if (o.HasStopRules) extras.Add("extra stop rules");
+            if (_clips.Running) extras.Add("shiny clip buffer");
+            Dialogs.Ui(() => _huntStatus.Text = (running ? (HuntService.IsPaused ? "⏸ Python hunter is PAUSED" : "● Python hunter is running") : "") +
+                                               (extras.Count > 0 ? $"{(running ? "  •  " : "")}{string.Join(", ", extras)}" : ""));
+            if (!running && _clips.Running && _hunt3ds == null) Dialogs.Ui(() => _clips.Stop());
+        });
+    }
+
+    /// <summary>Starts the rolling clip buffer from this game's capture source (Record card) - unless already recording.</summary>
+    private void StartClipBuffer()
+    {
+        if (!AppSettings.Current.ShinyClips || _recorder.IsRecording || _clips.Running) return;
+        var source = Sel(_source) ?? _gs.VideoSource;
+        if (string.IsNullOrWhiteSpace(source) || source.StartsWith("(")) return;
+        _clips.Start(source, Sel(_audio) ?? RecordingService.NoAudio, _game.Id,
+            Directory.Exists(_gs.RecordingFolder) ? Path.Combine(_gs.RecordingFolder, "Shiny Clips") : ShinyClipService.DefaultFolder);
+        if (_clips.Running) Status("Shiny clip buffer running - the last " + AppSettings.Current.ShinyClipSeconds + " s are saved when a shiny appears.");
+    }
+
+    /// <summary>Something was found: save the clip (or point at the running recording).</summary>
+    private void OnFound(string species, bool shiny)
+    {
+        Dialogs.Ui(() => Status($"{(shiny ? "★ Shiny " : "Found ")}{species}! {(_recorder.IsRecording ? "It's in the current recording." : "")}"));
+        if (_clips.Running)
+            _ = Task.Run(async () =>
+            {
+                var clip = await _clips.SaveClipAsync((shiny ? "shiny_" : "") + species);
+                if (clip == null) return;
+                Dialogs.Ui(() => Status("Clip saved: " + clip));
+                if (AppSettings.Current.NotifyShiny) NotifyService.Send("Clip saved", $"{species}: {Path.GetFileName(clip)}");
+            });
+    }
+
+    // ================================================================ recording
+    private Card BuildRecordCard()
+    {
+        var card = new Card(Skin.GlyphRecord, "Record Gameplay", Skin.Bad);
+        card.Body.Children.Add(Info("Records continuously, split into numbered files with no gap between them."));
+        _recStatus = Info("Looking for capture devices...");
+        _recFolder = Skin.Input(_gs.RecordingFolder, 330);
+        _segments = Skin.Combo(new[] { "5", "10", "15", "20", "30" }, _gs.SegmentMinutes.ToString(), 100);
+        var sourceRow = Skin.Row(Skin.T("Video", 13, Skin.Text, wrap: false));
+        var audioRow = Skin.Row(Skin.T("Audio", 13, Skin.Text, wrap: false));
+        card.Body.Children.Add(sourceRow);
+        card.Body.Children.Add(audioRow);
+        card.Body.Children.Add(Skin.Row(Skin.T("Segment length (minutes)", 13, Skin.Text, wrap: false), _segments));
+        var browse = new FancyButton("Browse", Skin.GlyphFolder, Skin.PanelHi);
+        browse.Click += async (_, _) => { if (await Dialogs.PickFolder(this, "Where should recordings be saved?", _recFolder.Text) is { } f) _recFolder.Text = f; };
+        card.Body.Children.Add(Skin.Row(Skin.T("Folder", 13, Skin.Text, wrap: false), _recFolder, browse));
+        _recButton = new FancyButton("Start recording", Skin.GlyphRecord, Color.FromRgb(190, 30, 50));
+        _recButton.Click += async (_, _) => await ToggleRecording();
+        var open = new FancyButton("Open folder", Skin.GlyphFolder, Skin.PanelHi);
+        open.Click += (_, _) => { if (Directory.Exists(_recFolder.Text)) OsInfo.OpenFolder(_recFolder.Text!); };
+        var buttons = Skin.Wrap(_recButton, open);
+        if (!_game.IsSwitch && OsInfo.IsWindows)
+        {
+            var launch = new FancyButton("Open 3DS Capture", Skin.GlyphUsb, Skin.PanelHi);
+            launch.Click += async (_, _) => await Launch3DSCapture();
+            buttons.Children.Add(launch);
+        }
+        card.Body.Children.Add(buttons);
+        card.Body.Children.Add(_recStatus);
+
+        // Capture devices are listed by ffmpeg in the background (it can take a moment).
+        _ = Task.Run(RecordingService.ListDevices).ContinueWith(t => Dialogs.Ui(() =>
+        {
+            var (video, audio) = t.IsFaulted ? (new List<string>(), new List<string>()) : t.Result;
+            var sources = new List<string>();
+            if (OsInfo.IsWindows && !_game.IsSwitch) sources.AddRange(new[] { RecordingService.WindowPrefix + "3DS Capture - Top", RecordingService.WindowPrefix + "3DS Capture - Bottom" });
+            sources.AddRange(OsInfo.IsWindows ? video.Select(v => RecordingService.DevicePrefix + v) : video);
+            if (OsInfo.IsWindows && _game.IsSwitch) sources.Add(RecordingService.WindowPrefix + "Streamlabs Desktop");
+            if (sources.Count == 0) sources.Add("(no capture device found - install FFmpeg and plug in the capture card)");
+            var def = !string.IsNullOrEmpty(_gs.VideoSource) && sources.Contains(_gs.VideoSource) ? _gs.VideoSource
+                : sources.FirstOrDefault(s => s.Contains("Capture", StringComparison.OrdinalIgnoreCase) && !s.Contains("screen", StringComparison.OrdinalIgnoreCase)) ?? sources[0];
+            _source = Skin.Combo(sources, def, 420);
+            var audios = new List<string> { RecordingService.NoAudio };
+            audios.AddRange(audio);
+            var defAudio = !string.IsNullOrEmpty(_gs.AudioDevice) && audios.Contains(_gs.AudioDevice) ? _gs.AudioDevice
+                : audios.FirstOrDefault(a => a.Contains("Capture", StringComparison.OrdinalIgnoreCase)) ?? RecordingService.NoAudio;
+            _audio = Skin.Combo(audios, defAudio, 420);
+            sourceRow.Children.Add(_source);
+            audioRow.Children.Add(_audio);
+            _recStatus.Text = "Not recording.";
+        }));
+        return card;
+    }
+
+    private async Task Launch3DSCapture()
+    {
+        if (!await EnsureDependency("3DS Capture")) return;
+        var cap = DependencyService.PathOf("3DS Capture");
+        if (cap != null && System.Diagnostics.Process.GetProcessesByName("3ds_capture").Length == 0)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(cap) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(cap)! });
+    }
+
+    private async Task ToggleRecording()
+    {
+        if (_recorder.IsRecording)
+        {
+            _recorder.Stop();
+            _recButton.Text = "Start recording";
+            return;
+        }
+        if (!await EnsureDependency("FFmpeg")) return;
+        if (_source == null || (Sel(_source) ?? "").StartsWith("(")) { await Dialogs.Info(this, "No capture device was found. Install FFmpeg, plug in the capture card, then open this game again.", "Recording"); return; }
+        if (string.IsNullOrWhiteSpace(_recFolder.Text) || !Directory.Exists(_recFolder.Text))
+        {
+            if (await Dialogs.PickFolder(this, "Choose the folder for the recordings (files are numbered automatically)", _recFolder.Text) is not { } f) return;
+            _recFolder.Text = f;
+        }
+        var source = Sel(_source) ?? "";
+        if (source.Contains("3DS Capture")) { await Launch3DSCapture(); await Task.Delay(1500); }
+        _gs.RecordingFolder = _recFolder.Text!;
+        _gs.SegmentMinutes = int.Parse(Sel(_segments) ?? "10");
+        _gs.VideoSource = source;
+        _gs.AudioDevice = Sel(_audio) ?? "";
+        AppSettings.Current.Save();
+        try
+        {
+            _clips.Stop(); // one capture device can't be opened twice
+            _recorder.Start(source, _gs.AudioDevice, _gs.RecordingFolder, _gs.SegmentMinutes);
+            _recButton.Text = "Stop recording";
+        }
+        catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Recording"); }
+    }
+
+    // ================================================================ collection tracker
+    private Card BuildTrackerCard()
+    {
+        var card = new Card(Skin.GlyphSheet, "Collection Tracker → Pokédex spreadsheet", Skin.Good);
+        var wb = SpreadsheetService.FindWorkbook(_game);
+        _sheetLabel = Info(SpreadsheetService.Describe(_game, wb), wb != null ? Skin.Text : Skin.Warn);
+        card.Body.Children.Add(_sheetLabel);
+        var change = new FancyButton("Choose spreadsheet", Skin.GlyphSheet, Skin.PanelHi);
+        change.Click += async (_, _) =>
+        {
+            var cur = SpreadsheetService.FindWorkbook(_game);
+            var start = cur != null ? Path.GetDirectoryName(cur) : Directory.Exists(AppSettings.Current.SpreadsheetRoot) ? AppSettings.Current.SpreadsheetRoot : SpreadsheetService.BundledRoot;
+            if (await Dialogs.PickFile(this, "Choose the Pokédex tracker", start, ("Excel workbooks", new[] { "*.xlsm", "*.xlsx" })) is not { } file) return;
+            _gs.SpreadsheetPath = file;
+            AppSettings.Current.Save();
+            RefreshSheetLabel();
+        };
+        var auto = new FancyButton("Auto-recognize", Skin.GlyphSync, Skin.PanelHi);
+        auto.Click += (_, _) => { _gs.SpreadsheetPath = ""; AppSettings.Current.Save(); RefreshSheetLabel(); };
+        var open = new FancyButton("Open", Skin.GlyphSheet, Skin.PanelHi);
+        open.Click += (_, _) => { if (SpreadsheetService.FindWorkbook(_game) is { } cur) OsInfo.Open(cur); };
+        card.Body.Children.Add(Skin.Wrap(change, auto, open));
+        var dex = new FancyButton("Pokédex (pop-out)", Skin.GlyphSparkle, Skin.Accent2);
+        dex.Click += (_, _) => OpenDex();
+        _downloadSheet = new FancyButton("Download tracker", Skin.GlyphDownload, Skin.Accent) { IsVisible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet) };
+        _downloadSheet.Click += async (_, _) => await DownloadTracker();
+        card.Body.Children.Add(Skin.Wrap(dex, _downloadSheet));
+
+        var sources = new List<string> { "Save file" };
+        if (_game.Bot == BotKind.FrlgSwitch) sources.Insert(0, "Live from the Switch (party + PC boxes)");
+        _trackSource = Skin.Combo(sources, null, 360);
+        _trackLive = (Sel(_trackSource) ?? "").StartsWith("Live");
+        _trackSource.SelectionChanged += (_, _) => _trackLive = (Sel(_trackSource) ?? "").StartsWith("Live");
+        card.Body.Children.Add(Skin.Row(Skin.T("Read from", 13, Skin.Text, wrap: false), _trackSource));
+
+        _trackSaveLabel = Info("Save file: searching...");
+        var pickSave = new FancyButton("Choose save file...", Skin.GlyphSave, Skin.PanelHi);
+        pickSave.Click += async (_, _) => await ChooseTrackerSave();
+        var autoSave = new FancyButton("Use auto-detected", Skin.GlyphSync, Skin.PanelHi);
+        autoSave.Click += (_, _) => { _gs.SaveFilePath = ""; AppSettings.Current.Save(); UpdateTrackerSaveLabel(); };
+        card.Body.Children.Add(_trackSaveLabel);
+        card.Body.Children.Add(Skin.Wrap(pickSave, autoSave));
+
+        var sync = new FancyButton("Sync now", Skin.GlyphSync, Skin.Accent) { IsEnabled = SpreadsheetService.CanUpdate };
+        sync.Click += async (_, _) => await SyncTracker(manual: true);
+        _autoMonitor = Skin.Check("Monitor automatically", false);
+        _autoMonitor.IsEnabled = SpreadsheetService.CanUpdate;
+        _autoMonitor.IsCheckedChanged += (_, _) => SetMonitoring(_autoMonitor.IsChecked == true);
+        card.Body.Children.Add(Skin.Wrap(sync, _autoMonitor));
+        card.Body.Children.Add(Info(SpreadsheetService.CanUpdate
+            ? "Marks 'In Box', 'OT' (caught by you) and 'Shiny' as Y for every Pokémon in your party and boxes. Only N → Y changes are made; your own marks are never removed."
+            : $"Updating the tracker uses Microsoft Excel on Windows (it keeps the trackers' macros and pictures intact), so Sync isn't available on {OsInfo.Name}. " +
+              "Open the tracker with Open, and see what you own in the Pokédex window."));
+        _trackLog = Skin.LogBox(110);
+        card.Body.Children.Add(_trackLog);
+        Dispatcher.UIThread.Post(UpdateTrackerSaveLabel);
+        return card;
+    }
+
+    private void Log(string s) => Dialogs.Ui(() => Skin.Append(_trackLog, $"[{DateTime.Now:HH:mm:ss}] {s}"));
+
+    private void RefreshSheetLabel()
+    {
+        var wb = SpreadsheetService.FindWorkbook(_game);
+        _sheetLabel.Text = SpreadsheetService.Describe(_game, wb);
+        _sheetLabel.Foreground = Skin.B(wb != null ? Skin.Text : Skin.Warn);
+        _downloadSheet.IsVisible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet);
+    }
+
+    /// <summary>Downloads this game's Pokédex tracker from ShinyForge's GitHub page.</summary>
+    private async Task DownloadTracker()
+    {
+        _downloadSheet.IsEnabled = false;
+        try
+        {
+            _sheetLabel.Foreground = Skin.B(Skin.Muted);
+            _sheetLabel.Text = "Looking up the tracker on ShinyForge's GitHub page...";
+            var entry = SheetsDownloadService.EntryFor(_game, await SheetsDownloadService.ManifestAsync());
+            if (entry == null) { _sheetLabel.Text = $"No published tracker for Pokémon {_game.Title} was found."; return; }
+            if (!await Dialogs.YesNo(this, $"Download the Pokémon {_game.Title} tracker ({entry.Size / 1048576.0:N0} MB) into\n{SpreadsheetService.BundledRoot}?", "Pokédex tracker")) return;
+            var path = await SheetsDownloadService.DownloadAsync(entry, s => Dialogs.Ui(() => _sheetLabel.Text = s));
+            Status("Tracker downloaded: " + path);
+        }
+        catch (Exception ex) { await Dialogs.Info(this, "Couldn't download the tracker: " + ex.Message, "Pokédex tracker"); }
+        finally { _downloadSheet.IsEnabled = true; RefreshSheetLabel(); }
+    }
+
+    private void OpenDex()
+    {
+        if (_dex is { IsVisible: true }) { _dex.Activate(); return; }
+        _dex = new DexWindow(_game, LoadCollectionForDex);
+        _dex.Show();
+    }
+
+    /// <summary>What you own for the Pokédex window: the live Switch game if that source is selected, else the tracker's save file.</summary>
+    private Collection? LoadCollectionForDex(Action<string> progress)
+    {
+        if (_trackLive)
+        {
+            if (!HealthMonitor.CanReach(AppSettings.Current.SwitchIP, AppSettings.Current.SwitchPort, 2500))
+                throw new InvalidOperationException($"Can't reach the Switch at {AppSettings.Current.SwitchIP} - check its IP (Settings, or start a hunt).");
+            progress("Reading party and PC boxes from the Switch...");
+            var s = AppSettings.Current;
+            using var lf = new LiveFrlg(s.SwitchIP, s.SwitchPort);
+            return lf.ReadCollection();
+        }
+        progress("Reading the save file...");
+        var save = ResolveTrackerSave();
+        return save == null ? null : Collection.FromSave(save.Save, save.Path);
+    }
+
+    private FoundSave? ResolveTrackerSave()
+    {
+        if (!string.IsNullOrWhiteSpace(_gs.SaveFilePath) && File.Exists(_gs.SaveFilePath) && SaveUtil.TryGetSaveFile(_gs.SaveFilePath, out var chosen) && chosen != null)
+            return new FoundSave(_gs.SaveFilePath, chosen);
+        return _save ?? SaveService.FindSaves(_gs.GameFolder, _game).FirstOrDefault();
+    }
+
+    private void UpdateTrackerSaveLabel()
+    {
+        Task.Run(ResolveTrackerSave).ContinueWith(t => Dialogs.Ui(() =>
+        {
+            var s = t.IsFaulted ? null : t.Result;
+            var picked = !string.IsNullOrWhiteSpace(_gs.SaveFilePath) && s?.Path == _gs.SaveFilePath;
+            _trackSaveLabel.Foreground = Skin.B(s != null ? Skin.Good : Skin.Warn);
+            _trackSaveLabel.Text = s == null
+                ? "Save file: none found - choose one, use Find in Checkpoint, or set the game folder in the Pokémon HOME card."
+                : $"Save file ({(picked ? "chosen by you" : "auto-detected")}): {Path.GetFileName(s.Path)} - {s.Save.OT}, {s.Save.Version}, {s.Save.PlayedHours}h {s.Save.PlayedMinutes:00}m\n    {Path.GetDirectoryName(s.Path)}";
+        }));
+    }
+
+    private async Task ChooseTrackerSave()
+    {
+        if (await Dialogs.PickFile(this, $"Choose a Pokémon {_game.Title} save file", Directory.Exists(_gs.GameFolder) ? _gs.GameFolder : null,
+                ("Save files", new[] { "*.sav", "*.dsv", "*.sa1", "*.srm", "*.bin", "main" })) is not { } file) return;
+        if (!SaveUtil.TryGetSaveFile(file, out var sav) || sav == null) { await Dialogs.Info(this, "That file isn't a Pokémon save file PKHeX can read.", "Choose save file"); return; }
+        if (!_game.Versions.Contains(sav.Version) && !await Dialogs.YesNo(this, $"This save is from Pokémon {sav.Version}, not {_game.Title}. Use it anyway?", "Choose save file")) return;
+        _gs.SaveFilePath = file;
+        if (string.IsNullOrWhiteSpace(_gs.GameFolder)) { _gs.GameFolder = Path.GetDirectoryName(file)!; _folderBox.Text = _gs.GameFolder; }
+        AppSettings.Current.Save();
+        UpdateTrackerSaveLabel();
+    }
+
+    private void SetMonitoring(bool on)
+    {
+        _gs.AutoMonitor = on;
+        AppSettings.Current.Save();
+        _watcher?.Dispose();
+        _watcher = null;
+        _liveTimer?.Stop();
+        _liveTimer = null;
+        if (!on) { Log("Automatic monitoring off."); return; }
+        if (_trackLive)
+        {
+            _liveTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+            _liveTimer.Tick += async (_, _) => await SyncTracker(manual: false);
+            _liveTimer.Start();
+            Log("Monitoring the live game every 5 minutes.");
+            return;
+        }
+        if (!Directory.Exists(_gs.GameFolder)) { Log("Set the game folder (Pokémon HOME card) first, then turn monitoring on."); _autoMonitor.IsChecked = false; return; }
+        _watcher = new FileSystemWatcher(_gs.GameFolder) { IncludeSubdirectories = true, EnableRaisingEvents = true, NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName };
+        _watcher.Changed += OnSaveChanged;
+        _watcher.Created += OnSaveChanged;
+        Log($"Watching {_gs.GameFolder} - the tracker updates whenever a new save is exported there.");
+    }
+
+    private void OnSaveChanged(object? sender, FileSystemEventArgs e)
+    {
+        if (e.FullPath.Contains("Pokemon Home for") || e.Name?.EndsWith(".txt") == true) return;
+        if ((DateTime.Now - _lastAutoSync).TotalSeconds < 20) return;
+        _lastAutoSync = DateTime.Now;
+        Dialogs.Ui(async () => { await Task.Delay(5000); await SyncTracker(manual: false); });
+    }
+
+    private async Task SyncTracker(bool manual)
+    {
+        if (_syncing) return;
+        _syncing = true;
+        try
+        {
+            var wb = SpreadsheetService.FindWorkbook(_game);
+            if (wb == null) { Log("No spreadsheet for this game - use 'Choose spreadsheet' or 'Download tracker'."); return; }
+            if (!await EnsureDependency("Microsoft Excel")) return;
+            Collection owned;
+            if (_trackLive)
+            {
+                if (manual ? !await IpPrompt.EnsureSwitch(this) : !HealthMonitor.CanReach(AppSettings.Current.SwitchIP, AppSettings.Current.SwitchPort, 2500))
+                {
+                    Log($"Can't reach the Switch at {AppSettings.Current.SwitchIP}.");
+                    _trackError = $"can't reach the Switch at {AppSettings.Current.SwitchIP}";
+                    return;
+                }
+                Log("Reading party and PC boxes from the Switch...");
+                var s = AppSettings.Current;
+                owned = await Task.Run(() => { using var live = new LiveFrlg(s.SwitchIP, s.SwitchPort); return live.ReadCollection(); });
+            }
+            else
+            {
+                var save = await Task.Run(ResolveTrackerSave);
+                if (save == null) { Log("No save file found - use 'Choose save file...' or set the game folder in the Pokémon HOME card."); return; }
+                Log($"Reading {save.Path}");
+                owned = Collection.FromSave(save.Save, save.Path);
+            }
+            Log($"{owned.Total} Pokémon, {owned.BySpecies.Count} species ({owned.BySpecies.Values.Count(e => e.Shiny)} shiny) - {owned.Source}");
+            await Task.Run(() =>
+            {
+                if (BackupService.Backup(wb, spreadsheet: true) is { } b) Log("Backup made: " + Path.GetFileName(b));
+                if (File.Exists(owned.Source)) BackupService.Backup(owned.Source, spreadsheet: false);
+            });
+            var result = await Task.Run(() => SpreadsheetService.Update(wb, owned, Log));
+            Log($"Done: {result.MarkedInBox} new 'In Box', {result.MarkedOT} new 'OT', {result.MarkedShiny} new 'Shiny' across {result.Sheets} sheet(s).");
+            _trackError = null;
+            Status($"Tracker updated: {Path.GetFileName(wb)}");
+        }
+        catch (Exception ex)
+        {
+            Log("Error: " + ex.Message);
+            _trackError = ex.Message;
+            if (manual) await Dialogs.Info(this, ex.Message, "Collection Tracker");
+        }
+        finally { _syncing = false; }
+    }
+
+    // ================================================================ save export / game info
+    private Card BuildSaveCard()
+    {
+        var card = new Card(Skin.GlyphSave, "Pokémon HOME folder + Game Info", Skin.Accent2);
+        card.Body.Children.Add(Info("Point ShinyForge at the folder where this game's files / exported saves are stored."));
+        _folderBox = Skin.Input(_gs.GameFolder, 380);
+        var browse = new FancyButton("Browse", Skin.GlyphFolder, Skin.PanelHi);
+        browse.Click += async (_, _) =>
+        {
+            if (await Dialogs.PickFolder(this, "Folder with this game's files / exported save", _folderBox.Text) is not { } f) return;
+            _folderBox.Text = f;
+            _gs.GameFolder = f;
+            AppSettings.Current.Save();
+            ScanSaves();
+        };
+        card.Body.Children.Add(Skin.Row(_folderBox, browse));
+        var scan = new FancyButton("Find save", Skin.GlyphSync, Skin.PanelHi);
+        scan.Click += (_, _) => ScanSaves();
+        var export = new FancyButton("Export Pokémon + Game Info", Skin.GlyphDownload, Skin.Accent);
+        export.Click += async (_, _) => await ExportSave();
+        card.Body.Children.Add(Skin.Wrap(scan, export));
+        var info = new FancyButton("View Game Info", Skin.GlyphInfo, Skin.PanelHi);
+        info.Click += async (_, _) =>
+        {
+            var p = Path.Combine(_gs.GameFolder, "game info.txt");
+            if (File.Exists(p)) OsInfo.Open(p);
+            else await Dialogs.Info(this, "Export first - the Game Info document is created together with the Pokémon HOME folder.", "Game Info");
+        };
+        var row = Skin.Wrap(info);
+        if (OsInfo.IsWindows)
+        {
+            var pkhex = new FancyButton("Open in PKHeX", Skin.GlyphTools, Skin.PanelHi);
+            pkhex.Click += async (_, _) => await OpenInPKHeX();
+            row.Children.Insert(0, pkhex);
+        }
+        card.Body.Children.Add(row);
+        var checkpoint = new FancyButton("Find in Checkpoint", Skin.GlyphSave, Skin.PanelHi);
+        checkpoint.Click += async (_, _) => await FindInCheckpoint();
+        var buttons = Skin.Wrap(checkpoint);
+        if (_game.IsSwitch)
+        {
+            var trades = new FancyButton("Wireless trades (pokeldn)", Skin.GlyphWifi, Skin.PanelHi);
+            trades.Click += async (_, _) => await new PokeldnWindow().ShowDialog(Dialogs.Owner(this)!);
+            buttons.Children.Add(trades);
+        }
+        card.Body.Children.Add(buttons);
+        _saveStatus = Info("", Skin.Text);
+        card.Body.Children.Add(_saveStatus);
+        if (Directory.Exists(_gs.GameFolder)) Dispatcher.UIThread.Post(ScanSaves);
+        return card;
+    }
+
+    // ---------------------------------------------------------------- Checkpoint (SD card) saves
+    private static readonly HashSet<string> CheckpointWarned = new();
+
+    /// <summary>Finds this game's Checkpoint backups on the SD card, warns first, offers a fresh backup on a rescan, lets the user pick, copies to the computer.</summary>
+    private async Task FindInCheckpoint()
+    {
+        var rescan = !string.IsNullOrEmpty(_gs.CheckpointBackup);
+        if (!CheckpointWarned.Contains(_game.Id))
+        {
+            if (!await Dialogs.YesNo(this,
+                    "Before ShinyForge uses your Checkpoint saves:\n\n" +
+                    "  • Save your game in-game first.\n" +
+                    "  • Back up the save YOURSELF with Checkpoint on your console. ShinyForge only reads those backups - it can't make them, and it never changes anything on your SD card.\n" +
+                    "  • Keep your own copies of your saves somewhere safe.\n\n" +
+                    $"ShinyForge copies the backup you pick to\n{CheckpointService.GameFolder(_game)}\nand uses that copy for the Pokémon HOME folder, Game Info and the Pokédex tracker.\n\n" +
+                    "Are you ready to continue?", "ShinyForge - Checkpoint saves"))
+                return;
+            CheckpointWarned.Add(_game.Id);
+        }
+        if (rescan)
+        {
+            var r = await Dialogs.YesNoCancel(this,
+                "Would you like to back up a fresh save before ShinyForge rescans?\n\n" +
+                "Yes = I'll make a new Checkpoint backup now (the steps are shown next)\nNo = rescan the backups that are already on the SD card", "ShinyForge - fresh backup?");
+            if (r == Dialogs.Cancel) return;
+            if (r == Dialogs.Yes && await Dialogs.Show(this,
+                    $"1. Save your game in Pokémon {_game.Title}, then close the game.\n2. Open Checkpoint on the console and select the game.\n" +
+                    "3. Choose Backup and confirm (the suggested date-and-time name is fine).\n4. Put the console's SD card into this computer (or reconnect it).\n\n" +
+                    "Click OK when the fresh backup is on the SD card and the card is connected.", "ShinyForge - make a fresh backup", Dialogs.Ok, Dialogs.Cancel) != Dialogs.Ok)
+                return;
+        }
+        _saveStatus.Foreground = Skin.B(Skin.Muted);
+        _saveStatus.Text = "Looking for Checkpoint on the SD card...";
+        var roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+        var where = _game.IsSwitch ? "switch/Checkpoint/saves" : "3ds/Checkpoint/saves";
+        if (roots.Count == 0)
+        {
+            if (!await Dialogs.YesNo(this, $"No Checkpoint folder ({where}) was found on any drive.\n\nPut the console's SD card into this computer - or, if you copied it, choose that folder.\n\nChoose a folder now?", "ShinyForge - Checkpoint"))
+            { _saveStatus.Text = "No Checkpoint folder found."; return; }
+            if (await Dialogs.PickFolder(this, "The SD card (or the Checkpoint / saves folder copied from it)", AppSettings.Current.CheckpointFolder) is not { } f) { _saveStatus.Text = ""; return; }
+            AppSettings.Current.CheckpointFolder = f;
+            AppSettings.Current.Save();
+            roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+            if (roots.Count == 0) { _saveStatus.Foreground = Skin.B(Skin.Warn); _saveStatus.Text = $"That folder doesn't contain {where}."; return; }
+        }
+        _saveStatus.Text = "Reading the Checkpoint backups of this game...";
+        var backups = await Task.Run(() => CheckpointService.FindBackups(_game, roots));
+        if (backups.Count == 0)
+        {
+            var ids = CheckpointService.TitleIds.TryGetValue(_game.Id, out var x) ? $" (title ID {string.Join(" / ", x)})" : "";
+            _saveStatus.Foreground = Skin.B(Skin.Warn);
+            _saveStatus.Text = $"No Checkpoint backup of Pokémon {_game.Title} was found.";
+            await Dialogs.Info(this, $"No Checkpoint backup of Pokémon {_game.Title}{ids} with a readable save was found in:\n\n  {string.Join("\n  ", roots)}\n\nBack the game up with Checkpoint on the console first, then try again.", "ShinyForge - Checkpoint");
+            return;
+        }
+        var chosen = backups[0];
+        if (backups.Count > 1)
+        {
+            var picker = new CheckpointPicker(_game.Title, backups);
+            await picker.ShowDialog(Dialogs.Owner(this)!);
+            if (picker.Chosen == null) { _saveStatus.Text = ""; return; }
+            chosen = picker.Chosen;
+        }
+        _saveStatus.Text = "Copying the backup to this computer...";
+        FoundSave copied;
+        try { copied = await Task.Run(() => CheckpointService.CopyToPc(chosen, _game)); }
+        catch (Exception ex) { _saveStatus.Foreground = Skin.B(Skin.Bad); _saveStatus.Text = "Couldn't copy the backup: " + ex.Message; return; }
+        _gs.CheckpointBackup = chosen.Folder;
+        _gs.GameFolder = CheckpointService.GameFolder(_game);
+        _gs.SaveFilePath = copied.Path;
+        AppSettings.Current.Save();
+        _folderBox.Text = _gs.GameFolder;
+        _save = copied;
+        _saveStatus.Foreground = Skin.B(Skin.Good);
+        _saveStatus.Text = $"✔ Checkpoint backup \"{chosen.BackupName}\" ({chosen.Time:yyyy-MM-dd HH:mm}) copied to this computer.\n" +
+                           $"    Trainer {copied.Save.OT}  •  TID {copied.Save.DisplayTID}  •  {copied.Save.Version}  •  {copied.Save.PlayedHours}h {copied.Save.PlayedMinutes:00}m";
+        UpdateTrackerSaveLabel();
+    }
+
+    private void ScanSaves()
+    {
+        _gs.GameFolder = _folderBox.Text ?? "";
+        AppSettings.Current.Save();
+        _saveStatus.Foreground = Skin.B(Skin.Muted);
+        _saveStatus.Text = "Searching for save files...";
+        Task.Run(() => SaveService.FindSaves(_gs.GameFolder, _game)).ContinueWith(t => Dialogs.Ui(() =>
+        {
+            var saves = t.IsFaulted ? new List<FoundSave>() : t.Result;
+            _save = saves.FirstOrDefault();
+            _saveStatus.Foreground = Skin.B(_save != null ? Skin.Good : Skin.Warn);
+            _saveStatus.Text = _save == null
+                ? "No save file for this game was found in that folder (searched 3 folder levels deep)."
+                : $"✔ Save found: {Path.GetFileName(_save.Path)}\n    Trainer {_save.Save.OT}  •  TID {_save.Save.DisplayTID}  •  {_save.Save.Version}  •  " +
+                  $"{_save.Save.PlayedHours}h {_save.Save.PlayedMinutes:00}m" + (saves.Count > 1 ? $"  ({saves.Count} saves found, newest used)" : "");
+            UpdateTrackerSaveLabel();
+        }));
+    }
+
+    private async Task ExportSave()
+    {
+        if (_save == null) { ScanSaves(); await Dialogs.Info(this, "No save file loaded yet - choose the game folder first.", "Export"); return; }
+        try
+        {
+            var baseFolder = Path.GetDirectoryName(_save.Path)!;
+            if (!string.IsNullOrWhiteSpace(_gs.GameFolder) && Directory.Exists(_gs.GameFolder)) baseFolder = _gs.GameFolder;
+            BackupService.Backup(_save.Path, spreadsheet: false);
+            var (folder, count) = SaveService.ExportPokemon(_save.Save, _game, baseFolder);
+            var infoPath = SaveService.WriteGameInfo(_save.Save, _game, _save.Path, baseFolder);
+            File.Copy(infoPath, Path.Combine(folder, "game info.txt"), true);
+            _saveStatus.Foreground = Skin.B(Skin.Good);
+            _saveStatus.Text = $"✔ Exported {count} Pokémon to '{Path.GetFileName(folder)}' and wrote 'game info.txt'.";
+            Status($"Exported {count} Pokémon from {_game.Title}.");
+            OsInfo.OpenFolder(folder);
+        }
+        catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Export"); }
+    }
+
+    private async Task OpenInPKHeX()
+    {
+        if (!await EnsureDependency("PKHeX")) return;
+        if (DependencyService.PathOf("PKHeX") is not { } exe) return;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, _save != null ? $"\"{_save.Path}\"" : "") { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
+    }
+}

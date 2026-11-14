@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Cross-platform self-test for the macOS / Linux build: runs the shared services on the OS it's started on. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\ShinyForge\Core\**\*.cs" LinkBase="Core" />
+    <Compile Include="..\..\ShinyForge\Services\**\*.cs" LinkBase="Services" />
+    <None Include="..\..\ShinyForge\Assets\Dex\dex_index.json" Link="Assets\Dex\dex_index.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="PKHeX.Core" Version="26.10.18" />
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
+  </ItemGroup>
+</Project>

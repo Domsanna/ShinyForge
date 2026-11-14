@@ -13,6 +13,12 @@ public static class Browser
     public static void Open(string pathOrUrl)
     {
         var url = File.Exists(pathOrUrl) ? new Uri(Path.GetFullPath(pathOrUrl)).AbsoluteUri : pathOrUrl;
+        if (!OsInfo.IsWindows)
+        {
+            // macOS "open" and Linux "xdg-open" hand web addresses (and file:// pages) to the default web browser.
+            OsInfo.Open(url);
+            return;
+        }
         if (DefaultBrowserCommand() is { } cmd && Split(cmd) is { } parts)
         {
             // Use the browser's own registered command line, e.g.  "firefox.exe" -osint -url "%1"
@@ -27,6 +33,7 @@ public static class Browser
     /// <summary>The command line registered for the user's default https (or http) handler, or null.</summary>
     public static string? DefaultBrowserCommand()
     {
+        if (!OperatingSystem.IsWindows()) return null;
         foreach (var scheme in new[] { "https", "http" })
         {
             try
