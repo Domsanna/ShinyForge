@@ -27,6 +27,14 @@ public static class AppPaths
         ? Path.Combine(AppDir, "Backup Tools")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShinyForge", "Backup Tools");
 
+    /// <summary>
+    /// Copies of saves ShinyForge took from Checkpoint (and their Pokémon HOME exports): portable = next to ShinyForge.exe,
+    /// installed = Documents\ShinyForge\Saves. Saves are always copied here first - ShinyForge never writes to the SD card.
+    /// </summary>
+    public static string SavesDir { get; } = IsPortable
+        ? Path.Combine(AppDir, "Saves")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ShinyForge", "Saves");
+
     /// <summary>Creates the backup folder and its README (safe to call every start).</summary>
     public static void EnsureBackupToolsDir()
     {

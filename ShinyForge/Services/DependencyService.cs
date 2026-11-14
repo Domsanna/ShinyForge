@@ -25,7 +25,11 @@ public sealed class Dependency
     public bool FromBackup => AppPaths.IsInBackupTools(Path);
     public DepState State { get; set; }
     public string Detail { get; set; } = "";
-    public bool CanAutoInstall => WingetId != null || Name is "PKHeX" or "SysBot.exe";
+    public bool CanAutoInstall => WingetId != null || Name is "PKHeX" or "SysBot.exe" or "pokeldn" or "esptool";
+    /// <summary>Only needed once the user set up that feature (the ESP32-S3 trades): not reported as missing before.</summary>
+    public bool OnlyAfterSetup { get; init; }
+    /// <summary>Should a missing copy be reported / installed by "Install all"?</summary>
+    public bool Wanted => !OnlyAfterSetup || AppSettings.Current.PokeldnSetupDone;
     /// <summary>Can only be installed by hand (paid software or no public download).</summary>
     public bool ManualOnly => !CanAutoInstall;
 }
@@ -55,6 +59,12 @@ public static class DependencyService
         new() { Name = "SysBot.exe", Purpose = "Sys-EncounterBot with the Switch bots (FRLG, Let's Go, SwSh, BDSP)", For3DS = false, ExeNames = new[] { "SysBot.exe" },
                 ManualUrl = "https://github.com/Manu098vm/Sys-EncounterBot.NET/releases/latest",
                 Locate = () => File.Exists(AppSettings.Current.SysBotPath) ? AppSettings.Current.SysBotPath : null },
+        new() { Name = "pokeldn", Purpose = "Wireless trades and Mystery Gift with Switch games through an ESP32-S3 board (Decryptu/pokeldn)", For3DS = false,
+                ExeNames = new[] { "pokeldn.exe" }, OnlyAfterSetup = true, ManualUrl = "https://github.com/Decryptu/pokeldn/releases/latest",
+                Locate = PokeldnService.FindApp },
+        new() { Name = "esptool", Purpose = "Espressif's tool that installs the pokeldn radio firmware on the ESP32-S3", For3DS = false,
+                ExeNames = new[] { "esptool.exe" }, OnlyAfterSetup = true, ManualUrl = "https://github.com/espressif/esptool/releases/latest",
+                Locate = () => Directory.Exists(PokeldnService.EsptoolDir) ? Directory.EnumerateFiles(PokeldnService.EsptoolDir, "esptool.exe", SearchOption.AllDirectories).FirstOrDefault() : null },
     };
 
     public static string? FindPKHeX()
@@ -145,6 +155,10 @@ public static class DependencyService
             return await InstallPKHeX(progress);
         if (d.Name == "SysBot.exe")
             return await InstallSysBot(progress);
+        if (d.Name == "pokeldn")
+            return await PokeldnService.InstallAppAndFirmware(progress);
+        if (d.Name == "esptool")
+            return await PokeldnService.InstallEsptool(progress);
         OpenUrl(d.ManualUrl);
         return $"{d.Name} can't be installed automatically - its download page was opened.";
     }
@@ -231,7 +245,7 @@ public static class DependencyService
     {
         var relevant = All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)).ToList();
         foreach (var d in relevant) Refresh(d);
-        var missing = relevant.Where(d => d.State == DepState.Missing).ToList();
+        var missing = relevant.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
         if (missing.Count == 0)
             return "Everything is already installed.";
 
@@ -312,6 +326,20 @@ public static class DependencyService
             }
         }
         catch (Exception e) { AppPaths.Log("PKHeX update check failed: " + e.Message); }
+
+        // pokeldn (only once the wireless-trades feature was set up).
+        if (AppSettings.Current.PokeldnSetupDone && PokeldnService.FindApp() is { } pokeldn)
+        {
+            try
+            {
+                var rel = await PokeldnService.LatestAsync();
+                var have = PokeldnService.InstalledAppTag(pokeldn);
+                if (AppInfo.ParseTag(rel.Tag) is { } latest && (have == null || AppInfo.ParseTag(have) < latest))
+                    list.Add(new("pokeldn", $"Installed {have ?? "unknown version"}, latest is {rel.Tag} (the board's firmware is updated from Wireless trades).",
+                        p => PokeldnService.InstallAppAndFirmware(p)));
+            }
+            catch (Exception e) { AppPaths.Log("pokeldn update check failed: " + e.Message); }
+        }
 
         // PKHeX library bundled inside ShinyForge (new games / save formats).
         try

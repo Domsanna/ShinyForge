@@ -155,7 +155,7 @@ public sealed class ToolsForm : Form
     {
         var relevant = DependencyService.All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)).ToList();
         foreach (var d in relevant) DependencyService.Refresh(d);
-        var missing = relevant.Where(d => d.State == DepState.Missing).ToList();
+        var missing = relevant.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
         if (missing.Count == 0)
         {
             MessageBox.Show(owner, "Everything is already installed.", "ShinyForge");

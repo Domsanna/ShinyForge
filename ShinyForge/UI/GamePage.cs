@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using PKHeX.Core;
 using ShinyForge.Core;
 using ShinyForge.Services;
@@ -244,7 +244,8 @@ public sealed class GamePage : UserControl
             RefreshHuntStatus();
         };
         stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); };
-        card.Body.Controls.Add(Row(start, stop));
+        // "Stop Python hunter" only where the Python hunter exists (FireRed/LeafGreen); SysBot is stopped in its own window.
+        card.Body.Controls.Add(options.Any(o => o.Key == "python") ? Row(start, stop) : Row(start));
         if (_game.Bot == BotKind.FrlgSwitch)
         {
             var pause = new FancyButton("Pause / Resume", Theme.GlyphStop, Theme.PanelHi);
@@ -859,6 +860,16 @@ public sealed class GamePage : UserControl
             else MessageBox.Show(FindForm(), "Export first - the Game Info document is created together with the Pokémon HOME folder.", "Game Info");
         };
         card.Body.Controls.Add(Row(pkhex, info));
+        var checkpoint = new FancyButton("Find in Checkpoint", Theme.GlyphSave, Theme.PanelHi);
+        checkpoint.Click += async (_, _) => await FindInCheckpoint();
+        var buttons = Row(checkpoint);
+        if (_game.IsSwitch)
+        {
+            var trades = new FancyButton("Wireless trades (pokeldn)", Theme.GlyphWifi, Theme.PanelHi);
+            trades.Click += (_, _) => { using var f = new PokeldnForm(); f.ShowDialog(FindForm()); };
+            buttons.Controls.Add(trades);
+        }
+        card.Body.Controls.Add(buttons);
         _saveStatus = Info("", Theme.Text);
         card.Body.Controls.Add(_saveStatus);
         if (Directory.Exists(_gs.GameFolder))
@@ -866,6 +877,105 @@ public sealed class GamePage : UserControl
         else
             Ui(UpdateTrackerSaveLabel);
         return card;
+    }
+
+    // ---------------------------------------------------------------- Checkpoint (SD card) saves
+    private static readonly HashSet<string> CheckpointWarned = new();
+
+    /// <summary>
+    /// Finds this game's Checkpoint backups on the SD card (any drive) by title ID / name. Warns first that the user must
+    /// save and back up themselves; on a rescan offers to make a fresh backup first; lets the user pick when there are
+    /// several; copies the chosen backup to the PC and uses that copy for the HOME folder, Game Info and the tracker.
+    /// </summary>
+    private async Task FindInCheckpoint()
+    {
+        var owner = FindForm();
+        var rescan = !string.IsNullOrEmpty(_gs.CheckpointBackup);
+        if (!CheckpointWarned.Contains(_game.Id))
+        {
+            if (MessageBox.Show(owner,
+                    "Before ShinyForge uses your Checkpoint saves:\n\n" +
+                    "  • Save your game in-game first.\n" +
+                    "  • Back up the save YOURSELF with Checkpoint on your console. ShinyForge only reads those backups - it can't make them, " +
+                    "and it never changes anything on your SD card.\n" +
+                    "  • Keep your own copies of your saves somewhere safe.\n\n" +
+                    $"ShinyForge copies the backup you pick to\n{CheckpointService.GameFolder(_game)}\n" +
+                    "and uses that copy for the Pokémon HOME folder, Game Info and the Pokédex tracker.\n\n" +
+                    "Are you ready to continue?",
+                    "ShinyForge - Checkpoint saves", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+            CheckpointWarned.Add(_game.Id);
+        }
+        if (rescan)
+        {
+            var r = MessageBox.Show(owner,
+                "Would you like to back up a fresh save before ShinyForge rescans?\n\n" +
+                "Yes = I'll make a new Checkpoint backup now (the steps are shown next)\n" +
+                "No = rescan the backups that are already on the SD card",
+                "ShinyForge - fresh backup?", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (r == DialogResult.Cancel) return;
+            if (r == DialogResult.Yes &&
+                MessageBox.Show(owner,
+                    $"1. Save your game in Pokémon {_game.Title}, then close the game.\n" +
+                    "2. Open Checkpoint on the console and select the game.\n" +
+                    "3. Choose Backup and confirm (the suggested date-and-time name is fine).\n" +
+                    "4. Put the console's SD card into this PC (or reconnect it).\n\n" +
+                    "Click OK when the fresh backup is on the SD card and the card is connected.",
+                    "ShinyForge - make a fresh backup", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+                return;
+        }
+
+        _saveStatus.ForeColor = Theme.Muted;
+        _saveStatus.Text = "Looking for Checkpoint on the SD card...";
+        var roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+        var where = _game.IsSwitch ? @"switch\Checkpoint\saves" : @"3ds\Checkpoint\saves";
+        if (roots.Count == 0)
+        {
+            if (MessageBox.Show(owner, $"No Checkpoint folder ({where}) was found on any drive.\n\n" +
+                                       "Put the console's SD card into this PC - or, if you copied it to the PC, choose that folder.\n\nChoose a folder now?",
+                    "ShinyForge - Checkpoint", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            { _saveStatus.Text = "No Checkpoint folder found."; return; }
+            var f = PickFolder("The SD card (or the Checkpoint / saves folder copied from it)", AppSettings.Current.CheckpointFolder);
+            if (f == null) { _saveStatus.Text = ""; return; }
+            AppSettings.Current.CheckpointFolder = f;
+            AppSettings.Current.Save();
+            roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+            if (roots.Count == 0) { _saveStatus.ForeColor = Theme.Warn; _saveStatus.Text = $"That folder doesn't contain {where}."; return; }
+        }
+
+        _saveStatus.Text = "Reading the Checkpoint backups of this game...";
+        var backups = await Task.Run(() => CheckpointService.FindBackups(_game, roots));
+        if (backups.Count == 0)
+        {
+            var ids = CheckpointService.TitleIds.TryGetValue(_game.Id, out var x) ? $" (title ID {string.Join(" / ", x)})" : "";
+            _saveStatus.ForeColor = Theme.Warn;
+            _saveStatus.Text = $"No Checkpoint backup of Pokémon {_game.Title} was found.";
+            MessageBox.Show(owner, $"No Checkpoint backup of Pokémon {_game.Title}{ids} with a readable save was found in:\n\n  {string.Join("\n  ", roots)}\n\n" +
+                                   "Back the game up with Checkpoint on the console first, then try again.", "ShinyForge - Checkpoint");
+            return;
+        }
+        var chosen = backups[0];
+        if (backups.Count > 1)
+        {
+            using var picker = new CheckpointPicker(_game.Title, backups);
+            if (picker.ShowDialog(owner) != DialogResult.OK || picker.Chosen == null) { _saveStatus.Text = ""; return; }
+            chosen = picker.Chosen;
+        }
+
+        _saveStatus.Text = "Copying the backup to this PC...";
+        FoundSave copied;
+        try { copied = await Task.Run(() => CheckpointService.CopyToPc(chosen, _game)); }
+        catch (Exception ex) { _saveStatus.ForeColor = Theme.Bad; _saveStatus.Text = "Couldn't copy the backup: " + ex.Message; return; }
+        _gs.CheckpointBackup = chosen.Folder;
+        _gs.GameFolder = CheckpointService.GameFolder(_game);
+        _gs.SaveFilePath = copied.Path;
+        AppSettings.Current.Save();
+        _folderBox.Text = _gs.GameFolder;
+        _save = copied;
+        _saveStatus.ForeColor = Theme.Good;
+        _saveStatus.Text = $"✔ Checkpoint backup \"{chosen.BackupName}\" ({chosen.Time:yyyy-MM-dd HH:mm}) copied to this PC.\n" +
+                           $"    Trainer {copied.Save.OT}  •  TID {copied.Save.DisplayTID}  •  {copied.Save.Version}  •  {copied.Save.PlayedHours}h {copied.Save.PlayedMinutes:00}m";
+        UpdateTrackerSaveLabel();
     }
 
     private void ScanSaves()

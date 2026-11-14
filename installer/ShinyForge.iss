@@ -23,6 +23,10 @@ SetupIconFile=..\ShinyForge\Assets\ShinyForge.ico
 UninstallDisplayIcon={app}\ShinyForge.exe
 Compression=lzma2/max
 SolidCompression=yes
+; With the spreadsheets the setup is over 2 GB (GitHub's per-file limit): split it into ShinyForge-Setup.exe +
+; ShinyForge-Setup-1.bin, -2.bin... (keep them in the same folder when installing).
+DiskSpanning=yes
+DiskSliceSize=1900000000
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

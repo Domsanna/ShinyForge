@@ -165,9 +165,12 @@ public sealed class MainForm : Form
             AppSettings.Current.LastPlatform = isSwitch ? "switch" : "3ds";
             AppSettings.Current.Save();
             CheckPlatformRequirements(isSwitch);
+            // Each console section asks for the console's IP address first (once per run).
             if (!isSwitch && IpPrompt.GetOrAsk(this) == null)
-                return; // the 3DS section needs the 3DS's IP first
-            Navigate(() => BuildGamesPage(isSwitch), isSwitch ? "Nintendo Switch" : $"Nintendo 3DS  ({AppSettings.Current.ThreeDSIP})");
+                return;
+            if (isSwitch && IpPrompt.GetOrAskSwitch(this) == null)
+                return;
+            Navigate(() => BuildGamesPage(isSwitch), isSwitch ? $"Nintendo Switch  ({AppSettings.Current.SwitchIP})" : $"Nintendo 3DS  ({AppSettings.Current.ThreeDSIP})");
         };
         return p;
     }
@@ -281,7 +284,7 @@ public sealed class MainForm : Form
         try
         {
             var updates = await DependencyService.CheckUpdates();
-            var missing = DependencyService.All.Where(d => d.State == DepState.Missing).ToList();
+            var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
             ToolsForm.LastUpdates = updates;
             if (updates.Count == 0 && missing.Count == 0)
             {
@@ -349,7 +352,7 @@ public sealed class MainForm : Form
         var installAll = new FancyButton("Install all", Theme.GlyphDownload, Theme.PanelHi) { Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right };
         installAll.Location = new Point(review.Left - installAll.Width - 10, 6);
         installAll.Click += (_, _) => ToolsForm.InstallAll(this, _isSwitch);
-        installAll.Visible = !health && DependencyService.All.Any(d => d.State == DepState.Missing);
+        installAll.Visible = !health && DependencyService.All.Any(d => d.State == DepState.Missing && d.Wanted);
         var close = Theme.Label("✕", Theme.H2, Theme.Muted);
         close.Cursor = Cursors.Hand;
         close.Anchor = AnchorStyles.Top | AnchorStyles.Right;

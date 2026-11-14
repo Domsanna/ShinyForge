@@ -129,6 +129,30 @@ if (tests.Contains("sheet"))
     t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
 }
 
+if (tests.Contains("sheet7"))
+{
+    // Gen 7 trackers: a copy of each is updated through Excel (the Let's Go ones with a small hand-made collection).
+    foreach (var id in new[] { "sw_lgp", "3ds_usun" })
+    {
+        var src = SpreadsheetService.FindWorkbook(GameCatalog.Get(id), AppSettings.Current.SpreadsheetRoot)!;
+        Check(src != null, $"{id} tracker located: {src}");
+        if (src == null) continue;
+        var copy = Path.Combine(work, Path.GetFileNameWithoutExtension(src) + " (TEST COPY).xlsm");
+        File.Copy(src, copy, true);
+        var col = new Collection();
+        foreach (var n in new[] { "Bulbasaur", "Pikachu", "Mewtwo" })
+            col.BySpecies[Collection.Normalize(n)] = new Collection.Entry { Name = n, Owned = true, OwnOT = true, Shiny = n == "Pikachu" };
+        var t7 = new Thread(() =>
+        {
+            var r = SpreadsheetService.Update(copy, col, s => Console.WriteLine("   " + s));
+            Console.WriteLine($"   result: inBox+{r.MarkedInBox} OT+{r.MarkedOT} shiny+{r.MarkedShiny} sheets={r.Sheets}");
+            Check(r.MarkedInBox + r.MarkedOT + r.MarkedShiny > 0 || r.Sheets > 0, $"{id} tracker copy updated through Excel");
+        });
+        t7.SetApartmentState(ApartmentState.STA); t7.Start(); t7.Join();
+        try { File.Delete(copy); } catch { }
+    }
+}
+
 if (tests.Contains("record"))
 {
     var rec = new RecordingService();
@@ -285,12 +309,12 @@ if (tests.Contains("3ds"))
 
 if (tests.Contains("sheets"))
 {
-    // Every game must auto-recognize its tracker (except Gen 7 / Let's Go, whose folders are empty).
+    // Every game must auto-recognize its tracker (Gen 7 / Let's Go included since build 4).
     var root = AppSettings.Current.SpreadsheetRoot;
     foreach (var g in GameCatalog.All)
     {
         var wb = SpreadsheetService.FindWorkbook(g, root);
-        var expectMissing = g.Gen == 7 || string.IsNullOrWhiteSpace(g.Spreadsheet);
+        var expectMissing = string.IsNullOrWhiteSpace(g.Spreadsheet);
         var nameOk = wb == null || Collection.Normalize(Path.GetFileName(wb)).Contains(Collection.Normalize(g.Spreadsheet));
         Check((wb != null || expectMissing) && nameOk, $"{g.Id,-16} '{g.Spreadsheet}' -> {(wb == null ? "(none)" : wb.Replace(root, "<root>"))}");
     }
@@ -405,8 +429,8 @@ if (tests.Contains("update"))
            {"name":"ShinyForge-Portable.zip","browser_download_url":"https://example/portable.zip","size":157000000}]}
         """)!.AsObject();
     var rel = AppUpdateService.Parse(json)!;
-    Check(rel.Build == 500 && rel.IsNewer && rel.SetupUrl!.EndsWith("setup.exe") && rel.ZipUrl!.EndsWith("portable.zip") && rel.SetupSize == 1500000000,
-        $"release parsed: build {rel.Build}, newer={rel.IsNewer}, setup+zip found");
+    Check(rel.Build == 500 && rel.IsNewer && rel.ZipUrl!.EndsWith("portable.zip") && rel.ZipSize == 157000000,
+        $"release parsed: build {rel.Build}, newer={rel.IsNewer}, program zip found");
     var old = AppUpdateService.Parse(System.Text.Json.Nodes.JsonNode.Parse("""{"tag_name":"v0.9.1","assets":[]}""")!.AsObject())!;
     Check(!old.IsNewer, "an older release is not offered");
     var plain = ShinyForge.UI.UpdateForm.Plain("## What's new\n- **Faster** hunts\nauto - catch");
@@ -448,11 +472,196 @@ if (tests.Contains("update"))
     Check(File.ReadAllText(Path.Combine(appDir, "portable.flag")) == "mine" && File.Exists(Path.Combine(appDir, "Backup Tools", "tool.txt")), "portable.flag and Backup Tools kept");
 }
 
+if (tests.Contains("pokeldn"))
+{
+    // Serial framing: CRC-32/ISO-HDLC check value, COBS round trips, and byte-for-byte equality with pokeldn's own Python code.
+    Check(PokeldnService.Crc32("123456789"u8) == 0xCBF43926, "CRC-32 check value");
+    var rnd = new Random(7);
+    var okRound = true;
+    foreach (var len in new[] { 0, 1, 253, 254, 255, 600 })
+    {
+        var data = new byte[len];
+        rnd.NextBytes(data);
+        if (len > 10) { data[3] = 0; data[len - 1] = 0; }
+        okRound &= PokeldnService.CobsDecode(PokeldnService.CobsEncode(data))!.SequenceEqual(data);
+        okRound &= !PokeldnService.CobsEncode(data).Contains((byte)0);
+    }
+    Check(okRound, "COBS encode/decode round trip (0-600 bytes, zeros, 254-byte runs)");
+    var info = new byte[14].Concat(System.Text.Encoding.ASCII.GetBytes("pokeldn-radio esp32s3 version=1.11.0")).ToArray();
+    info[0] = 1;
+    var big = Enumerable.Range(0, 600).Select(i => (byte)(i % 7 == 0 ? 0 : i)).ToArray();
+    var root = Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "pokeldn");
+    var repo = new[] { root, @"C:\Users\Dominic Sanna\Desktop\Updated app\ShinyForge\Source\external\pokeldn" }.Select(Path.GetFullPath).FirstOrDefault(Directory.Exists);
+    var py = DependencyService.FindPython();
+    if (repo != null && py != null)
+    {
+        var script = Path.Combine(work, "pokeldn_frames.py");
+        File.WriteAllText(script, $$"""
+            import sys; sys.path.insert(0, r'{{repo}}')
+            from pokeldn.ldn import esp32
+            print(esp32.encode_frame(1).hex())
+            print(esp32.encode_frame(0x81, bytes.fromhex('{{Convert.ToHexString(info)}}')).hex())
+            print(esp32.encode_frame(0x08, bytes.fromhex('{{Convert.ToHexString(big)}}')).hex())
+            """);
+        var psi = new System.Diagnostics.ProcessStartInfo(py, $"-I \"{script}\"") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var lines = p.StandardOutput.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        p.WaitForExit();
+        Check(lines.Length == 3, $"pokeldn's Python framing ran ({lines.Length} frames)");
+        if (lines.Length == 3)
+        {
+            Check(Convert.ToHexString(PokeldnService.Frame(0x01, Array.Empty<byte>())).Equals(lines[0], StringComparison.OrdinalIgnoreCase), $"HELLO frame identical to pokeldn's ({lines[0]})");
+            Check(Convert.ToHexString(PokeldnService.Frame(0x08, big)).Equals(lines[2], StringComparison.OrdinalIgnoreCase), "600-byte frame with zeros identical to pokeldn's");
+            var fromPy = Convert.FromHexString(lines[1]);
+            Check(PokeldnService.TryDecode(fromPy[..^1], out var type, out var payload) && type == 0x81 && payload.SequenceEqual(info), "INFO frame built by pokeldn decoded");
+            var text = System.Text.Encoding.UTF8.GetString(payload, 14, payload.Length - 14);
+            var fi = new FirmwareInfo(true, PokeldnService.ParseVersion(text), text, null);
+            Check(fi.Version == "1.11.0" && fi.Target == "esp32s3", $"firmware version {fi.Version} and chip {fi.Target} read from INFO");
+        }
+    }
+    else Console.WriteLine("   (pokeldn source or Python not found - Python comparison skipped)");
+    var bad = PokeldnService.Frame(0x01, Array.Empty<byte>());
+    bad[2] ^= 0x40;
+    Check(!PokeldnService.TryDecode(bad[..^1], out _, out _), "a corrupted frame is rejected (CRC)");
+
+    // Checksums file and firmware image version
+    var sums = PokeldnService.ParseSums("8ddc0e01c6a66bd5f111d74793c5869207ea2aa7e923ac3735c9e38b7f3c49c1  pokeldn-windows-x64.zip\nc581a4e8f42f34e38e61a9636df56352c7db48ac274297a9c9aa4dfae0cc8769  pokeldn-radio-s3.bin\n");
+    Check(sums.Count == 2 && sums["pokeldn-radio-s3.bin"].StartsWith("c581a4e8"), "SHA256SUMS parsed");
+    if (PokeldnService.FindFirmware() is { } fw)
+        Check(PokeldnService.FirmwareVersionOf(fw) is { Length: > 0 } v && Version.TryParse(v, out _), $"firmware image version: {PokeldnService.FirmwareVersionOf(fw)} ({fw})");
+    var fakeImg = Path.Combine(work, "fake.bin");
+    var img = new byte[0x10100];
+    BitConverter.GetBytes(0xABCD5432u).CopyTo(img, 0x10020);
+    System.Text.Encoding.ASCII.GetBytes("1.11.0").CopyTo(img, 0x10030);
+    File.WriteAllBytes(fakeImg, img);
+    Check(PokeldnService.FirmwareVersionOf(fakeImg) == "1.11.0", "app descriptor version read from a merged image");
+
+    // prod.keys: names checked, values never needed; pokeldn's settings.json gets only the path (other fields kept)
+    var keys = Path.Combine(work, "prod.keys");
+    File.WriteAllText(keys, "aes_kek_generation_source = 00\naes_key_generation_source = 00\nmaster_key_00 = 00\n");
+    Check(PokeldnService.MissingKeys(keys).SequenceEqual(new[] { "master_key_12" }), "missing key names found");
+    var pdata = Path.Combine(work, "pokeldn_data");
+    Directory.CreateDirectory(pdata);
+    File.WriteAllText(Path.Combine(pdata, "settings.json"), """{"ot": "Ash", "keys": "old"}""");
+    PokeldnService.SetKeysPath(keys, pdata);
+    var js = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(pdata, "settings.json")))!;
+    Check(js["keys"]!.ToString() == keys && js["ot"]!.ToString() == "Ash", "prod.keys path written into pokeldn's settings.json, other settings kept");
+
+    var boards = PokeldnService.FindBoards();
+    Console.WriteLine($"   ESP32 boards plugged in: {(boards.Count == 0 ? "none" : string.Join(", ", boards.Select(b => $"{b.Kind} {b.Port}")))}");
+    foreach (var b in boards.Where(b => b.NativeUsb))
+        Console.WriteLine($"   {b.Port}: {PokeldnService.QueryFirmware(b.Port)}");
+}
+
+if (tests.Contains("pokeldnlive"))
+{
+    // The real install path (downloads ~140 MB from GitHub, verifies checksums), then starts pokeldn once. Cleaned up afterwards.
+    var hadApp = Directory.Exists(PokeldnService.AppDir);
+    Console.WriteLine("   " + await PokeldnService.InstallAppAndFirmware(_ => { }));
+    Console.WriteLine("   " + await PokeldnService.InstallEsptool(_ => { }));
+    var app = PokeldnService.FindApp();
+    Check(app != null && app.StartsWith(PokeldnService.AppDir) && PokeldnService.InstalledAppTag(app) is { Length: > 0 }, $"pokeldn installed: {PokeldnService.InstalledAppTag(app)} {app}");
+    var fw = Path.Combine(PokeldnService.FirmwareDir, PokeldnService.FirmwareAsset);
+    Check(PokeldnService.FirmwareVersionOf(fw) is { } fv && Version.TryParse(fv, out _), $"S3 firmware downloaded and checksum-verified: version {PokeldnService.FirmwareVersionOf(fw)}");
+    var esptool = PokeldnService.FindEsptool();
+    Check(esptool != null && esptool.StartsWith(PokeldnService.EsptoolDir), $"esptool installed: {esptool}");
+    if (esptool != null)
+    {
+        using var v = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(esptool, "version") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+        var outp = v.StandardOutput.ReadToEnd();
+        v.WaitForExit(30000);
+        Check(outp.Contains("esptool", StringComparison.OrdinalIgnoreCase), "esptool runs: " + outp.Split('\n').FirstOrDefault()?.Trim());
+    }
+    if (app != null)
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(app) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(app)! })!;
+        Thread.Sleep(15000);
+        p.Refresh();
+        var alive = !p.HasExited;
+        var windowed = System.Diagnostics.Process.GetProcessesByName("pokeldn").Any(x => x.MainWindowHandle != IntPtr.Zero);
+        Check(alive || windowed, $"pokeldn starts (running: {alive}, window: {windowed})");
+        foreach (var x in System.Diagnostics.Process.GetProcessesByName("pokeldn")) try { x.Kill(true); } catch { }
+        Thread.Sleep(2000);
+    }
+    if (!hadApp)
+        foreach (var d in new[] { PokeldnService.AppDir, PokeldnService.FirmwareDir, PokeldnService.EsptoolDir })
+            try { Directory.Delete(d, true); } catch (Exception e) { Console.WriteLine($"   (couldn't remove {d}: {e.Message})"); }
+}
+
+if (tests.Contains("checkpoint"))
+{
+    // A fake SD card with Checkpoint backups for several games (and look-alikes that must not match).
+    var sd = Path.Combine(work, "fake_sd");
+    if (Directory.Exists(sd)) Directory.Delete(sd, true);
+    // Copies of real saves (blank saves made by PKHeX aren't recognised for every game); the originals are only read.
+    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var roc = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master");
+    var usSave = Path.Combine(roc, @"25 - Gen VII - USUM Collection\Save Data\20180228134249 - Ultra Sun\00001b50\main");
+    var xSave = Path.Combine(roc, @"19 - Gen VI - XY Collection\Save Data\20180219163039 - X\0000055d\main");
+    var shSave = Path.Combine(desk, @"PKHeX (26.10.18)\shield\20210420-120931 Dom\main");
+    void Put(string folder, string source, DateTime when)
+    {
+        Directory.CreateDirectory(folder);
+        var file = Path.Combine(folder, "main");
+        File.Copy(source, file, true);
+        File.SetLastWriteTime(file, when);
+    }
+    var t0 = new DateTime(2026, 11, 1, 12, 0, 0);
+    Put(Path.Combine(sd, @"3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun\20261101-120000"), usSave, t0);
+    Put(Path.Combine(sd, @"3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun\20261110-090000"), usSave, t0.AddDays(9));
+    Put(Path.Combine(sd, @"3ds\Checkpoint\saves\0x01B51 Pokémon Ultra Moon\20261105-120000"), usSave, t0.AddDays(4)); // other title ID: ignored
+    Put(Path.Combine(sd, @"3ds\Checkpoint\saves\0x0055D Pokémon X\backup"), xSave, t0);
+    Put(Path.Combine(sd, @"switch\Checkpoint\saves\01008DB008C2C000 Pokémon Shield\20261102-101010"), shSave, t0.AddDays(1));
+    Put(Path.Combine(sd, @"switch\Checkpoint\saves\0100ABF008968000 Pokémon Sword\20261102-101010"), shSave, t0.AddDays(1)); // a Shield save in Sword's folder
+    Directory.CreateDirectory(Path.Combine(sd, @"switch\Checkpoint\saves\01008DB008C2C000 Pokémon Shield\empty backup"));
+
+    var old = AppSettings.Current.CheckpointFolder;
+    AppSettings.Current.CheckpointFolder = sd; // not saved: test only
+    try
+    {
+        Check(CheckpointService.SplitFolder("0x01B51 Pokémon Ultra Moon") == ("01B51", "Pokémon Ultra Moon"), "3DS folder name split");
+        Check(CheckpointService.SplitFolder("0100ABF008968000 Pokémon Sword") == ("0100ABF008968000", "Pokémon Sword"), "Switch folder name split");
+        Check(CheckpointService.SplitFolder("IRBO Pokémon Black") == ("IRBO", "Pokémon Black"), "DS cartridge folder name split");
+        var g = (string id) => GameCatalog.All.First(x => x.Id == id);
+        Check(CheckpointService.Matches(g("3ds_umoon"), "0x01B51 Pokémon Ultra Moon") && !CheckpointService.Matches(g("3ds_moon"), "0x01B51 Pokémon Ultra Moon"),
+            "Ultra Moon matched by ID, Moon not");
+        Check(CheckpointService.Matches(g("nds_black"), "IRBO Pokémon Black") && !CheckpointService.Matches(g("nds_black2"), "IRBO Pokémon Black"), "DS game matched by name");
+        Check(CheckpointService.Matches(g("sw_za"), "0100F43008C44000 Pokémon Legends: Z-A"), "Legends: Z-A matched by name (no ID listed)");
+        Check(CheckpointService.Matches(g("sw_frlg_lg"), "010034D02340E000 Pokemon LeafGreen") && !CheckpointService.Matches(g("sw_frlg_fr"), "010034D02340E000 Pokemon LeafGreen"),
+            "Switch LeafGreen matched by ID, FireRed not");
+        Check(CheckpointService.Matches(g("sw_lgp"), "010003F003A34000 Pokémon: Let's Go, Pikachu!"), "Let's Go Pikachu matched");
+
+        var roots3 = CheckpointService.FindRoots(false);
+        var rootsS = CheckpointService.FindRoots(true);
+        Check(roots3.Any(r => r.StartsWith(sd)) && rootsS.Any(r => r.StartsWith(sd)), "Checkpoint roots found from the chosen folder");
+        var um = CheckpointService.FindBackups(g("3ds_usun"), roots3.Where(r => r.StartsWith(sd)));
+        Check(um.Count == 2 && um[0].BackupName == "20261110-090000", $"Ultra Sun: {um.Count} backups, newest first ({um.FirstOrDefault()?.BackupName}); Ultra Moon's folder ignored");
+        var sh = CheckpointService.FindBackups(g("sw_shield"), rootsS.Where(r => r.StartsWith(sd)));
+        Check(sh.Count == 1 && sh[0].Save.Save.Version == GameVersion.SH, $"Shield: {sh.Count} backup (empty backup folder and Sword's folder ignored)");
+        Check(CheckpointService.FindBackups(g("sw_sword"), rootsS.Where(r => r.StartsWith(sd))).Count == 0, "a Shield save in Sword's folder isn't taken as Sword");
+        Check(CheckpointService.FindBackups(g("3ds_x"), roots3.Where(r => r.StartsWith(sd))).Count == 1, "X backup found");
+        var savesRoot = Path.Combine(work, "saves_copy");
+        if (Directory.Exists(savesRoot)) Directory.Delete(savesRoot, true);
+        var copied = CheckpointService.CopyToPc(um[1], g("3ds_usun"), savesRoot);
+        Check(File.Exists(copied.Path) && copied.Path.StartsWith(savesRoot) && File.GetLastWriteTime(copied.Path) == t0, $"backup copied to the PC with its time kept: {Path.GetRelativePath(work, copied.Path)}");
+        Check(SaveService.FindSaves(CheckpointService.GameFolder(g("3ds_usun"), savesRoot), g("3ds_usun")).Count == 1, "the copy is found by the normal save search");
+        Check(Directory.GetLastWriteTime(um[0].Folder) <= DateTime.Now && File.Exists(um[1].Save.Path), "the SD card copy was only read");
+    }
+    finally { AppSettings.Current.CheckpointFolder = old; }
+
+    // Gen 7 trackers are recognised
+    foreach (var id in new[] { "3ds_sun", "3ds_moon", "3ds_usun", "3ds_umoon", "sw_lgp", "sw_lge" })
+    {
+        var wb = SpreadsheetService.FindWorkbook(GameCatalog.All.First(x => x.Id == id));
+        Check(wb != null, $"{id}: tracker {(wb == null ? "NOT found" : Path.GetFileName(wb))}");
+    }
+}
+
 if (tests.Contains("updatelive"))
 {
     var rel = await AppUpdateService.CheckAsync();
-    Console.WriteLine($"   GitHub latest: {rel?.Tag} build {rel?.Build}, setup {rel?.SetupSize / 1048576} MB, zip {rel?.ZipSize / 1048576} MB, page {rel?.PageUrl}");
-    Check(rel != null && rel.SetupUrl != null && rel.ZipUrl != null, "latest release found on GitHub with both downloads");
+    Console.WriteLine($"   GitHub latest: {rel?.Tag} build {rel?.Build}, program zip {rel?.ZipSize / 1048576} MB, page {rel?.PageUrl}");
+    Check(rel != null && rel.ZipUrl != null, "latest release found on GitHub with the program download");
     Check(rel != null && rel.IsNewer == (rel.Version > ShinyForge.Core.AppInfo.Comparable), $"this copy ({ShinyForge.Core.AppInfo.Display}) compares correctly");
 }
 
@@ -685,6 +894,40 @@ if (tests.Contains("featuresui"))
     Snap(new BackupsForm(), "backups");
     Snap(new LivingDexForm(), "living_dex", 40000);
     Snap(new GamePage(GameCatalog.Get("sw_frlg_lg")) is var gp ? new Form { Size = new Size(1320, 1200), Controls = { gp } } : null!, "game_page_frlg", 1500);
+}
+
+if (tests.Contains("newui"))
+{
+    ApplicationConfiguration.Initialize();
+    var outDir = Path.Combine(work, "screens"); Directory.CreateDirectory(outDir);
+    void Snap(Form f, string name, int waitMs = 600)
+    {
+        f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000); f.ShowInTaskbar = false;
+        f.Show(); for (int i = 0; i < waitMs / 50; i++) { Application.DoEvents(); Thread.Sleep(50); }
+        using var bmp = new Bitmap(f.Width, f.Height);
+        f.DrawToBitmap(bmp, new Rectangle(Point.Empty, f.Size));
+        bmp.Save(Path.Combine(outDir, name + ".png"));
+        f.Close();
+        Console.WriteLine("   rendered " + name);
+    }
+    // In memory only (never saved): skip the first-run questions so the window can be drawn.
+    AppSettings.Current.PokeldnSetupDone = true;
+    var keys = Path.Combine(work, "prod.keys");
+    File.WriteAllText(keys, string.Join("\n", PokeldnService.KeysNeeded.Select(k => k + " = 00")));
+    AppSettings.Current.ProdKeysPath = keys;
+    Snap(new PokeldnForm(), "pokeldn", 15000);
+    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var us = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master\25 - Gen VII - USUM Collection\Save Data\20180228134249 - Ultra Sun\00001b50\main");
+    if (PKHeX.Core.SaveUtil.TryGetSaveFile(us, out var usSav) && usSav != null)
+    {
+        var fake = new List<CheckpointBackup>
+        {
+            new(@"E:\3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun\20261110-090000", @"E:\3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun", "20261110-090000", new DateTime(2026, 11, 10, 9, 0, 0), new FoundSave(us, usSav)),
+            new(@"E:\3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun\20261101-120000", @"E:\3ds\Checkpoint\saves\0x01B50 Pokémon Ultra Sun", "20261101-120000", new DateTime(2026, 11, 1, 12, 0, 0), new FoundSave(us, usSav)),
+        };
+        Snap(new CheckpointPicker("Ultra Sun", fake), "checkpoint_picker");
+    }
+    Snap(new GamePage(GameCatalog.Get("sw_shield")) is var gp ? new Form { Size = new Size(1320, 1200), Controls = { gp } } : null!, "game_page_shield", 1500);
 }
 
 if (tests.Contains("healthui"))

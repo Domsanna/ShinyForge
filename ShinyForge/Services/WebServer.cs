@@ -111,7 +111,7 @@ public static class WebServer
             TcpClient client;
             try { client = await _listener.AcceptTcpClientAsync(token); }
             catch { break; }
-            _ = Task.Run(() => Handle(client));
+            _ = Task.Run(() => Handle(client), CancellationToken.None); // a request in progress finishes on its own (5 s timeout)
         }
     }
 

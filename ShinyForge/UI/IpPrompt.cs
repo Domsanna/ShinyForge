@@ -92,6 +92,20 @@ public sealed class IpPrompt : Form
         return ip;
     }
 
+    private static bool _switchAskedThisRun;
+
+    /// <summary>
+    /// The Switch IP for this run: asked once when the Switch section is opened (like the 3DS), pre-filled with the last
+    /// address, and saved. Null if cancelled.
+    /// </summary>
+    public static string? GetOrAskSwitch(IWin32Window? owner)
+    {
+        if (_switchAskedThisRun && !string.IsNullOrWhiteSpace(AppSettings.Current.SwitchIP)) return AppSettings.Current.SwitchIP;
+        var ip = AskSwitch(owner);
+        if (ip != null) _switchAskedThisRun = true;
+        return ip;
+    }
+
     /// <summary>Asks for the Switch's new IP and saves it (settings + the Python bot's config). Null if cancelled.</summary>
     public static string? AskSwitch(IWin32Window? owner, string? problem = null)
     {

@@ -6,7 +6,6 @@ namespace ShinyForge.UI;
 /// <summary>"A new version of ShinyForge is available": what's new, then download + install, view on GitHub, skip or later.</summary>
 public sealed class UpdateForm : Form
 {
-    private readonly AppRelease _r;
     private readonly Label _progress = Theme.Label("", Theme.Body, Theme.Muted);
     private readonly ProgressBar _bar = new() { Style = ProgressBarStyle.Marquee, Visible = false, Height = 10, Width = 300 };
     /// <summary>True when the update has started and ShinyForge must close.</summary>
@@ -14,7 +13,6 @@ public sealed class UpdateForm : Form
 
     public UpdateForm(AppRelease r)
     {
-        _r = r;
         Text = "ShinyForge - update available";
         BackColor = Theme.Bg;
         ForeColor = Theme.Text;
@@ -28,7 +26,7 @@ public sealed class UpdateForm : Form
         var title = Theme.Label($"ShinyForge {r.Version.Major}.{r.Version.Minor} (build {r.Build}) is available", Theme.Title);
         title.Location = new Point(20, 12);
         var sub = Theme.Label($"You have {AppInfo.Display}.  Released {(r.Published == default ? "" : r.Published.ToLocalTime().ToString("yyyy-MM-dd"))}  •  " +
-                              (AppPaths.IsPortable ? $"portable download {Mb(r.ZipSize)}" : $"installer download {Mb(r.SetupSize)}"), Theme.Body, Theme.Muted);
+                              $"download {Mb(r.ZipSize)} - your spreadsheets, saves and settings are kept", Theme.Body, Theme.Muted);
         sub.Location = new Point(22, 60);
         head.Controls.AddRange(new Control[] { title, sub });
 

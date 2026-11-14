@@ -30,6 +30,8 @@
 | 🧪 **Optional extras** | Auto-catch and shiny RNG manipulation (FRLG). Both are **off by default** and only run when you turn them on. |
 | 🎥 **Recording & shiny clips** | Gap-free recordings in numbered segments, plus an automatic clip and screenshot of every shiny. |
 | 📋 **Pokédex tracker** | Updates your Excel Pokédex spreadsheet from your save. The Pokédex window uses each game's own sprites, forms and silhouettes. |
+| 📡 **Wireless trades & Mystery Gift** | Trade with and send Mystery Gifts to Switch games over local wireless through an **ESP32-S3** board, powered by [pokeldn](https://github.com/Decryptu/pokeldn). ShinyForge checks the board, installs pokeldn and its firmware, and asks for your `prod.keys`. |
+| 🗂️ **Checkpoint saves** | Finds your Checkpoint backups on the SD card by title ID, lets you pick one, and copies it to the PC before using it. |
 | 💾 **Saves & Game Info** | Reads saves from Red/Blue to Legends: Z-A and exports every Pokémon into a Pokémon HOME-ready folder. Also writes a readable Game Info report. |
 | 🧬 **Living Dex planner** | Combines all your saves to show what you own, where, and what's missing. |
 | 📈 **Hunt statistics** | Odds, the chance you'd have found a shiny by now, encounters per hour, ETA and a 24-hour chart. |
@@ -48,10 +50,12 @@
 
 Get the newest version from **[Releases](https://github.com/Domsanna/ShinyForge/releases/latest)**:
 
-- **`ShinyForge-Setup.exe`**: the installer. It includes the Pokédex tracker spreadsheets and needs no admin rights.
+- **`ShinyForge-Setup.exe` + `ShinyForge-Setup-1.bin`**: the installer. It includes all the Pokédex tracker spreadsheets and needs no admin rights. Download both parts into the same folder (the setup is over GitHub's 2 GB per-file limit).
 - **`ShinyForge-Portable.zip`**: unzip and run. Everything stays in its folder, so it works from a USB drive.
 
-ShinyForge checks this page for new versions when it starts. You can also check from **Tools & Updates**.
+ShinyForge checks this page for new versions when it starts. You can also check from **Tools & Updates**. Updates download only the program files (~150 MB), and your settings, spreadsheets and saves are kept. See the [changelog](CHANGELOG.md).
+
+**Platforms:** Windows 10/11 only. A macOS or Linux version would need a complete rewrite of the interface, which uses Windows Forms, Excel automation and Windows capture and USB APIs. pokeldn itself runs on macOS and Linux.
 
 > Windows SmartScreen may warn that the program is unrecognised, because it isn't code-signed. Click **More info → Run anyway**.
 
@@ -60,7 +64,8 @@ ShinyForge checks this page for new versions when it starts. You can also check 
 - Windows 10 or 11 (64-bit). The .NET runtime is included.
 - **Switch hunting:** a Switch running [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) with [sys-botbase](https://github.com/olliz0r/sys-botbase), on the same network as the PC.
 - **3DS hunting:** a 3DS running [Luma3DS](https://github.com/LumaTeam/Luma3DS). Turn on InputRedirection and the debugger in the Rosalina menu.
-- **Optional:** FFmpeg (recording), Python 3 (the FRLG hunter), Microsoft Excel (spreadsheets) and PKHeX. ShinyForge offers to install whatever is missing.
+- **Wireless trades:** an ESP32-S3 board on a USB data cable, and the `prod.keys` from your own Switch.
+- **Optional:** FFmpeg (recording), Python 3 (the FRLG hunter), Microsoft Excel (spreadsheets), PKHeX, pokeldn and esptool. ShinyForge offers to install whatever is missing.
 
 The full **User Guide** ships with the program: click **Guide** in the app, or see [`ShinyForge/ShinyForge User Guide.html`](ShinyForge/ShinyForge%20User%20Guide.html).
 
@@ -69,7 +74,7 @@ The full **User Guide** ships with the program: click **Guide** in the app, or s
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download), [Inno Setup 6](https://jrsoftware.org/isinfo.php) for the installer, and Git.
 
 ```powershell
-git clone https://github.com/Domsanna/ShinyForge.git
+git clone --recurse-submodules https://github.com/Domsanna/ShinyForge.git
 cd ShinyForge
 .\build.ps1        # → dist\ShinyForge-Setup.exe, dist\ShinyForge-Portable.zip
 ```
@@ -82,6 +87,7 @@ Or double-click `Install tools and build.bat`, which installs the SDK and Inno S
 |---|---|
 | `ShinyForge/` | The WinForms app (`Core`, `Services`, `UI`, `Assets`) and the user guide |
 | `PythonBot/` | The FireRed/LeafGreen Switch hunter (Python), bundled with the app |
+| `external/pokeldn/` | [pokeldn](https://github.com/Decryptu/pokeldn) (git submodule, AGPL-3.0). ShinyForge uses its official release builds |
 | `installer/` | Inno Setup script |
 | `tools/SelfTest/` | Test harness: `dotnet run -- <workdir> dex health features ...` |
 | `tools/*.py` | Scripts that build the artwork and sprite assets from PokeAPI |
@@ -99,6 +105,9 @@ ShinyForge is built on the work of many people. Thank you!
 - **[Luma3DS](https://github.com/LumaTeam/Luma3DS)** and Rosalina: AuroraWright, TuxSH and contributors.
 - **3DSShinyHunter** (SirSnorealot), **PKMN-NTR** (drgoku282) and **Pokebot-3ds** (SHGliscor): 3DS protocols and memory offsets.
 - **[NXBT](https://github.com/Brikwerk/nxbt)**: Brikwerk. Optional Raspberry Pi controller bridge.
+- **[pokeldn](https://github.com/Decryptu/pokeldn)**: Decryptu and contributors, built on MercuryEnigma's and tornadus' frlg-ldn-trade and kinnay's LDN library. Wireless trades and Mystery Gift.
+- **[esptool](https://github.com/espressif/esptool)** and **ESP-IDF**: Espressif Systems. Firmware installation.
+- **[Checkpoint](https://github.com/BernardoGiordano/Checkpoint)**: Bernardo Giordano (FlagBrew). The save backups ShinyForge reads.
 - **[PokeAPI](https://github.com/PokeAPI/pokeapi)** and **[PokeAPI/sprites](https://github.com/PokeAPI/sprites)**: Pokédex data and sprites.
 - **[FFmpeg](https://ffmpeg.org)**, with Windows builds by [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).
 - **[OpenCV](https://opencv.org)**, **[NumPy](https://numpy.org)**, **[python-mss](https://github.com/BoboTiG/python-mss)** and **[PyYAML](https://pyyaml.org)**.
@@ -110,7 +119,7 @@ The User Guide has the complete list with licenses.
 
 ## License
 
-ShinyForge is free software under the **[GNU General Public License v3.0](LICENSE)**, the same license as PKHeX.Core, which it is built on.
+ShinyForge is free software under the **[GNU General Public License v3.0](LICENSE)**, the same license as PKHeX.Core, which it is built on. The pokeldn submodule keeps its own license (AGPL-3.0).
 
 ## Disclaimer
 

@@ -112,18 +112,20 @@
     <li><a href="#record">7. Recording &amp; shiny clips</a></li>
     <li><a href="#tracker">8. Pokédex tracker</a></li>
     <li><a href="#saves">9. Saves, HOME folder &amp; Game Info</a></li>
-    <li><a href="#livingdex">10. Living Dex planner</a></li>
-    <li><a href="#stats">11. Hunt statistics</a></li>
-    <li><a href="#notify">12. Phone &amp; Discord alerts</a></li>
-    <li><a href="#overlay">13. Stream overlay &amp; phone remote</a></li>
-    <li><a href="#safety">14. Safety features</a></li>
-    <li><a href="#tools">15. Tools &amp; updates</a></li>
+    <li class="sub"><a href="#checkpoint">Checkpoint saves</a></li>
+    <li><a href="#trades">10. Wireless trades &amp; Mystery Gift</a></li>
+    <li><a href="#livingdex">11. Living Dex planner</a></li>
+    <li><a href="#stats">12. Hunt statistics</a></li>
+    <li><a href="#notify">13. Phone &amp; Discord alerts</a></li>
+    <li><a href="#overlay">14. Stream overlay &amp; phone remote</a></li>
+    <li><a href="#safety">15. Safety features</a></li>
+    <li><a href="#tools">16. Tools &amp; updates</a></li>
     <li class="sub"><a href="#updates">Updating ShinyForge</a></li>
-    <li><a href="#hardware">16. Switch &amp; 3DS setup</a></li>
-    <li><a href="#pythonbot">17. The Python bot (advanced)</a></li>
-    <li><a href="#files">18. Where your files live</a></li>
-    <li><a href="#trouble">19. Troubleshooting</a></li>
-    <li><a href="#credits">20. Credits &amp; thanks</a></li>
+    <li><a href="#hardware">17. Switch &amp; 3DS setup</a></li>
+    <li><a href="#pythonbot">18. The Python bot (advanced)</a></li>
+    <li><a href="#files">19. Where your files live</a></li>
+    <li><a href="#trouble">20. Troubleshooting</a></li>
+    <li><a href="#credits">21. Credits &amp; thanks</a></li>
   </ol>
   <button class="theme-toggle" type="button" id="themeToggle">Switch light / dark</button>
 </nav>
@@ -165,6 +167,7 @@
   </table></div>
   <h3>Installer</h3>
   <ol class="steps">
+    <li>Download <code>ShinyForge-Setup.exe</code> <b>and</b> every <code>ShinyForge-Setup-N.bin</code> file of the release into the same folder. The installer is split into parts because, with all the Pokédex spreadsheets, it's larger than GitHub's 2 GB file limit.</li>
     <li>Double-click <code>ShinyForge-Setup.exe</code>. If Windows SmartScreen shows "Windows protected your PC", click <b>More info → Run anyway</b>. This happens because the program isn't code-signed.</li>
     <li>Follow the wizard. You can add a desktop shortcut.</li>
     <li>ShinyForge, this guide and your spreadsheet folder are added to the Start menu.</li>
@@ -193,7 +196,7 @@
 <section id="quickstart">
   <h2><span class="num">3</span> Quick start</h2>
   <ol class="steps">
-    <li><b>Open ShinyForge</b> and pick <b>Nintendo Switch</b> or <b>Nintendo 3DS</b>.</li>
+    <li><b>Open ShinyForge</b> and pick <b>Nintendo Switch</b> or <b>Nintendo 3DS</b>. ShinyForge asks for the console's IP address (once per run, pre-filled with the last one). On the Switch it's under <b>System Settings → Internet</b>; on the 3DS, Rosalina shows it.</li>
     <li>If a yellow banner says programs are missing, click <b>Review</b> → <b>Install all</b>.</li>
     <li><b>Click your game.</b> Its page has four cards: <i>Shiny Hunt</i>, <i>Record Gameplay</i>, <i>Collection Tracker</i> and <i>Pokémon HOME folder + Game Info</i>.</li>
     <li>For hunting, make sure your console is set up (see <a href="#hardware">Switch &amp; 3DS setup</a>). Stand in front of the Pokémon, <b>save in-game</b>, then click <b>Start hunting</b>.</li>
@@ -368,11 +371,47 @@
     <li><b>Open in PKHeX</b> opens the save in PKHeX, if it's installed.</li>
   </ol>
   <p>ShinyForge reads saves from every main-series game from Red/Blue to Legends: Z-A, using PKHeX's core library. It only reads them and never writes to them.</p>
+
+  <h3 id="checkpoint">Saves from Checkpoint (SD card)</h3>
+  <p>If you back up your saves with <b>Checkpoint</b> on the console, ShinyForge can find them on the SD card. Click <b>Find in Checkpoint</b>.</p>
+  <ul>
+    <li>It searches every drive of this PC for Checkpoint's folders:
+      <ul>
+        <li>3DS: <code>sdmc:/3ds/Checkpoint/saves/&lt;unique ID&gt; &lt;game title&gt;/</code></li>
+        <li>Switch: <code>sdmc:/switch/Checkpoint/saves/&lt;title ID&gt; &lt;game title&gt;/</code></li>
+      </ul>
+      If you copied the SD card to the PC, choose that folder when asked. It's remembered in Settings.</li>
+    <li>The game you opened is matched by its <b>title ID</b> (e.g. <code>0x01B51</code> for Ultra Moon, <code>0100ABF008968000</code> for Sword), or by its name for games without a listed ID (DS cartridges, Legends: Z-A).</li>
+    <li>When several backups are found, you choose which one to use. The newest is selected.</li>
+    <li>The chosen backup is <b>copied to this PC</b> (<code>Documents\ShinyForge\Saves\&lt;game&gt;</code>, or <code>Saves</code> next to the portable program). The HOME folder, Game Info and the Pokédex tracker then use that copy.</li>
+  </ul>
+  <div class="callout warn"><strong>You make the backups</strong>Before the first scan, ShinyForge reminds you to save in-game and back up the save <b>yourself</b> with Checkpoint. ShinyForge can't make Checkpoint backups, and it never writes to your SD card. When you scan again later, it asks whether you'd like to make a fresh backup first and shows the steps.</div>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="trades">
+  <h2><span class="num">10</span> Wireless trades &amp; Mystery Gift</h2>
+  <p>On every Switch game's page, <b>Wireless trades (pokeldn)</b> opens trading and Mystery Gift over the console's local wireless. This uses <b>pokeldn</b> by Decryptu: a small board acts as the radio, and nothing is installed on the console. It works with FireRed/LeafGreen, Let's Go, Sword/Shield, BD/SP, Legends: Arceus, Scarlet/Violet and Legends: Z-A.</p>
+  <div class="callout warn"><strong>You need an ESP32-S3 board</strong>An ESP32-S3 is a small, inexpensive microcontroller board, for example the Seeed XIAO ESP32S3 or an ESP32-S3 DevKit. Connect it with a USB <b>data</b> cable (charge-only cables don't work) to the board's <b>native USB</b> socket. You also need the <code>prod.keys</code> dumped from <b>your own</b> Switch.</div>
+  <h3>First time</h3>
+  <ol class="steps">
+    <li>ShinyForge asks whether you have an ESP32-S3. If you don't, it shows pokeldn's list of supported boards and stops there.</li>
+    <li>It checks that the board is plugged in, which pokeldn firmware it runs, and whether the pokeldn app and esptool are installed and up to date.</li>
+    <li>If anything is missing or old, it lists what it would do and <b>asks first</b>. Then it downloads from the official GitHub releases, checks every file against its published SHA-256 checksum, installs, and writes the radio firmware to the board with Espressif's esptool.</li>
+    <li>Finally it asks where <code>prod.keys</code> is on this PC. Only the location is stored, in ShinyForge and in pokeldn's own settings. The file is never copied, uploaded or shown.</li>
+  </ol>
+  <h3>After that</h3>
+  <ul>
+    <li>The window shows a checklist: board, firmware, pokeldn app, firmware file, esptool and prod.keys. Use <b>Install / update everything</b>, <b>Install firmware on the board</b>, <b>Choose prod.keys…</b> or <b>Check again</b>.</li>
+    <li><b>Open pokeldn</b> starts it. Choose a game and a tool there, then follow the steps it shows for the console.</li>
+    <li>New pokeldn versions show up in <b>Tools &amp; Updates</b>.</li>
+  </ul>
+  <p>For the portable version, pokeldn, esptool and the ESP32-S3 firmware can also sit in the <b>Backup Tools</b> folder. ShinyForge uses them from there.</p>
 </section>
 
 <!-- ============================================================ 10 -->
 <section id="livingdex">
-  <h2><span class="num">10</span> Living Dex planner</h2>
+  <h2><span class="num">11</span> Living Dex planner</h2>
   <p>Click <b>Living Dex</b> in the top bar. ShinyForge reads the saves you've set up for every game and builds one list of all 1,025 species:</p>
   <ul>
     <li>Which species you own, and <b>in which game</b>.</li>
@@ -384,7 +423,7 @@
 
 <!-- ============================================================ 11 -->
 <section id="stats">
-  <h2><span class="num">11</span> Hunt statistics</h2>
+  <h2><span class="num">12</span> Hunt statistics</h2>
   <p>Open <b>Hunt stats</b> from the top bar, or <b>Statistics</b> on a hunt card. Pick a hunt log at the top.</p>
   <ul>
     <li><b>Encounters</b> in the current hunt, counted since your last shiny.</li>
@@ -399,7 +438,7 @@
 
 <!-- ============================================================ 12 -->
 <section id="notify">
-  <h2><span class="num">12</span> Phone &amp; Discord alerts</h2>
+  <h2><span class="num">13</span> Phone &amp; Discord alerts</h2>
   <p>Get a message the moment a shiny appears, or if something goes wrong while you're away. Set it up in <b>Settings → Notifications</b>.</p>
   <h3>Discord</h3>
   <ol class="steps">
@@ -422,7 +461,7 @@
 
 <!-- ============================================================ 13 -->
 <section id="overlay">
-  <h2><span class="num">13</span> Stream overlay &amp; phone remote</h2>
+  <h2><span class="num">14</span> Stream overlay &amp; phone remote</h2>
   <p>Both are turned on in <b>Settings → Stream overlay &amp; phone remote</b>. Click <b>Overlay / remote links…</b> to see and copy your addresses.</p>
   <h3>Stream overlay <span class="badge off">off by default</span></h3>
   <ul>
@@ -441,7 +480,7 @@
 
 <!-- ============================================================ 14 -->
 <section id="safety">
-  <h2><span class="num">14</span> Safety features</h2>
+  <h2><span class="num">15</span> Safety features</h2>
   <div class="grid">
     <div class="card"><b>System check (every minute)</b><p>Checks that everything running still works: hunts, recordings, clip buffer, console connections, disk space and data folders. Problems show in the status bar and a banner, and go to your phone if you set that up. Click the status-bar light for details, <b>Check now</b> or <b>Open log</b>.</p></div>
     <div class="card"><b>Same-Pokémon guard</b><p>If the hunter sees exactly the same Pokémon twice in a row, the reset didn't register. It warns you, holds the reset buttons longer and checks that the game really restarted. If it happens 3 times in a row, ShinyForge restarts the hunter automatically (up to 3 times), then stops and tells you.</p></div>
@@ -454,7 +493,7 @@
 
 <!-- ============================================================ 15 -->
 <section id="tools">
-  <h2><span class="num">15</span> Tools &amp; updates</h2>
+  <h2><span class="num">16</span> Tools &amp; updates</h2>
   <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, and where.</p>
   <ul>
     <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
@@ -465,7 +504,7 @@
   <ul>
     <li>When ShinyForge starts, it checks the <a href="https://github.com/Domsanna/ShinyForge/releases">ShinyForge GitHub page</a> for a newer release. If there is one, a window shows <b>what's new</b> with these options:
       <ul>
-        <li><b>Download and install</b>: the <i>installed</i> version downloads the new installer, which closes ShinyForge, updates it and starts it again. The <i>portable</i> version downloads the new zip and swaps in the new program files. Your <code>Data</code>, <code>Spreadsheets</code> and <code>Backup Tools</code> folders are kept.</li>
+        <li><b>Download and install</b>: downloads only the program files (about 150 MB, not the multi-GB installer). ShinyForge closes, the new files replace the old ones, and it starts again. This works the same for installed and portable copies. Your settings, spreadsheets, Checkpoint copies, Backup Tools and the hunter's <code>config.yaml</code> are kept. New spreadsheets that come with a release are in the full installer.</li>
         <li><b>View on GitHub</b>: opens the release page.</li>
         <li><b>Skip this version</b> or <b>Later</b>.</li>
       </ul></li>
@@ -479,7 +518,7 @@
 
 <!-- ============================================================ 16 -->
 <section id="hardware">
-  <h2><span class="num">16</span> Switch &amp; 3DS setup</h2>
+  <h2><span class="num">17</span> Switch &amp; 3DS setup</h2>
   <div class="callout warn"><strong>Homebrew notice</strong>Automatic hunting needs custom firmware on your console. Only use it on hardware you own, keep a backup of your saves, and play offline when using homebrew.</div>
   <h3>Nintendo Switch (sys-botbase)</h3>
   <ol class="steps">
@@ -505,7 +544,7 @@
 
 <!-- ============================================================ 17 -->
 <section id="pythonbot">
-  <h2><span class="num">17</span> The Python bot (advanced)</h2>
+  <h2><span class="num">18</span> The Python bot (advanced)</h2>
   <p>The FireRed/LeafGreen hunter is a Python program that ships with ShinyForge, in the <code>PythonBot</code> folder next to <code>ShinyForge.exe</code>. You can point <b>Settings → Python hunting bot folder</b> at another copy. ShinyForge starts it, passes your settings to it, and watches it for you, so most people never need to touch it. If you're curious:</p>
   <ul>
     <li><code>config.yaml</code> holds the bot's own settings: controller type and address, hunting mode, timings and detection thresholds. ShinyForge keeps the Switch address in it up to date.</li>
@@ -532,7 +571,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
 
 <!-- ============================================================ 18 -->
 <section id="files">
-  <h2><span class="num">18</span> Where your files live</h2>
+  <h2><span class="num">19</span> Where your files live</h2>
   <p>"Data folder" means <code>%AppData%\ShinyForge</code> (installed) or <code>Data</code> next to the program (portable).</p>
   <div class="table-wrap"><table>
     <tr><th>What</th><th>Where</th></tr>
@@ -541,7 +580,9 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Backups</td><td><code>Data folder\Backups\Saves</code> and <code>…\Spreadsheets</code></td></tr>
     <tr><td>Shiny clips</td><td>The game's recording folder, or <code>Data folder\Shiny Clips</code></td></tr>
     <tr><td>Overlay text files</td><td><code>Data folder\Overlay</code></td></tr>
-    <tr><td>Downloaded tools</td><td><code>Data folder\Tools</code></td></tr>
+    <tr><td>Downloaded tools</td><td><code>Data folder\Tools</code> (pokeldn, esptool and the ESP32-S3 firmware too)</td></tr>
+    <tr><td>Checkpoint copies &amp; their exports</td><td><code>Documents\ShinyForge\Saves</code> (installed) or <code>Saves</code> (portable)</td></tr>
+    <tr><td>pokeldn's own settings</td><td><code>%AppData%\pokeldn</code></td></tr>
     <tr><td>3DS encounter log</td><td><code>3ds_encounters.csv</code> in the data folder</td></tr>
     <tr><td>Switch encounter log</td><td><code>encounters.csv</code> in the Python bot folder (<code>PythonBot</code> next to the program)</td></tr>
     <tr><td>Pokédex spreadsheets</td><td><code>Documents\ShinyForge\Spreadsheets</code> (installed) or <code>Spreadsheets</code> (portable)</td></tr>
@@ -550,7 +591,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
 
 <!-- ============================================================ 19 -->
 <section id="trouble">
-  <h2><span class="num">19</span> Troubleshooting</h2>
+  <h2><span class="num">20</span> Troubleshooting</h2>
   <div class="table-wrap"><table>
     <tr><th>Problem</th><th>Try this</th></tr>
     <tr><td>"Couldn't connect to sys-botbase"</td><td>Is the Switch on, awake and on the same network? Check its IP in System Settings → Internet. Make sure sys-botbase is installed and the Switch was rebooted after installing it.</td></tr>
@@ -562,6 +603,9 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>No save found</td><td>Point the card at the folder that holds the exported save (e.g. your Checkpoint/JKSV backup folder). Sub-folders are searched.</td></tr>
     <tr><td>The phone remote doesn't load</td><td>The phone must be on the same WiFi. Allow ShinyForge in the Windows firewall for private networks. Check the PIN in the address.</td></tr>
     <tr><td>No notifications</td><td>Use Test notification in Settings. Check the webhook URL, or that the ntfy topic name matches exactly.</td></tr>
+    <tr><td>No Checkpoint folder found</td><td>Put the console's SD card into the PC (or connect it), or choose the copied folder when asked. Checkpoint must have made at least one backup of the game.</td></tr>
+    <tr><td>ESP32-S3 not found</td><td>Use a USB <b>data</b> cable and the board's native USB socket. The board appears as a COM port in Device Manager; ESP32-S3 boards need no driver on Windows 10/11.</td></tr>
+    <tr><td>Firmware "not answering"</td><td>Close pokeldn (it holds the port), then click <b>Check again</b>. If it still doesn't answer, use <b>Install firmware on the board</b>.</td></tr>
     <tr><td>RNG mode keeps missing</td><td>A miss of a frame or two is normal, and the bot adjusts its timing. Fewer nature or IV requirements make matching frames more common.</td></tr>
   </table></div>
   <p>When in doubt, open the status-bar <b>system check</b>. It usually says exactly what's wrong and what to do.</p>
@@ -569,7 +613,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
 
 <!-- ============================================================ 20 -->
 <section id="credits">
-  <h2><span class="num">20</span> Credits &amp; thanks</h2>
+  <h2><span class="num">21</span> Credits &amp; thanks</h2>
   <p>ShinyForge stands on the shoulders of a generous community. A huge thank-you to everyone below. Each project stays the property of its authors and is used under its own license. Please support them!</p>
 
   <h3>Built into ShinyForge</h3>
@@ -611,6 +655,17 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>NumPy</td><td>The NumPy developers. BSD-3-Clause</td><td>Image maths</td></tr>
     <tr><td>python-mss</td><td>Mickaël Schoentgen (BoboTiG). MIT</td><td>Screen capture in vision mode</td></tr>
     <tr><td>PyYAML</td><td>Kirill Simonov and the PyYAML contributors. MIT</td><td>Reading <code>config.yaml</code></td></tr>
+  </table></div>
+
+  <h3>Wireless trades &amp; Checkpoint saves</h3>
+  <div class="table-wrap"><table class="credits">
+    <tr><th>Project</th><th>By</th><th>Used for</th></tr>
+    <tr><td>pokeldn</td><td>Decryptu and contributors (Gr3nSkyDragon, ismailhasannnnnn, easyworld, capito27, DedHapp3n, elsardine6k7, junkmailkeep, MarcJa420, axechaso, FrozenGEE, Matcore962, gfaraujosousa). AGPL-3.0</td><td>Local wireless trades and Mystery Gift through an ESP32 board. Included as source (submodule) and as its official app and firmware</td></tr>
+    <tr><td>frlg-ldn-trade</td><td>MercuryEnigma, and tornadus (original), with trowgundam</td><td>The projects pokeldn grew from</td></tr>
+    <tr><td>LDN library &amp; NintendoClients wiki</td><td>kinnay</td><td>The Switch local wireless protocol pokeldn builds on</td></tr>
+    <tr><td>esptool</td><td>Espressif Systems and contributors. GPL-2.0</td><td>Installing the radio firmware on the ESP32-S3</td></tr>
+    <tr><td>ESP-IDF</td><td>Espressif Systems. Apache-2.0</td><td>The framework pokeldn's firmware is built with</td></tr>
+    <tr><td>Checkpoint</td><td>Bernardo Giordano (FlagBrew) and contributors. GPL-3.0</td><td>The console save manager whose backups ShinyForge reads</td></tr>
   </table></div>
 
   <h3>Services &amp; other tools</h3>

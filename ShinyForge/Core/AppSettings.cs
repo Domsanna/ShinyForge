@@ -14,6 +14,8 @@ public sealed class GameSettings
     public string SpreadsheetPath { get; set; } = "";  // auto-detected if empty
     public bool AutoMonitor { get; set; }
     public string HuntBot { get; set; } = "";
+    /// <summary>The Checkpoint backup folder (on the SD card) last copied for this game; set = the next scan is a rescan.</summary>
+    public string CheckpointBackup { get; set; } = "";
 }
 
 /// <summary>Hunt options chosen in the "Hunt options" window (used by the Python hunter and the 3DS bot).</summary>
@@ -57,6 +59,17 @@ public sealed class AppSettings
     public bool CheckUpdatesOnStart { get; set; } = true;
     /// <summary>A ShinyForge release the user chose to skip ("v1.0.12"); no reminder until a newer one comes out.</summary>
     public string SkippedAppVersion { get; set; } = "";
+
+    // pokeldn (local wireless trades through an ESP32-S3)
+    /// <summary>pokeldn.exe chosen by hand (blank = the copy ShinyForge installs in its Tools folder).</summary>
+    public string PokeldnPath { get; set; } = "";
+    /// <summary>Location of the user's Switch prod.keys. Only the path is stored - the file is never copied.</summary>
+    public string ProdKeysPath { get; set; } = "";
+    /// <summary>The ESP32-S3 introduction and first-time setup were completed.</summary>
+    public bool PokeldnSetupDone { get; set; }
+
+    /// <summary>A Checkpoint saves folder chosen by hand (e.g. a copy of the SD card on the PC); blank = search the drives.</summary>
+    public string CheckpointFolder { get; set; } = "";
 
     // ---- notifications (phone / Discord)
     public string DiscordWebhookUrl { get; set; } = "";

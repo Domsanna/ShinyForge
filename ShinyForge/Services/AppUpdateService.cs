@@ -8,17 +8,17 @@ namespace ShinyForge.Services;
 
 /// <summary>A published ShinyForge release (from the GitHub releases of <see cref="AppInfo.Repo"/>).</summary>
 public sealed record AppRelease(string Tag, Version Version, string Name, string Notes, string PageUrl, DateTime Published,
-    string? SetupUrl, long SetupSize, string? ZipUrl, long ZipSize)
+    string? ZipUrl, long ZipSize)
 {
     public int Build => Version.Build;
     public bool IsNewer => Version > AppInfo.Comparable;
 }
 
 /// <summary>
-/// Checks GitHub for a newer ShinyForge and installs it:
-///  - installed copy: downloads ShinyForge-Setup.exe and runs it (it closes ShinyForge, updates, and starts it again);
-///  - portable copy: downloads ShinyForge-Portable.zip and replaces the program files after ShinyForge closes
-///    (the Data, Spreadsheets and Backup Tools folders are kept).
+/// Checks GitHub for a newer ShinyForge and installs it. Both the installed and the portable copy update the same way:
+/// ShinyForge-Portable.zip (the program files, ~150 MB - not the multi-GB installer with the spreadsheets) is downloaded
+/// and its files replace the old ones after ShinyForge closes. The Data, Spreadsheets, Saves and Backup Tools folders,
+/// portable.flag and the Python bot's config.yaml are kept.
 /// </summary>
 public static class AppUpdateService
 {
@@ -48,39 +48,26 @@ public static class AppUpdateService
         var tag = j["tag_name"]?.ToString() ?? "";
         var v = AppInfo.ParseTag(tag);
         if (v == null) return null;
-        string? setup = null, zip = null;
-        long setupSize = 0, zipSize = 0;
+        string? zip = null;
+        long zipSize = 0;
         foreach (var a in j["assets"] as JsonArray ?? new JsonArray())
         {
             var name = a?["name"]?.ToString() ?? "";
             var url = a?["browser_download_url"]?.ToString();
             var size = a?["size"]?.GetValue<long>() ?? 0;
-            if (name.EndsWith("Setup.exe", StringComparison.OrdinalIgnoreCase)) { setup = url; setupSize = size; }
-            else if (name.Contains("Portable", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) { zip = url; zipSize = size; }
+            if (name.Contains("Portable", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) { zip = url; zipSize = size; }
         }
         DateTime.TryParse(j["published_at"]?.ToString(), out var published);
         return new AppRelease(tag, v, j["name"]?.ToString() is { Length: > 0 } n ? n : tag, j["body"]?.ToString() ?? "",
-            j["html_url"]?.ToString() ?? AppInfo.ReleasesUrl, published, setup, setupSize, zip, zipSize);
+            j["html_url"]?.ToString() ?? AppInfo.ReleasesUrl, published, zip, zipSize);
     }
 
-    /// <summary>Downloads the right file for this copy (installer or portable zip) and starts the update.
-    /// Returns true when ShinyForge should now close so the update can finish.</summary>
+    /// <summary>Downloads the program files and starts the update. Returns true when ShinyForge should now close so it can finish.</summary>
     public static async Task<bool> InstallAsync(AppRelease r, Action<string> progress, CancellationToken token = default)
     {
         var dir = Path.Combine(Path.GetTempPath(), "ShinyForgeUpdate", r.Tag);
         Directory.CreateDirectory(dir);
-        if (!AppPaths.IsPortable)
-        {
-            if (r.SetupUrl == null) throw new IOException("This release has no installer to download - get it from the release page.");
-            var setup = Path.Combine(dir, "ShinyForge-Setup.exe");
-            await DownloadAsync(r.SetupUrl, setup, r.SetupSize, progress, token);
-            progress("Starting the installer...");
-            // Inno Setup: closes ShinyForge if needed, installs over the old version, restarts it afterwards.
-            Process.Start(new ProcessStartInfo(setup, "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /NOCANCEL") { UseShellExecute = true });
-            return true;
-        }
-
-        if (r.ZipUrl == null) throw new IOException("This release has no portable zip to download - get it from the release page.");
+        if (r.ZipUrl == null) throw new IOException("This release has no program download (ShinyForge-Portable.zip) - get it from the release page.");
         var zipFile = Path.Combine(dir, "ShinyForge-Portable.zip");
         await DownloadAsync(r.ZipUrl, zipFile, r.ZipSize, progress, token);
         progress("Unpacking...");
@@ -93,7 +80,7 @@ public static class AppUpdateService
     /// <summary>
     /// Unpacks a portable zip into <paramref name="workDir"/> and writes apply_update.cmd, which waits for process
     /// <paramref name="waitForPid"/> to exit, copies the new program files into <paramref name="appDir"/> (keeping the
-    /// Data, Backup Tools and Spreadsheets folders and portable.flag) and starts ShinyForge again. Returns the script path.
+    /// Data, Backup Tools, Spreadsheets and Saves folders, portable.flag and the bot's config.yaml) and starts ShinyForge again. Returns the script path.
     /// </summary>
     public static string PreparePortableUpdate(string zipFile, string workDir, string appDir, int waitForPid, bool restart = true)
     {
@@ -110,7 +97,7 @@ public static class AppUpdateService
             "title ShinyForge update\r\n" +
             "echo Updating ShinyForge - please wait...\r\n" +
             $":wait\r\ntasklist /FI \"PID eq {waitForPid}\" /NH | find \" {waitForPid} \" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
-            $"robocopy \"{newApp}\" \"{appDir}\" /E /XD Data \"Backup Tools\" Spreadsheets /XF portable.flag /R:5 /W:2 /NFL /NDL /NJH /NJS /NP\r\n" +
+            $"robocopy \"{newApp}\" \"{appDir}\" /E /XD Data \"Backup Tools\" Spreadsheets Saves /XF portable.flag config.yaml /R:5 /W:2 /NFL /NDL /NJH /NJS /NP\r\n" +
             "if %ERRORLEVEL% GEQ 8 (echo The update could not be copied. & pause & exit /b 1)\r\n" +
             (restart ? $"start \"\" \"{Path.Combine(appDir, "ShinyForge.exe")}\"\r\n" : "") +
             "exit /b 0\r\n");
