@@ -155,19 +155,9 @@ public sealed class GamePage : UserControl, IDisposable
             if (key == "python" && !await EnsureDependency("Python 3")) return;
             if (key == "sysbot" && !await EnsureDependency("SysBot.exe")) return;
             if (!await IpPrompt.EnsureSwitch(this)) return;
-            try
-            {
-                _gs.HuntBot = key;
-                AppSettings.Current.Save();
-                HuntService.ResetAutoFixes();
-                HuntService.Start(_game, key);
-                Status(key == "python"
-                    ? OsInfo.IsWindows ? "Python hunter started in its own window." : "Python hunter started - its output goes to hunt_console.log in the bot folder."
-                    : "SysBot.exe opened with the routine pre-selected - press Start All there.");
-                if (key == "python") StartClipBuffer();
-            }
-            catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Shiny Hunt"); }
-            RefreshHuntStatus();
+            // FireRed / LeafGreen: the game must be open with the save loaded (the hunter decides its mode from where you stand)
+            if (key == "python" && !await EnsureGameOpen()) return;
+            await StartHuntNow(key);
         };
         stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); };
         card.Body.Children.Add(options.Any(o => o.Key == "python") ? Skin.Wrap(start, stop) : Skin.Wrap(start));
@@ -749,7 +739,19 @@ public sealed class GamePage : UserControl, IDisposable
     private static readonly HashSet<string> CheckpointWarned = new();
 
     /// <summary>Finds this game's Checkpoint backups on the SD card, warns first, offers a fresh backup on a rescan, lets the user pick, copies to the computer.</summary>
+    private bool _switchFtpStarted; // ShinyForge opened the FTP app on the Switch during this Checkpoint step
+
     private async Task FindInCheckpoint()
+    {
+        try { await FindInCheckpointSteps(); }
+        finally
+        {
+            // whatever happened after it (picked, cancelled, failed): offer to close the FTP app and go back to the game
+            if (_switchFtpStarted) { _switchFtpStarted = false; await OfferBackToGame(); }
+        }
+    }
+
+    private async Task FindInCheckpointSteps()
     {
         var rescan = !string.IsNullOrEmpty(_gs.CheckpointBackup);
         if (!CheckpointWarned.Contains(_game.Id))
@@ -875,7 +877,7 @@ public sealed class GamePage : UserControl, IDisposable
                 startedApp = true;
                 var (started, cancelled) = await StartSwitchFtpApp(ip);
                 if (cancelled) { _saveStatus.Text = ""; return null; }
-                if (started != null) { port = started; break; }
+                if (started != null) { port = started; _switchFtpStarted = true; break; }
             }
             var r = await Dialogs.YesNoCancel(this, ConsoleSdService.HowToTurnOn(_game.IsSwitch, ip) +
                                                     "\n\nYes = try again    No = enter a different IP address", "ShinyForge - read the console's SD card");
@@ -891,9 +893,6 @@ public sealed class GamePage : UserControl, IDisposable
             var (h, p) = (ip, port.Value);
             var result = await Task.Run(() => ConsoleSdService.Mirror(_game, h, p, msg => Dialogs.Ui(() => _saveStatus.Text = msg)));
             _saveStatus.Text = $"Read {result.TitleFolders} Checkpoint folder(s) of this game from the {console} ({result.Downloaded} file(s) downloaded).";
-            if (startedApp && _game.IsSwitch)
-                await Dialogs.Info(this, "Done reading the Switch's SD card.\n\nThe FTP app is still open on the Switch: press HOME and close it " +
-                                         "before you start your game again.", "ShinyForge - read the console's SD card");
             return result.Root;
         }
         catch (Exception ex)
@@ -955,6 +954,90 @@ public sealed class GamePage : UserControl, IDisposable
                                      "\n\nYou can start it yourself instead (the steps are shown next).", "ShinyForge - open the FTP app");
             return (null, false);
         }
+    }
+
+    /// <summary>After the WiFi save read: close the FTP app, open the game and (FireRed / LeafGreen) load the save and start the hunt.</summary>
+    private async Task OfferBackToGame()
+    {
+        var hunt = _game.Bot == BotKind.FrlgSwitch && !HuntService.IsPythonHuntRunning();
+        if (!await Dialogs.YesNo(this,
+                "ShinyForge is done with the Switch's SD card.\n\n" +
+                $"Yes = close the FTP app and open Pokémon {_game.Title}" + (hunt ? ", load your save and start the shiny hunt" : "") + "\n" +
+                "No = leave the FTP app open (close it yourself: HOME, X, Close)", "ShinyForge - back to the game"))
+            return;
+        if (await OpenGameOnSwitch(t => _saveStatus.Text = t) && hunt && await EnsureDependency("Python 3"))
+            await StartHuntNow("python");
+    }
+
+    /// <summary>Before a FireRed / LeafGreen hunt: is the game open on the Switch with the save loaded? If not (nothing open, the
+    /// FTP app / Homebrew Menu still open), offer to open it. False = don't start the hunt.</summary>
+    private async Task<bool> EnsureGameOpen()
+    {
+        var s = AppSettings.Current;
+        var ids = SwitchGameLauncher.TitleIds(_game);
+        if (ids.Length == 0) return true;
+        Status("Checking the Switch...");
+        string? running;
+        bool ftp;
+        try
+        {
+            running = await Task.Run(() => ConsoleFtpLauncher.RunningGame(s.SwitchIP, s.SwitchPort));
+            ftp = running != null && await Task.Run(() => ConsoleSdService.FindPort(s.SwitchIP)) != null;
+        }
+        catch { return true; } // can't tell - the hunter reports problems itself
+        if (running != null && ids.Contains(running) && !ftp) return true;
+        if (running != null && !ftp)
+        {
+            await Dialogs.Info(this, $"Another game is open on the Switch ({running}). Save and close it, then start the hunt again.", "Shiny Hunt");
+            return false;
+        }
+        var r = await Dialogs.YesNoCancel(this,
+            (ftp ? "The FTP app is still open on the Switch." : $"Pokémon {_game.Title} isn't open on the Switch.") + "\n\n" +
+            $"Yes = open Pokémon {_game.Title} and load your save first (ShinyForge finds it on the HOME menu or in All Software by its icon)\n" +
+            "No = start the hunt anyway", "Shiny Hunt");
+        return r == Dialogs.No || (r == Dialogs.Yes && await OpenGameOnSwitch(Status));
+    }
+
+    /// <summary>Opens this game on the Switch (closing the FTP app first) and, for FireRed / LeafGreen, loads the save.</summary>
+    private async Task<bool> OpenGameOnSwitch(Action<string> status)
+    {
+        var s = AppSettings.Current;
+        if (HuntService.IsPythonHuntRunning())
+        {
+            await Dialogs.Info(this, "The hunter is running - stop it first.", "ShinyForge - open the game");
+            return false;
+        }
+        try
+        {
+            await Task.Run(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, _game, m => Dialogs.Ui(() => status(m))));
+            status($"Pokémon {_game.Title} is open on the Switch" + (_game.Bot == BotKind.FrlgSwitch ? " with your save loaded." : "."));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("Opening the game on the Switch failed: " + ex);
+            status(ex.Message);
+            await Dialogs.Info(this, ex.Message, "ShinyForge - open the game");
+            return false;
+        }
+    }
+
+    /// <summary>Starts the chosen hunt bot (and, for the Python hunter, the rolling shiny-clip buffer).</summary>
+    private async Task StartHuntNow(string key)
+    {
+        try
+        {
+            _gs.HuntBot = key;
+            AppSettings.Current.Save();
+            HuntService.ResetAutoFixes();
+            HuntService.Start(_game, key);
+            Status(key == "python"
+                ? OsInfo.IsWindows ? "Python hunter started in its own window." : "Python hunter started - its output goes to hunt_console.log in the bot folder."
+                : "SysBot.exe opened with the routine pre-selected - press Start All there.");
+            if (key == "python") StartClipBuffer();
+        }
+        catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Shiny Hunt"); }
+        RefreshHuntStatus();
     }
 
     private void ScanSaves()

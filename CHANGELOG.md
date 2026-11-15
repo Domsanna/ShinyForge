@@ -2,6 +2,18 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 10)
+
+### New
+- **ShinyForge opens the game on the Switch and starts the hunt.** After reading Checkpoint saves over WiFi, ShinyForge offers to go back to the game. It closes the FTP app, opens the game and, for FireRed / LeafGreen, loads your save and starts the shiny hunt. **Start hunting** does the same when the game isn't open yet.
+- **Finds the game on the Switch by its icon.** The cursor starts on the first game of the HOME menu (checked on a screenshot). ShinyForge then goes along the HOME row and, if the game isn't there, through **All Software**. Each game is compared with the official icon of the game you picked (all languages), and nothing is started until the right one is selected. Tested on a real Switch: it found LeafGreen on the HOME row and Pokémon Shield in All Software.
+- **You choose the Switch user.** When the Switch asks "Who is using the software?", ShinyForge shows that screen and asks which user should play, then selects that user. This works for opening games and for opening the FTP app.
+
+### Fixed
+- The FTP app (ftpd / Checkpoint) runs under the title ID of the game it was started from, so it's no longer mistaken for that game.
+- A sys-botbase press the Switch refuses (stuck virtual controller) is noticed: the controller is reset and the press repeated once.
+- ShinyForge never closes a game you're playing. Only the FTP app it opened itself is closed.
+
 ## 1.0 (build 9)
 
 ### New

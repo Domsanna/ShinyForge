@@ -754,6 +754,10 @@ if (tests.Contains("checkpoint"))
         Directory.Delete(real, true);
     }
 
+    // every Switch game ShinyForge can open on the Switch has its HOME-menu icon (all languages)
+    var noIcon = GameCatalog.ForSwitch.SelectMany(SwitchGameLauncher.TitleIds).Where(t => !File.Exists(Path.Combine(AppPaths.AssetsDir, "SwitchIcons", t + ".jpg"))).ToList();
+    Check(noIcon.Count == 0, "Switch game icons for every title ID" + (noIcon.Count > 0 ? ": missing " + string.Join(", ", noIcon) : ""));
+
     // Gen 7 trackers are recognised
     foreach (var id in new[] { "3ds_sun", "3ds_moon", "3ds_usun", "3ds_umoon", "sw_lgp", "sw_lge" })
     {
@@ -970,6 +974,99 @@ if (tests.Contains("dexinfo"))
           && links.First(l => l.Title == "Let's Go, Pikachu!").Url.Contains("/pokedex-sm/") && links.First(l => l.Title == "Legends: Arceus").Url.Contains("/pokedex-swsh/")
           && links.First(l => l.Title == "Red").Url.Contains("/pokedex/018"), "Serebii links go to each game's own Pokédex");
     foreach (var l in links) Console.WriteLine($"   {l.Title,-22} {l.Url}");
+}
+
+if (tests.Contains("homemenu"))
+{
+    // Offline: SelfTest <work> homemenu <folder with Switch HOME screenshots> - frame, icon, user-count and All Software checks
+    // on saved screenshots (row*.jpg = HOME row, all_*.jpg = All Software, as_open.jpg = "Who is using the software?").
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var dir = args.Skip(1).First(a => a != "homemenu" && Directory.Exists(a));
+    RgbImage Load(string f) => ConsoleFtpLauncher.Decode!(File.ReadAllBytes(Path.Combine(dir, f)))!;
+    List<double[]> Icons(string id) => SwitchGameLauncher.IconPrints(SwitchGameLauncher.TitleIds(GameCatalog.Get(id)));
+    bool IconAt(RgbImage img, int x, int y, int w, string id)
+    {
+        var p = ConsoleFtpLauncher.Fingerprint(img, (x + 10, y + 10, w - 20, w - 20));
+        return Icons(id).Min(i => ConsoleFtpLauncher.Difference(p, i)) <= 22;
+    }
+    var row10 = Load("row10.jpg");
+    Check(SwitchGameLauncher.SelectedBox(row10) is { X: >= 900 and <= 915, W: > 260 }, $"HOME row: the selected tile's frame ({SwitchGameLauncher.SelectedBox(row10)})");
+    Check(SwitchGameLauncher.SelectedBox(Load("wrap_left.jpg")) is { X: < 160 }, "HOME row: the cursor on the first game is recognised");
+    Check(SwitchGameLauncher.SelectedBox(Load("as_sel2.jpg")) == null, "HOME row: \"All Software\" (no tile frame) is recognised");
+    Check(IconAt(row10, 647, 194, 256, "sw_frlg_lg") && !IconAt(row10, 647, 194, 256, "sw_frlg_fr") && IconAt(row10, 377, 194, 256, "sw_frlg_fr"),
+        "HOME row: LeafGreen and FireRed told apart by their icons");
+    var all0 = Load("all_0.jpg");
+    Check(SwitchGameLauncher.SelectedBox(all0) is { W: > 170 and < 200 }, "All Software: the selected icon's frame");
+    Check(IconAt(all0, 829, 351, 174, "sw_frlg_lg") && !IconAt(all0, 645, 351, 174, "sw_frlg_lg") && !IconAt(all0, 93, 167, 174, "sw_frlg_lg"),
+        "All Software: LeafGreen found among the other games");
+    Check(SwitchGameLauncher.SelectedBox(Load("all_d5.jpg")) is { Y: > 300 and < 360 }, "All Software: frame found under the name tooltip");
+    var picker = Load("as_open.jpg");
+    Check(ConsoleFtpLauncher.IsUserPicker(picker) && SwitchGameLauncher.CountUsers(picker) == 3, $"user picker: {SwitchGameLauncher.CountUsers(picker)} users");
+}
+
+if (tests.Contains("switchfind"))
+{
+    // REAL HARDWARE, starts nothing: SelfTest <work> switchfind <game id> - HOME menu, cursor on the first game, then the game is
+    // looked for along the HOME row and in All Software; the cursor is left on it (no A), then back to HOME.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    var game = GameCatalog.Get(args.Skip(1).First(a => a != "switchfind" && GameCatalog.All.Any(g => g.Id == a)));
+    using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort);
+    Check(bot.TitleId() == null, "nothing is running on the Switch (nothing will be started)");
+    bot.Tap("HOME", 1500);
+    var (img, box) = SwitchGameLauncher.StartAtFirstGame(bot);
+    Check(box.X < 160, $"cursor on the first game of the HOME menu ({box})");
+    var icons = SwitchGameLauncher.IconPrints(SwitchGameLauncher.TitleIds(game));
+    var onRow = SwitchGameLauncher.FindOnHomeRow(bot, icons, ref img, ref box, CancellationToken.None);
+    var where = onRow ? "on the HOME row" : SwitchGameLauncher.FindInAllSoftware(bot, icons, m => Console.WriteLine("   " + m), CancellationToken.None) ? "in All Software" : null;
+    if (bot.Screenshot() is { } shot) File.WriteAllBytes(Path.Combine(work, $"found_{game.Id}.jpg"), shot);
+    Check(where != null, $"Pokémon {game.Title} found {where ?? "nowhere"} (screenshot found_{game.Id}.jpg)");
+    if (!onRow) bot.Tap("B", 1000);
+    bot.Tap("HOME", 1000);
+    Check(bot.TitleId() == null, "still nothing running");
+}
+
+if (tests.Contains("switchgame"))
+{
+    // REAL HARDWARE: FTP app → read the LeafGreen backups → close the FTP app → open LeafGreen → save loaded → (hunt: the Python
+    // hunter logs an encounter, then it's stopped). The game must be closed (or the FTP app already running) at the start.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    var lg = GameCatalog.Get("sw_frlg_lg");
+    var port = ConsoleSdService.FindPort(s.SwitchIP);
+    if (port == null)
+        try { port = ConsoleFtpLauncher.StartFtpApp(s.SwitchIP, s.SwitchPort, m => Console.WriteLine("   " + m)); }
+        catch (Exception e) { Console.WriteLine("   " + e.Message); }
+    Check(port != null, $"FTP app running on the Switch (port {port})");
+    if (port != null)
+    {
+        var m = ConsoleSdService.Mirror(lg, s.SwitchIP, port.Value, null, Path.Combine(work, "switch_sd"));
+        Check(CheckpointService.FindBackups(lg, new[] { m.Root }).Count > 0, $"LeafGreen backups read over FTP ({m.Files} files)");
+    }
+    string? title = null;
+    try { title = SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, lg, m => Console.WriteLine("   " + m)); }
+    catch (Exception e) { Console.WriteLine("   " + e.Message); }
+    Check(title != null && SwitchGameLauncher.TitleIds(lg).Contains(title), $"LeafGreen opened from the Homebrew Menu / FTP app ({title})");
+    Check(ConsoleSdService.FindPort(s.SwitchIP) == null, "the FTP app is closed");
+    if (title != null)
+    {
+        using var live = new LiveFrlg(s.SwitchIP, s.SwitchPort);
+        var r = live.Read();
+        Check(r != null, $"the save is loaded (trainer {r?.Trainer}, {r?.Party.Count} in the party)");
+    }
+    if (tests.Contains("hunt") && title != null)
+    {
+        var csv = Path.Combine(HuntService.BotDir!, "encounters.csv");
+        int Lines() => File.Exists(csv) ? File.ReadAllLines(csv).Length : 0;
+        var before = Lines();
+        HuntService.Start(lg, "python");
+        var until = DateTime.Now.AddSeconds(150);
+        while (DateTime.Now < until && Lines() <= before) Thread.Sleep(2000);
+        var after = Lines();
+        Check(after > before, $"the hunter started from there and logged an encounter ({after - before} new)" +
+              (after > before ? ": " + File.ReadAllLines(csv).Last().Split(',').Skip(3).FirstOrDefault() : ""));
+        HuntService.StopPythonHunt();
+    }
 }
 
 if (tests.Contains("sheetsdl"))

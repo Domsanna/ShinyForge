@@ -265,10 +265,22 @@
         <li>Anywhere else, it walks for wild encounters and runs from ordinary Pokémon. It <b>never runs from a legendary</b>.</li>
       </ul></li>
     <li>Every encounter is logged with its species, level, IVs, EVs, nature, Hidden Power, PID and shiny value. The log is used by <a href="#stats">Hunt statistics</a>.</li>
+    <li><b>The game doesn't have to be open.</b> If it isn't, ShinyForge offers to open it when you click <b>Start hunting</b>. The same happens if the FTP app or Homebrew Menu is still open. ShinyForge closes the FTP app, then finds FireRed / LeafGreen and starts it. It presses A through the title screen until your save is loaded, and the hunt starts from there. See <a href="#switch-open-game">how ShinyForge finds and opens the game</a>. It never closes a game you're playing.</li>
     <li>Use <b>Pause / Resume</b> to stop after the current attempt and carry on later. <b>Stop Python hunter</b> ends the hunt.</li>
     <li><b>Hunt options</b> sets stop rules, auto-catch and shiny RNG. <b>Statistics</b> opens this hunt's numbers.</li>
   </ul>
   <div class="callout"><strong>Wild hunting tip</strong>Lead with a Pokémon that's faster or higher level than the wild ones, or one holding a Smoke Ball. Failed escapes cost HP, and the bot stops if your lead faints.</div>
+
+  <h3 id="switch-open-game">How ShinyForge finds and opens the game on the Switch</h3>
+  <ol>
+    <li>It puts the cursor on the <b>first game</b> of the HOME menu and checks that on a screenshot, so it always starts from the same place.</li>
+    <li>It goes right along the HOME menu and compares each game with the <b>official icon</b> of the game you picked in ShinyForge (every language).</li>
+    <li>If the game isn't there, it opens <b>All Software</b> at the end of the row and goes through every game you have, row by row.</li>
+    <li>Nothing is started until the right game is selected. Then ShinyForge presses A.</li>
+    <li>If the Switch asks <b>"Who is using the software?"</b>, ShinyForge shows you that screen and asks which user should play. It selects that user and carries on. Cancel stops without starting anything.</li>
+    <li>It checks the game that started (its title ID). For FireRed / LeafGreen it then loads your save.</li>
+  </ol>
+  <p>ShinyForge works through sys-botbase and screenshots of the Switch, so don't touch the controller while it does this.</p>
 
   <h3 id="hunt-sysbot">Switch: Let's Go, Sword/Shield, Brilliant Diamond/Shining Pearl</h3>
   <p>These games use <b>SysBot.exe</b> (Sys-EncounterBot.NET). ShinyForge writes your Switch's address into its settings and opens it with the right routine already selected. Press <b>Start All</b> in the SysBot window to begin.</p>
@@ -409,7 +421,8 @@
             <li>If a game is open, ShinyForge asks you to <b>save and close it</b> (HOME, then X on the game, then Close) and waits for your OK. It checks that the game really is closed before it continues.</li>
             <li>It starts a game from the HOME menu while <b>holding R</b>, so Atmosphère opens the <b>Homebrew Menu</b> instead of the game. If the Switch asks "Who is using the software?", it picks the <b>first user</b> while still holding R.</li>
             <li>It steps through the Homebrew Menu, recognises <b>ftpd</b> or <b>Checkpoint</b> by its icon, and starts it. ftpd comes first because it always serves FTP. Checkpoint's FTP server only runs when it's turned on in Checkpoint's settings.</li>
-            <li>Don't touch the controller while this runs (about a minute). When ShinyForge has finished reading, close the FTP app (HOME, then close it) before you start your game again.</li>
+            <li>Don't touch the controller while this runs (about a minute).</li>
+            <li>When ShinyForge has finished with the SD card, it offers to <b>go back to the game</b>. It closes the FTP app, then finds and opens the game you're working on (see <a href="#switch-open-game">how ShinyForge finds and opens the game</a>). For FireRed / LeafGreen it also loads your save and <b>starts the shiny hunt</b>. Choose No to close the FTP app yourself (HOME, X, Close).</li>
           </ol></li>
         <li><b>3DS:</b> ShinyForge asks you to <b>save and exit the game</b> and open Checkpoint (with its FTP server turned on) or ftpd, then click OK.</li>
         <li>You can also start the FTP app yourself: Checkpoint's FTP server shows <i>FTP server running on &lt;IP&gt;:50000</i>, ftpd uses port 5000.</li>
@@ -730,6 +743,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Discord webhooks</td><td>Discord Inc.</td><td>Discord alerts</td></tr>
     <tr><td>Microsoft Excel</td><td>Microsoft</td><td>Updating the tracker spreadsheets</td></tr>
     <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>Linked from the Pokédex info panel; Serebii's Pokémon HOME depositable list is the reference for the Living Dex's slots</td></tr>
+    <tr><td>Switch game icons</td><td>© Nintendo / The Pokémon Company (listed in blawar/titledb)</td><td>Recognising the Pokémon games on the Switch's HOME menu</td></tr>
     <tr><td>Pokémon HOME renders</td><td>© Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokémon Company</td><td>The Living Dex pictures (normal and shiny), shrunk to 128 px</td></tr>
     <tr><td>Inno Setup</td><td>Jordan Russell and Martijn Laan</td><td>The Windows installer</td></tr>
     <tr><td>Segoe UI &amp; Segoe Fluent Icons</td><td>Microsoft (part of Windows)</td><td>Fonts and icons</td></tr>

@@ -1,6 +1,3 @@
-using System.Net.Sockets;
-using System.Text;
-using System.Text.RegularExpressions;
 using ShinyForge.Core;
 
 namespace ShinyForge.Services;
@@ -38,89 +35,10 @@ public static class ConsoleFtpLauncher
     private const double MatchLimit = 14;   // mean colour difference (0-255) for "same icon"
     private const int MaxEntries = 150;
 
-    // ------------------------------------------------------------------ sys-botbase
-    private sealed class Bot : IDisposable
-    {
-        private readonly TcpClient _c = new();
-        private readonly NetworkStream _s;
-        private readonly StreamReader _r;
-
-        public Bot(string host, int port)
-        {
-            if (!_c.ConnectAsync(host, port).Wait(3000) || !_c.Connected)
-                throw new IOException($"sys-botbase doesn't answer at {host}:{port}.");
-            _c.ReceiveTimeout = 15000;
-            _s = _c.GetStream();
-            Send("configure echoCommands 0");
-            // sys-botbase's virtual controller can be left stale (e.g. after a homebrew app ran): every press then fails with
-            // "hiddbgSetHdlsState". Same reset as the Python hunter: release everything, detach, attach a fresh one.
-            ReleaseAll();
-            Send("detachController");
-            Thread.Sleep(500);
-            Send("setStick LEFT 0 0");   // attaches the new controller (the first input after attaching is lost)
-            Thread.Sleep(1000);
-            // throw away whatever error lines that produced, so replies line up
-            var junk = new byte[4096];
-            while (_c.Available > 0) _s.Read(junk, 0, junk.Length);
-            _r = new StreamReader(_s, Encoding.ASCII);
-        }
-
-        private void ReleaseAll()
-        {
-            foreach (var b in new[] { "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "PLUS", "MINUS", "HOME", "DUP", "DDOWN", "DLEFT", "DRIGHT" })
-                Send("release " + b);
-        }
-
-        public void Send(string cmd)
-        {
-            var b = Encoding.ASCII.GetBytes(cmd + "\r\n");
-            _s.Write(b, 0, b.Length);
-        }
-
-        /// <summary>Held long enough not to be dropped over WiFi (shorter presses get lost).</summary>
-        public void Tap(string button, int waitMs = 350)
-        {
-            Send("press " + button); Thread.Sleep(160); Send("release " + button); Thread.Sleep(waitMs);
-        }
-
-        /// <summary>The running game's title ID, or null when no game is running (sys-botbase answers with error lines + a blank line).</summary>
-        public string? TitleId()
-        {
-            Send("getTitleID");
-            for (var i = 0; i < 8; i++)
-            {
-                var line = _r.ReadLine()?.Trim();
-                if (string.IsNullOrEmpty(line)) return null;
-                if (Regex.IsMatch(line, "^[0-9A-Fa-f]{16}$")) return line.TrimStart('0').Length == 0 ? null : line.ToUpperInvariant();
-            }
-            return null;
-        }
-
-        public byte[]? Screenshot()
-        {
-            Send("pixelPeek");
-            for (var i = 0; i < 20; i++)
-            {
-                var line = _r.ReadLine()?.Trim();
-                if (line == null) return null;
-                if (line.Length < 1000) continue; // an error line from an earlier command, not the picture
-                return line.Length % 2 != 0 || !line.All(Uri.IsHexDigit) ? null : Convert.FromHexString(line);
-            }
-            return null;
-        }
-
-        /// <summary>Leaves no button held (R especially) and detaches the virtual controller cleanly.</summary>
-        public void Dispose()
-        {
-            try { ReleaseAll(); Send("detachController"); Thread.Sleep(200); } catch { }
-            _c.Dispose();
-        }
-    }
-
     /// <summary>The title ID of the game running on the Switch, or null if none is open.</summary>
     public static string? RunningGame(string host, int port)
     {
-        using var bot = new Bot(host, port);
+        using var bot = new SysBotSession(host, port);
         return bot.TitleId();
     }
 
@@ -199,36 +117,26 @@ public static class ConsoleFtpLauncher
         if (Decode == null) throw new InvalidOperationException("No image decoder is set up.");
         var refs = References();
         if (refs.Count == 0) throw new InvalidOperationException("The FTP app icons (Assets/Homebrew) are missing.");
-        using var bot = new Bot(host, botPort);
+        using var bot = new SysBotSession(host, botPort);
         if (bot.TitleId() is { } running)
             throw new InvalidOperationException($"A game is still open on the Switch ({running}). Close it first.");
 
         progress?.Invoke("Going to the HOME menu...");
-        bot.Tap("B", 400);               // the first input only attaches sys-botbase's controller (B is harmless everywhere)
         bot.Tap("HOME", 1500);
-        // Up, up = the user icons along the top (from any row); down once = the game row.
-        bot.Tap("DUP", 250); bot.Tap("DUP", 250); bot.Tap("DDOWN", 300);
-        for (var i = 0; i < 12; i++) bot.Tap("DLEFT", 200); // the first tile = the last game played
+        SwitchGameLauncher.StartAtFirstGame(bot); // the cursor on the first game (checked on a screenshot)
 
         progress?.Invoke("Opening the Homebrew Menu (starting the game while holding R)...");
-        bot.Send("press R");
+        bot.Hold("R");
         Thread.Sleep(400);
         bot.Tap("A", 200);
-        // With more than one user on the Switch, "Who is using the software?" comes first: pick the FIRST user, R still held.
-        // (Detected, never pressed blindly - an extra A in the Homebrew Menu would start its first app.)
+        // With more than one user on the Switch, "Who is using the software?" comes first: the user picks who plays, R still held.
         for (var i = 0; i < 5; i++)
         {
             Thread.Sleep(700);
-            if (bot.Screenshot() is { } pickShot && Decode(pickShot) is { } pickImg && IsUserPicker(pickImg))
-            {
-                progress?.Invoke("Choosing the first user (\"Who is using the software?\")...");
-                for (var k = 0; k < 8; k++) bot.Tap("DLEFT", 150); // the far left = the first user
-                bot.Tap("A", 200);
-                break;
-            }
+            if (SwitchGameLauncher.PickUserIfAsked(bot)) { progress?.Invoke("User chosen."); break; }
         }
         Thread.Sleep(4500);              // keep R held while the game starts → Atmosphère opens the Homebrew Menu
-        bot.Send("release R");
+        bot.Release("R");
 
         // The "Nintendo / Nintendo Switch" start-up logo covers the menu for a few seconds and buttons are ignored meanwhile:
         // wait until it's gone (no black bar along the top) and the picture has settled.
