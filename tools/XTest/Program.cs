@@ -140,6 +140,42 @@ if (live)
     if (!had) foreach (var d in new[] { PokeldnService.AppDir, PokeldnService.FirmwareDir, PokeldnService.EsptoolDir }) try { Directory.Delete(d, true); } catch { }
 }
 
+// ---- Living Dex, Pokédex info, Checkpoint matching and reading a console's SD card over FTP
+var ld = LivingDex.Load();
+Check(ld.Count == 1391 && ld.Count(e => e.Female) > 100 && ld.Count(e => e.Species == 869) == 63, $"Living Dex: {ld.Count} Pokémon HOME box slots");
+Check(ld.All(e => !e.Sprite.Contains('\\') && e.Sprite.StartsWith("Home")), "Living Dex picture paths use this OS's separator");
+var leafGreen = GameCatalog.Get("gba_leafgreen");
+var pidgeot = DexData.Build(leafGreen, false).First(x => x.Species == 18);
+Check(DexData.Evolution(leafGreen, pidgeot) == "Pidgey at Lv. 18 > Pidgeotto at Lv. 36 > [Pidgeot]", "evolution chain: " + DexData.Evolution(leafGreen, pidgeot));
+Check(DexData.SerebiiUrl(leafGreen, pidgeot).EndsWith("/pokedex-rs/018.shtml"), "Serebii link goes to the game's own Pokédex");
+Check(CheckpointService.Matches(GameCatalog.Get("sw_za"), "0x0100F43008C44000 0x0100F43008C44000") &&
+      CheckpointService.Matches(GameCatalog.Get("nds_black"), "IRBO POKEMON B"), "Checkpoint folder names matched");
+if (savesSrc.Length > 0 && Directory.Exists(savesSrc))
+{
+    string? pick = null; Game? pg = null;
+    foreach (var f in Directory.EnumerateFiles(savesSrc, "*", SearchOption.AllDirectories))
+    {
+        if (new FileInfo(f).Length > 16 * 1024 * 1024 || !SaveUtil.TryGetSaveFile(f, out var sv) || sv == null) continue;
+        pg = GameCatalog.All.FirstOrDefault(x => x.Versions.Contains(sv.Version) && CheckpointService.TitleIds.ContainsKey(x.Id) && x.Platform is Platform.Switch or Platform.N3DS);
+        if (pg != null) { pick = f; break; }
+    }
+    if (pick != null && pg != null)
+    {
+        var id = CheckpointService.TitleIds[pg.Id][0];
+        var sdRoot = Path.Combine(work, "mock_sd");
+        if (Directory.Exists(sdRoot)) Directory.Delete(sdRoot, true);
+        var backup = Path.Combine(sdRoot, pg.IsSwitch ? "switch" : "3ds", "Checkpoint", "saves", pg.IsSwitch ? $"0x{id} 0x{id}" : $"0x{id} Pokémon {pg.Title}", "20261115-120000 Dom");
+        Directory.CreateDirectory(backup);
+        File.Copy(pick, Path.Combine(backup, Path.GetFileName(pick)), true);
+        using var ftpd = new MockFtpd(sdRoot);
+        var mirror = ConsoleSdService.Mirror(pg, "127.0.0.1", ftpd.Port, null, Path.Combine(work, "mock_mirror"));
+        var found = CheckpointService.FindBackups(pg, new[] { mirror.Root });
+        Check(found.Count == 1 && found[0].Save.Save.Version == SaveUtil.GetSaveFile(pick)!.Version,
+            $"{pg.Title} Checkpoint backup read over FTP ({mirror.Downloaded} file downloaded)");
+    }
+    else Check(false, "a Switch / 3DS save to test the FTP reading with");
+}
+
 // ---- keep awake + sound (must never crash)
 try { Sounds.Play(); Check(true, "alert sound call is safe"); } catch (Exception e) { Check(false, "sound: " + e.Message); }
 

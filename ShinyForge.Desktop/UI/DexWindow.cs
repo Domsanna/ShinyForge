@@ -23,14 +23,16 @@ public static class Sprites
     public const int Size = 76;
     private static readonly Dictionary<string, (Bitmap Color, Bitmap Shadow)?> Cache = new();
 
-    public static Bitmap? Get(DexEntry e, bool silhouette)
+    /// <param name="shiny">use the shiny picture when the entry has one (Living Dex: Pokémon HOME's shiny renders)</param>
+    public static Bitmap? Get(DexEntry e, bool silhouette, bool shiny = false)
     {
-        if (e.Sprite.Length == 0) return null;
+        var sprite = shiny && e.ShinySprite.Length > 0 ? e.ShinySprite : e.Sprite;
+        if (sprite.Length == 0) return null;
         (Bitmap Color, Bitmap Shadow)? pair;
         lock (Cache)
         {
-            if (!Cache.TryGetValue(e.Sprite, out pair))
-                Cache[e.Sprite] = pair = Load(Path.Combine(AppPaths.AssetsDir, e.Sprite.Replace('\\', Path.DirectorySeparatorChar)));
+            if (!Cache.TryGetValue(sprite, out pair))
+                Cache[sprite] = pair = Load(Path.Combine(AppPaths.AssetsDir, sprite.Replace('\\', Path.DirectorySeparatorChar)));
         }
         return pair is { } p ? silhouette ? p.Shadow : p.Color : null;
     }
@@ -221,7 +223,7 @@ public sealed class DexGrid : Control
             var fill = i == _sel ? Skin.Accent : i == _hover ? Skin.PanelHi : Skin.Panel;
             var border = state == DexState.Shiny ? Skin.Gold : missing ? Skin.Border : Skin.Good;
             g.DrawRectangle(Skin.B(fill), new Pen(Skin.B(border), missing ? 1 : 1.6), r, 10, 10);
-            if (Sprites.Get(entry, missing) is { } img)
+            if (Sprites.Get(entry, missing, state == DexState.Shiny) is { } img)
             {
                 using (g.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = BitmapInterpolationMode.None }))
                     g.DrawImage(img, new Rect(r.X + (CellW - Sprites.Size) / 2.0, r.Y + 6, Sprites.Size, Sprites.Size));
@@ -405,7 +407,7 @@ public sealed class DexWindow : Window
         };
         _sub.Foreground = Skin.B(state == DexState.Missing ? Skin.Warn : state == DexState.Shiny ? Skin.Gold : Skin.Good);
         _links.Children.Clear();
-        foreach (var (label, url) in new[] { ("Bulbapedia", DexData.BulbapediaUrl(e)), ("Serebii", DexData.SerebiiUrl(e)) })
+        foreach (var (label, url) in new[] { ("Bulbapedia", DexData.BulbapediaUrl(e)), ("Serebii", DexData.SerebiiUrl(_game, e)) })
         {
             var b = new FancyButton(label, "↗", Skin.PanelHi) { Height = 30 };
             b.Click += (_, _) => { try { Browser.Open(url); } catch { } };

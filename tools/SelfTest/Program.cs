@@ -9,6 +9,8 @@ Directory.CreateDirectory(work);
 var tests = args.Skip(1).ToHashSet();
 int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}"); if (!ok) failures++; }
+var uiReady = false;
+void InitUi() { if (uiReady) return; ApplicationConfiguration.Initialize(); uiReady = true; } // WinForms: once per process
 
 if (tests.Contains("saves"))
 {
@@ -27,35 +29,28 @@ if (tests.Contains("saves"))
         pk.SetShiny();
         pk.RefreshChecksum();
         sav.SetPartySlotAtIndex(pk, 0);
-        var boxed = pk.Clone(); boxed.Species = 25; boxed.SetShiny(); boxed.SetPIDGender(0); boxed.RefreshChecksum();
+        var boxed = pk.Clone(); boxed.Species = 25; boxed.SetPIDGender(0); boxed.SetShiny(); boxed.RefreshChecksum(); // gender first: it rerolls the PID
         sav.SetBoxSlotAtIndex(boxed, 0, 3);
         var path = Path.Combine(folder, "nested", $"{id}.sav");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllBytes(path, sav.Write().ToArray());
 
-        var fi = new FileInfo(path);
-        var okLoad = SaveUtil.TryGetSaveFile(path, out var probe);
-        Console.WriteLine($"   debug: size={fi.Length} sizeValid={SaveUtil.IsSizeValid(fi.Length)} load={okLoad} version={probe?.Version} gen={probe?.Generation}");
-        if (!okLoad)
-        {
-            try { var s2 = SaveUtil.GetSaveFile(path); Console.WriteLine($"   GetSaveFile -> {s2?.GetType().Name}"); }
-            catch (Exception ex) { Console.WriteLine($"   GetSaveFile threw {ex.GetType().Name}: {ex.Message}"); }
-            var mem = File.ReadAllBytes(path);
-            Console.WriteLine($"   TryGetSaveFile(bytes) -> {SaveUtil.TryGetSaveFile(mem, out var s3, path)} {s3?.Version}");
-        }
         var found = SaveService.FindSaves(folder, game);
-        Check(found.Count == 1, $"{id}: save found in a sub-folder ({found.Count})");
-        if (found.Count == 0) continue;
-        var (outDir, count) = SaveService.ExportPokemon(found[0].Save, game, folder);
+        // PKHeX doesn't recognise every freshly made BLANK save once it's written to disk (Scarlet, X, Sword): the sub-folder
+        // search is then checked with real saves in the "checkpoint" test, and the rest uses the save in memory.
+        if (SaveUtil.TryGetSaveFile(path, out _)) Check(found.Count == 1, $"{id}: save found in a sub-folder ({found.Count})");
+        else Console.WriteLine($"   {id}: PKHeX doesn't detect a blank save file of this game - sub-folder search covered by the checkpoint test");
+        var save = found.Count > 0 ? found[0] : new FoundSave(path, sav);
+        var (outDir, count) = SaveService.ExportPokemon(save.Save, game, folder);
         var files = Directory.EnumerateFiles(outDir, "*", SearchOption.AllDirectories).ToList();
         Check(count == 2 && files.Count == 2, $"{id}: exported {count} Pokémon -> {Path.GetFileName(outDir)} ({string.Join(", ", files.Select(Path.GetFileName))})");
         var reread = EntityFormat.GetFromBytes(File.ReadAllBytes(files[0]));
         Check(reread != null && reread.Species != 0, $"{id}: exported file re-opens with PKHeX ({reread?.GetType().Name} species {reread?.Species})");
-        var info = SaveService.WriteGameInfo(found[0].Save, game, found[0].Path, folder);
+        var info = SaveService.WriteGameInfo(save.Save, game, save.Path, folder);
         var text = File.ReadAllText(info);
-        Check(text.Contains("Dom") && text.Contains("7397"), $"{id}: game info.txt written");
+        Check(text.Contains("Dom") && text.Contains(save.Save.DisplayTID.ToString()), $"{id}: game info.txt written (TID {save.Save.DisplayTID})");
         if (id == "3ds_x") Console.WriteLine(text);
-        var col = Collection.FromSave(found[0].Save, path);
+        var col = Collection.FromSave(save.Save, path);
         Check(col.BySpecies.Count == 2 && col.BySpecies.Values.All(e => e.OwnOT && e.Shiny), $"{id}: collection {string.Join(", ", col.BySpecies.Values.Select(e => $"{e.Name}(OT={e.OwnOT},shiny={e.Shiny})"))}");
     }
 }
@@ -379,7 +374,7 @@ if (tests.Contains("dex"))
 
 if (tests.Contains("dexui"))
 {
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var outDir = Path.Combine(work, "screens");
     Directory.CreateDirectory(outDir);
     var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
@@ -626,7 +621,7 @@ if (tests.Contains("checkpoint"))
         Check(CheckpointService.Matches(g("3ds_umoon"), "0x01B51 Pokémon Ultra Moon") && !CheckpointService.Matches(g("3ds_moon"), "0x01B51 Pokémon Ultra Moon"),
             "Ultra Moon matched by ID, Moon not");
         Check(CheckpointService.Matches(g("nds_black"), "IRBO Pokémon Black") && !CheckpointService.Matches(g("nds_black2"), "IRBO Pokémon Black"), "DS game matched by name");
-        Check(CheckpointService.Matches(g("sw_za"), "0100F43008C44000 Pokémon Legends: Z-A"), "Legends: Z-A matched by name (no ID listed)");
+        Check(CheckpointService.Matches(g("sw_za"), "0100F43008C44000 Pokémon Legends: Z-A"), "Legends: Z-A matched (by title ID)");
         Check(CheckpointService.Matches(g("sw_frlg_lg"), "010034D02340E000 Pokemon LeafGreen") && !CheckpointService.Matches(g("sw_frlg_fr"), "010034D02340E000 Pokemon LeafGreen"),
             "Switch LeafGreen matched by ID, FireRed not");
         Check(CheckpointService.Matches(g("sw_lgp"), "010003F003A34000 Pokémon: Let's Go, Pikachu!"), "Let's Go Pikachu matched");
@@ -649,12 +644,332 @@ if (tests.Contains("checkpoint"))
     }
     finally { AppSettings.Current.CheckpointFolder = old; }
 
+    // ---- The exact folder/file names Checkpoint writes (from its source: 3ds/source/paths.cpp + titleprobe.cpp,
+    // switch/source/titleprobe.cpp + BackupList.cpp), filled with copies of real saves - one SD card with both systems.
+    {
+        var real = Path.Combine(work, "checkpoint_sd");
+        if (Directory.Exists(real)) Directory.Delete(real, true);
+        var pk = Path.Combine(desk, "PKHeX (26.10.18)");
+        var bak = Path.Combine(pk, "bak");
+        string Bak(string start) => Directory.EnumerateFiles(bak).First(f => Path.GetFileName(f).StartsWith(start));
+        void CopyDir(string from, string to)
+        {
+            foreach (var f in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            {
+                var t = Path.Combine(to, Path.GetRelativePath(from, f));
+                Directory.CreateDirectory(Path.GetDirectoryName(t)!);
+                File.Copy(f, t, true);
+            }
+        }
+        void PutAs(string folder, string source, string fileName)
+        {
+            Directory.CreateDirectory(folder);
+            File.Copy(source, Path.Combine(folder, fileName), true);
+        }
+        var c3 = Path.Combine(real, @"3ds\Checkpoint\saves");
+        var cs = Path.Combine(real, @"switch\Checkpoint\saves");
+        // 3DS: "0x%05X " + English short title (Unicode kept, . , ! \ / : ? * " < > | -> space, trailing spaces cut)
+        var bdsp = SaveUtil.TryGetSaveFile(Path.Combine(pk, "SaveData.bin"), out var bdspSav) ? bdspSav!.Version : GameVersion.Invalid;
+        var cases = new (string Game, string Folder, string Source, string? FileName)[]
+        {
+            ("3ds_umoon", Path.Combine(c3, @"0x01B51 Pokémon Ultra Moon\20261112-221200"), Path.Combine(pk, "main"), "main"),
+            ("3ds_usun", Path.Combine(c3, @"0x01B50 Pokémon Ultra Sun\20180228-134249"), usSave, "main"),
+            ("3ds_x", Path.Combine(c3, @"0x0055D Pokémon X\20241119-133800"), xSave, "main"),
+            // 3DS Virtual Console (GB/GBC): sav.dat; names as on the 3DS HOME menu
+            ("gb_red", Path.Combine(c3, @"0x01710 Pokémon Red Version\20261101-120000"), Bak("Pokemon Red.sav"), "sav.dat"),
+            ("gb_yellow", Path.Combine(c3, @"0x01712 Pokémon Yellow Version  Special Pikachu Edition\20261101-120000"), Bak("Pokemon Yellow.sav"), "sav.dat"),
+            ("gbc_crystal", Path.Combine(c3, @"0x0172F Pokémon Crystal Version\20261101-120000"), Bak("sav.dat [DOM (C)"), "sav.dat"),
+            ("gbc_gold", Path.Combine(c3, @"0x0172D Pokémon Gold Version\20261101-120000"), Bak("sav.dat [DOM (GS)"), "sav.dat"),
+            // DS cartridge in a 3DS: "<game code> <12-char ROM header title>/<backup>/<ROM title>.sav"
+            ("nds_black", Path.Combine(c3, @"IRBO POKEMON B\20261101-120000"), Path.Combine(pk, "Pokemon Black.sav"), "POKEMON B.sav"),
+            ("nds_heartgold", Path.Combine(c3, @"IPKE POKEMON HG\20261101-120000"), Path.Combine(pk, "Pokemon HeartGold.sav"), "POKEMON HG.sav"),
+            // Switch: "0x%016llX " + name, but the ID again when the name isn't ASCII (every "Pokémon" title); backup = "<date> <user>"
+            ("sw_shield", Path.Combine(cs, @"0x01008DB008C2C000 0x01008DB008C2C000\20210420-120931 Dom"), Path.Combine(pk, @"shield\20210420-120931 Dom"), null),
+            ("sw_pla", Path.Combine(cs, @"0x01001F5010DFA000 0x01001F5010DFA000\20220123-152959 Dom"), Path.Combine(pk, @"arceus\20220123-152959 Dom"), null),
+            ("sw_violet", Path.Combine(cs, @"0x01008F6008C5E000 0x01008F6008C5E000\20261101-120000 Dom"), Path.Combine(pk, @"violet\OG Playthrough"), null),
+            ("sw_za", Path.Combine(cs, @"0x0100F43008C44000 0x0100F43008C44000\20261101-120000 Dom"), Path.Combine(pk, @"legends za\main"), "main"),
+            (bdsp == GameVersion.SP ? "sw_sp" : "sw_bd", Path.Combine(cs, (bdsp == GameVersion.SP ? "0x010018E011D92000 0x010018E011D92000" : "0x0100000011D90000 0x0100000011D90000") + @"\20261101-120000 Dom"),
+                Path.Combine(pk, "SaveData.bin"), "SaveData.bin"),
+            ("sw_frlg_lg", Path.Combine(cs, @"0x010034D02340E000 0x010034D02340E000\20261101-120000 Dom"), Path.Combine(pk, "LeafGreen_e.sav"), "LeafGreen_e.sav"),
+        };
+        foreach (var c in cases)
+            if (c.FileName == null) CopyDir(c.Source, c.Folder); else PutAs(c.Folder, c.Source, c.FileName);
+
+        var g = (string id) => GameCatalog.All.First(x => x.Id == id);
+        foreach (var c in cases)
+        {
+            var game = g(c.Game);
+            var root = game.IsSwitch ? cs : c3;
+            var found = CheckpointService.FindBackups(game, new[] { root });
+            var s = found.FirstOrDefault()?.Save.Save;
+            Check(found.Count == 1 && s != null, $"{(game.IsSwitch ? "Switch" : "3DS")} {game.Title}: " +
+                (s == null ? $"NOT found ({Path.GetFileName(Path.GetDirectoryName(c.Folder))})"
+                           : $"found + read: {s.Version}, OT {s.OT}, TID {s.DisplayTID}, {s.BoxCount} boxes  [{Path.GetRelativePath(real, found[0].Save.Path)}]"));
+            // no other game on that system claims this folder
+            var title = Path.GetFileName(Path.GetDirectoryName(c.Folder))!;
+            var others = GameCatalog.All.Where(x => x.IsSwitch == game.IsSwitch && x.Id != game.Id && CheckpointService.Matches(x, title)).Select(x => x.Id).ToList();
+            Check(others.Count == 0, $"   folder \"{title}\" belongs to {game.Id} only" + (others.Count > 0 ? ": also " + string.Join(", ", others) : ""));
+        }
+        Check(!CheckpointService.Matches(g("gb_red"), "0x01234 Red Steel") && !CheckpointService.Matches(g("nds_black"), "IREO POKEMON B2")
+              && CheckpointService.Matches(g("nds_black2"), "IREO POKEMON B2") && CheckpointService.Matches(g("nds_white"), "IRAD POKEMON W"),
+            "look-alikes rejected (Red Steel, Black 2 for Black); other regions' DS carts accepted");
+
+        // ---- The same SD card read over WiFi, from a mock console that answers exactly like ftpd (Checkpoint's FTP server).
+        using (var ftpd = new MockFtpd(real))
+        {
+            var mirror = Path.Combine(work, "console_mirror");
+            if (Directory.Exists(mirror)) Directory.Delete(mirror, true);
+            Check(ConsoleSdService.FindPort("127.0.0.1", new[] { 50001, ftpd.Port }) == ftpd.Port, $"console FTP server found on port {ftpd.Port}");
+            foreach (var id in new[] { "sw_shield", "sw_za", "sw_pla", "3ds_umoon", "nds_black", "gbc_crystal" })
+            {
+                var game = g(id);
+                var local = Path.Combine(mirror, game.IsSwitch ? "Switch" : "3DS");
+                var m = ConsoleSdService.Mirror(game, "127.0.0.1", ftpd.Port, null, local);
+                var found = CheckpointService.FindBackups(game, new[] { m.Root });
+                var s = found.FirstOrDefault()?.Save.Save;
+                Check(m.TitleFolders == 1 && found.Count == 1 && s != null,
+                    $"over WiFi: {game.Title}: {m.Downloaded} file(s) downloaded" + (s == null ? " - NOT read" : $", read {s.Version} OT {s.OT} TID {s.DisplayTID}"));
+            }
+            var sw = Path.Combine(mirror, "Switch");
+            var shTitle = Path.Combine(real, @"switch\Checkpoint\saves\0x01008DB008C2C000 0x01008DB008C2C000");
+            var again = ConsoleSdService.Mirror(g("sw_shield"), "127.0.0.1", ftpd.Port, null, sw);
+            Check(again.Downloaded == 0 && again.Files > 0, $"unchanged backups aren't downloaded again ({again.Files} files checked)");
+            var src = Path.Combine(shTitle, "20210420-120931 Dom");
+            var second = Path.Combine(shTitle, "20261115-100000 Dom");
+            Directory.CreateDirectory(second);
+            File.Copy(Path.Combine(src, "main"), Path.Combine(second, "main"));
+            File.SetLastWriteTime(Path.Combine(second, "main"), DateTime.Now);
+            ConsoleSdService.Mirror(g("sw_shield"), "127.0.0.1", ftpd.Port, null, sw);
+            var two = CheckpointService.FindBackups(g("sw_shield"), new[] { sw });
+            Check(two.Count == 2 && two[0].BackupName == "20261115-100000 Dom", $"a new backup on the console shows up first ({two.FirstOrDefault()?.BackupName})");
+            Directory.Delete(second, true);
+            ConsoleSdService.Mirror(g("sw_shield"), "127.0.0.1", ftpd.Port, null, sw);
+            Check(CheckpointService.FindBackups(g("sw_shield"), new[] { sw }).Count == 1, "a backup deleted on the console disappears from the mirror");
+            var copied = CheckpointService.CopyToPc(CheckpointService.FindBackups(g("sw_za"), new[] { sw })[0], g("sw_za"), Path.Combine(work, "saves_copy"));
+            Check(File.Exists(copied.Path) && copied.Save.Version == GameVersion.ZA, "a backup read over WiFi is copied to the PC like one from a card");
+            var writes = ftpd.Commands.Where(c => c is not ("USER" or "PASS" or "OPTS" or "TYPE" or "PASV" or "MLSD" or "LIST" or "RETR" or "QUIT")).Distinct().ToList();
+            Check(writes.Count == 0, "only read commands were sent to the console" + (writes.Count > 0 ? ": " + string.Join(", ", writes) : $" ({string.Join(" ", ftpd.Commands.Distinct())})"));
+            Check(ConsoleSdService.FindPort("127.0.0.1", new[] { 50001 }) == null, "no FTP server -> nothing found (the user is told how to turn it on)");
+        }
+        Directory.Delete(real, true);
+    }
+
     // Gen 7 trackers are recognised
     foreach (var id in new[] { "3ds_sun", "3ds_moon", "3ds_usun", "3ds_umoon", "sw_lgp", "sw_lge" })
     {
         var wb = SpreadsheetService.FindWorkbook(GameCatalog.All.First(x => x.Id == id));
         Check(wb != null, $"{id}: tracker {(wb == null ? "NOT found" : Path.GetFileName(wb))}");
     }
+}
+
+if (tests.Contains("switchftp"))
+{
+    // REAL HARDWARE: opens the Homebrew Menu on the Switch (game must be closed), starts the FTP app, reads every Pokémon backup.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    ConsoleFtpLauncher.ScreenshotDir = Path.Combine(work, "hbmenu_scan");
+    if (Directory.Exists(ConsoleFtpLauncher.ScreenshotDir)) Directory.Delete(ConsoleFtpLauncher.ScreenshotDir, true);
+    var s = AppSettings.Current;
+    Console.WriteLine($"   Switch {s.SwitchIP}, sys-botbase port {s.SwitchPort}");
+    var port = ConsoleSdService.FindPort(s.SwitchIP);
+    if (port == null)
+    {
+        var game = ConsoleFtpLauncher.RunningGame(s.SwitchIP, s.SwitchPort);
+        Check(game == null, game == null ? "no game open on the Switch" : $"a game is open ({game}) - close it first");
+        if (game == null)
+            try { port = ConsoleFtpLauncher.StartFtpApp(s.SwitchIP, s.SwitchPort, m => Console.WriteLine("   " + m)); }
+            catch (Exception e) { Check(false, "starting the FTP app: " + e.Message); }
+    }
+    Check(port != null, $"FTP server on the Switch: port {port}");
+    if (port != null)
+    {
+        using (var ftp = ConsoleFtp.Connect(s.SwitchIP, port.Value))
+        {
+            var titles = ftp.List(ConsoleSdService.RemoteSaves(true));
+            Console.WriteLine($"   {titles.Count} Checkpoint title folders on the SD card:");
+            foreach (var t in titles) Console.WriteLine($"      {t.Name}");
+        }
+        var mirror = Path.Combine(work, "switch_sd");
+        foreach (var game in GameCatalog.ForSwitch)
+        {
+            var m = ConsoleSdService.Mirror(game, s.SwitchIP, port.Value, null, mirror);
+            if (m.TitleFolders == 0) continue;
+            if (m.Files == 0) { Console.WriteLine($"   {game.Title}: Checkpoint folder exists, no backups yet"); continue; }
+            var found = CheckpointService.FindBackups(game, new[] { m.Root });
+            var sv = found.FirstOrDefault()?.Save.Save;
+            Check(found.Count > 0, $"{game.Title}: {m.Files} file(s), {found.Count} readable backup(s)" +
+                (sv == null ? " - files: " + string.Join(", ", Directory.EnumerateFiles(m.Root, "*", SearchOption.AllDirectories)
+                                   .Where(f => CheckpointService.Matches(game, Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(f))!)))
+                                   .Select(f => $"{Path.GetFileName(f)} ({new FileInfo(f).Length} B)"))
+                            : $"; newest: {sv.Version}, OT {sv.OT}, TID {sv.DisplayTID}, {sv.PlayedHours}h"));
+        }
+    }
+}
+
+if (tests.Contains("homedex"))
+{
+    // BUILD STEP for the Living Dex: SelfTest <work> homedex <serebii depositablepokemon.shtml> <"...\Detailed" HOME renders folder>
+    // Every boxable slot from Serebii's Pokémon HOME list → PKHeX species/form/gender/sweet → the HOME render files.
+    // Writes <work>\home_dex.json (then tools\make_home_sprites.py makes Assets\Home from it).
+    var a = args.Skip(1).Where(x => x != "homedex").ToList();
+    var html = File.ReadAllText(a[0], System.Text.Encoding.Latin1);
+    var renders = a[1];
+    var normal = Directory.GetFiles(Path.Combine(renders, "Normal"), "poke_capture_*.png").Select(Path.GetFileName).ToHashSet()!;
+    var shiny = Directory.GetFiles(Path.Combine(renders, "Shiny"), "poke_capture_*.png").Select(Path.GetFileName).ToHashSet()!;
+    // Some shiny renders are named by hand: "(19) Rattata (F).png", "(19.1) Alolan Rattata.png", "(1) Bulbasaur.png".
+    var named = Directory.GetFiles(Path.Combine(renders, "Shiny"), "(*.png").Select(Path.GetFileName).ToList();
+    string? NamedShiny(int sp, string alt, bool female)
+    {
+        var mine = named.Where(f => System.Text.RegularExpressions.Regex.IsMatch(f!, $@"^\({sp}(\.\d+)?\) ")).ToList();
+        string Label(string f) => System.Text.RegularExpressions.Regex.Replace(f[(f.IndexOf(')') + 2)..^4], @"\s*\((F|M)\)$", "");
+        var want = N(alt.Replace("(Female)", ""));
+        var cands = mine.Where(f => N(Label(f!)) == want && !f!.Contains("G-") && !f.Contains("Mega")).ToList();
+        // cap Pikachu: "(25) Ash Hat Pikachu (Orginal).png" (sic)
+        if (cands.Count == 0 && sp == 25 && alt.EndsWith(" Cap"))
+        {
+            var region = N(alt[8..^4]).Replace("original", "orginal");
+            cands = mine.Where(f => f!.Contains("Ash Hat") && N(f).Contains(region)).ToList();
+        }
+        // typos in the hand-made names ("Squritle", "Cartipie"): the species' only plain file
+        if (cands.Count == 0 && N(alt) == N(SpeciesName.GetSpeciesName((ushort)sp, 2)))
+            cands = mine.Where(f => f!.StartsWith($"({sp}) ") && !f.Contains("G-") && !f.Contains("Mega")).ToList();
+        if (cands.Count == 0) return null;
+        return cands.FirstOrDefault(f => f!.EndsWith(female ? "(F).png" : "(M).png")) ?? cands.FirstOrDefault(f => !f!.EndsWith("(F).png")) ?? cands[0];
+    }
+    var std = html[html.IndexOf("<div id=\"normal\"")..html.IndexOf("<div id=\"shiny\"")];
+    var slots = System.Text.RegularExpressions.Regex.Matches(std, "<img src=\"/pokemonhome/pokemon/80/([^\"]+)\\.png\"[^>]*alt=\"([^\"]*)\"")
+        .Select(m => (Code: m.Groups[1].Value, Alt: System.Net.WebUtility.HtmlDecode(m.Groups[2].Value))).ToList();
+    string N(string s) => new string(s.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD).Where(char.IsLetterOrDigit).ToArray());
+    string[] creams = { "vanillacream", "rubycream", "matchacream", "mintcream", "lemoncream", "saltedcream", "rubyswirl", "caramelswirl", "rainbowswirl" };
+    string[] sweets = { "", "berry", "love", "star", "clover", "flower", "ribbon" };
+    var outList = new List<object>();
+    var problems = new List<string>();
+    foreach (var (code, alt) in slots)
+    {
+        var parts = code.Split('-', 2);
+        var sp = ushort.Parse(parts[0]);
+        var suffix = parts.Length > 1 ? parts[1] : "";
+        // "-f" is not always female on Serebii (Maushold Family of Four, Polteageist Authentic): use the label
+        var female = alt.Contains("(Female)") || alt.EndsWith(" Female");
+        var species = SpeciesName.GetSpeciesName(sp, 2).Replace('’', '\'');
+        var label = alt.Replace("(Female)", "").Replace('’', '\'').Trim();
+        if (label.EndsWith(" Female")) label = label[..^7].Trim();
+        if (label.StartsWith(species + " ")) label = label[(species.Length + 1)..];
+        else if (label == species) label = "";
+        else if (label.EndsWith(" " + species)) label = label[..^(species.Length + 1)];
+        label = label.Trim();
+        // "215-h-f" = Hisuian Sneasel (female), labelled just "Sneasel (Female)": the regional letter is in the code
+        if (label.Length == 0 && female && suffix.Length == 3 && suffix.EndsWith("-f"))
+            label = suffix[0] switch { 'a' => "Alolan", 'g' => "Galarian", 'h' => "Hisuian", 'p' => "Paldean", _ => "" };
+        byte form = 0; int sweet = 0; byte? renderForm = null;
+        var names = FormConverter.GetFormList(sp, GameInfo.Strings.types, GameInfo.Strings.forms, new[] { "♂", "♀", "-" }, EntityContext.Gen9);
+        var nl = N(label);
+        string[] minior = { "red", "orange", "yellow", "green", "blue", "indigo", "violet" };
+        // Forms whose Serebii label doesn't match PKHeX's form name (checked one by one).
+        int? fixedForm = sp switch
+        {
+            128 => nl.Contains("blaze") ? 2 : nl.Contains("aqua") ? 3 : nl.Length > 0 ? 1 : 0,       // Paldean Tauros: Combat, Blaze, Aqua
+            201 when label is "!" or "?" => label == "!" ? 26 : 27,
+            658 => nl.Contains("battlebond") ? 1 : 0,                                            // Battle Bond Greninja is form 1
+            666 when nl.Length == 0 => 6,                                                        // plain Vivillon = Meadow
+            670 when nl.Contains("eternal") => 5,
+            676 when nl.Contains("deputante") => 4,                                              // Serebii's spelling of Debutante
+            710 or 711 => nl.Contains("super") ? 3 : nl.Contains("large") ? 2 : nl.Contains("small") ? 1 : 0,
+            718 => nl.Contains("powerconstruct") ? (code.EndsWith("-10") ? 2 : 3) : nl.Contains("10") ? 1 : 0,
+            744 => nl.Contains("owntempo") ? 1 : 0,                                              // Own Tempo Rockruff
+            774 => Math.Max(0, Array.FindIndex(minior, c => nl.StartsWith(c))),                  // boxed Minior: the core colour
+            _ => null,
+        };
+        if (sp == 774) renderForm = (byte)(form + 7); // shown with its coloured core (renders 7-13), not the brown shell
+        if (fixedForm != null) { form = (byte)fixedForm; if (sp == 774) renderForm = (byte)(form + 7); }
+        else if (sp == 869)
+        {
+            var cream = label.Length == 0 ? 0 : Array.IndexOf(creams, N(label));
+            if (cream < 0) { problems.Add($"unknown Alcremie cream {code} \"{alt}\""); continue; }
+            form = (byte)cream;
+            var s = suffix;
+            foreach (var c in new[] { "rc", "mac", "mic", "lc", "sc", "rs", "cs", "ras" }) if (s.StartsWith(c)) { s = s[c.Length..]; break; }
+            sweet = Math.Max(0, Array.IndexOf(sweets, s));
+        }
+        else if (female && names.Contains("♀"))
+            form = (byte)Array.IndexOf(names, "♀");    // Meowstic, Indeedee, Basculegion, Oinkologne: the female is a form
+        else if (label.Length > 0)
+        {
+            var want = N(label).Replace("authentic", "antique").Replace("alolan", "alola").Replace("galarian", "galar").Replace("hisuian", "hisui").Replace("paldean", "paldea")
+                               .Replace("pattern", "").Replace("cap", "").Replace("form", "").Replace("rotom", "");
+            var best = -1;
+            for (var i = names.Length > 0 && names[0] is not ("" or "Normal") ? 0 : 1; i < names.Length; i++)
+            {
+                var n = N(names[i]).Replace("alolan", "alola").Replace("galarian", "galar").Replace("hisuian", "hisui").Replace("paldean", "paldea").Replace("form", "");
+                if (n.Length > 0 && (n == want || (want.Length > 2 && n.Contains(want)) || (n.Length > 2 && want.Contains(n)))) { best = i; if (n == want) break; }
+            }
+            if (best < 0) { problems.Add($"no form for {code} \"{alt}\" (forms: {string.Join(", ", names)})"); continue; }
+            form = (byte)best;
+        }
+        string? Find(HashSet<string> set, string end, byte fm, int sw)
+        {
+            // female look: fd; otherwise the male/neutral look - female-only species (Enamorus, Tinkatink) only have fd/fo
+            // (genderless "uk" and female-only "fo" before the stray "mf" copies some of those species also have)
+            foreach (var g in female ? new[] { "fd", "fo", "uk", "mf" } : new[] { "md", "mo", "uk", "fo", "mf", "fd" })
+            {
+                var f = $"poke_capture_{sp:0000}_{fm:000}_{g}_n_{sw:00000000}_f_{end}.png";
+                if (set.Contains(f)) return f;
+            }
+            return null;
+        }
+        // forms that look the same as form 0 have no render of their own (Artisan Poltchageist, Masterpiece Sinistcha);
+        // every shiny Alcremie looks the same whatever the cream (only the sweet differs)
+        var rf = renderForm ?? form;
+        var nf = Find(normal, "n", rf, sweet) ?? Find(normal, "n", 0, sweet);
+        var sf = Find(shiny, "r", rf, sweet) ?? NamedShiny(sp, alt, female) ?? Find(shiny, "r", 0, sweet)
+                 // look-alike forms: shiny Greninja = Battle Bond's render; Zygarde 50% / 10% = their Power Construct renders
+                 ?? (sp == 658 && rf == 0 ? Find(shiny, "r", 1, 0) : null)
+                 ?? (sp == 718 && rf <= 1 ? Find(shiny, "r", (byte)(3 - rf), 0) : null);
+        if (nf == null) problems.Add($"no normal render for {code} \"{alt}\" (form {form}, sweet {sweet})");
+        if (sf == null) problems.Add($"no shiny render for {code} \"{alt}\" (form {form}, sweet {sweet})");
+        var formName = sp == 869 ? $"{names[Math.Max(0, (int)form)]}, {(sweet == 0 ? "Strawberry" : char.ToUpper(sweets[sweet][0]) + sweets[sweet][1..])} Sweet" : label;
+        var pkhexForm = form < names.Length ? names[form] : "?";
+        if (formName.Length == 0 && form > 0 && pkhexForm is not ("♀" or "♂" or "?")) formName = pkhexForm; // plain Vivillon = Meadow
+        outList.Add(new { species = sp, form, female, sweet, name = DexEntry.Plain(species), formName = DexEntry.Plain(formName), pkhexForm, serebii = code, normal = nf ?? "", shiny = sf ?? "" });
+    }
+    // renders of boxable-looking forms Serebii doesn't list (should only be battle-only forms, Gigantamax is skipped already)
+    var used = outList.Select(o => (string)o.GetType().GetProperty("normal")!.GetValue(o)!).ToHashSet();
+    var extra = normal.Where(f => f!.Contains("_n_") && f.EndsWith("_f_n.png") && !used.Contains(f) && !f.Contains("_mf1_") && !f.Contains("_mfx_") && !f.Contains("_mfy_")).OrderBy(f => f).ToList();
+    File.WriteAllText(Path.Combine(work, "home_dex.json"), System.Text.Json.JsonSerializer.Serialize(outList, new System.Text.Json.JsonSerializerOptions { WriteIndented = false }));
+    File.WriteAllLines(Path.Combine(work, "home_dex_not_listed.txt"), extra!);
+    Console.WriteLine($"   {slots.Count} Serebii slots, {outList.Count} mapped, {problems.Count} problem(s), {extra.Count} render(s) not on Serebii's list");
+    foreach (var p in problems) Console.WriteLine("   ! " + p);
+    Check(problems.Count == 0 && outList.Count == slots.Count, "every boxable slot has a form and both renders");
+}
+
+if (tests.Contains("dexinfo"))
+{
+    // Evolution text and Serebii links for a set of tricky families in several games, plus a check that EVERY species in
+    // EVERY game gets readable evolution text (no raw method names, no errors).
+    var g = (string id) => GameCatalog.All.First(x => x.Id == id);
+    foreach (var (game, sp, form) in new (string, ushort, byte)[] {
+        ("gba_leafgreen", 18, 0), ("sw_frlg_lg", 133, 0), ("nds_platinum", 82, 0), ("nds_heartgold", 133, 0), ("nds_black", 290, 0),
+        ("3ds_usun", 25, 0), ("3ds_umoon", 26, 1), ("sw_sword", 133, 0), ("sw_shield", 349, 0), ("sw_pla", 215, 1), ("sw_scarlet", 133, 0),
+        ("sw_violet", 924, 0), ("sw_za", 133, 0), ("gb_red", 64, 0), ("gbc_crystal", 236, 0), ("3ds_x", 686, 0), ("sw_bd", 133, 0),
+        ("sw_pla", 215, 0), ("sw_pla", 234, 0), ("sw_pla", 550, 2), ("sw_pla", 217, 0), ("sw_scarlet", 206, 0), ("sw_sword", 891, 0) })
+    {
+        var e = DexData.Build(g(game), true).First(x => x.Species == sp && x.Form == form);
+        Console.WriteLine($"--- {g(game).Title}: {e.Display}   {DexData.SerebiiUrl(g(game), e)}");
+        foreach (var l in DexData.Evolution(g(game), e).Split(Environment.NewLine)) Console.WriteLine("   " + l);
+    }
+    var bad = new List<string>();
+    foreach (var game in GameCatalog.All)
+        foreach (var e in DexData.Build(game, true))
+        {
+            var t = DexData.Evolution(game, e);
+            if (t.Contains("unavailable") || t.Contains("when it levels up  ") || System.Text.RegularExpressions.Regex.IsMatch(t, "LevelUp|UseItem|Trade[A-Z]"))
+                bad.Add($"{game.Id} {e.Display}: {t}");
+        }
+    Check(bad.Count == 0, $"evolution text for every species in every game ({bad.Count} problem(s))" + (bad.Count > 0 ? ": " + string.Join(" | ", bad.Take(5)) : ""));
+    var links = GameCatalog.All.Select(x => (x.Title, Url: DexData.SerebiiUrl(x, new DexEntry { Species = 18 }))).ToList();
+    Check(links.First(l => l.Title == "LeafGreen").Url.Contains("/pokedex-rs/018") && links.First(l => l.Title == "LeafGreen (Switch)").Url.Contains("/pokedex-rs/")
+          && links.First(l => l.Title == "Let's Go, Pikachu!").Url.Contains("/pokedex-sm/") && links.First(l => l.Title == "Legends: Arceus").Url.Contains("/pokedex-swsh/")
+          && links.First(l => l.Title == "Red").Url.Contains("/pokedex/018"), "Serebii links go to each game's own Pokédex");
+    foreach (var l in links) Console.WriteLine($"   {l.Title,-22} {l.Url}");
 }
 
 if (tests.Contains("sheetsdl"))
@@ -725,7 +1040,7 @@ if (tests.Contains("health"))
     Check(!HealthMonitor.CanReach("192.168.0.250", 6000, 1500), "a wrong IP is detected as unreachable");
 
     // recording: ffmpeg dies -> the health check restarts it
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var win = new Form { Text = "ShinyForgeHealthTest", Size = new Size(320, 240), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50), BackColor = Color.SteelBlue };
     win.Show(); Application.DoEvents();
     var recDir = Path.Combine(work, "health_rec");
@@ -860,7 +1175,7 @@ if (tests.Contains("features"))
     s.Hunt = System.Text.Json.JsonSerializer.Deserialize<HuntOptions>(keepHunt)!;
 
     // ---- shiny clip buffer
-    try { ApplicationConfiguration.Initialize(); } catch (InvalidOperationException) { /* already set up by an earlier test mode */ }
+    InitUi();
     var win = new Form { Text = "ShinyForgeClipTest", Size = new Size(320, 240), StartPosition = FormStartPosition.Manual, Location = new Point(60, 60), BackColor = Color.SeaGreen };
     win.Show(); Application.DoEvents();
     var clipOut = Path.Combine(work, "clips"); if (Directory.Exists(clipOut)) Directory.Delete(clipOut, true);
@@ -893,7 +1208,7 @@ if (tests.Contains("features"))
 
 if (tests.Contains("featuresui"))
 {
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var outDir = Path.Combine(work, "screens"); Directory.CreateDirectory(outDir);
     void Snap(Form f, string name, int waitMs = 600)
     {
@@ -915,7 +1230,7 @@ if (tests.Contains("featuresui"))
 
 if (tests.Contains("newui"))
 {
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var outDir = Path.Combine(work, "screens"); Directory.CreateDirectory(outDir);
     void Snap(Form f, string name, int waitMs = 600)
     {
@@ -949,7 +1264,7 @@ if (tests.Contains("newui"))
 
 if (tests.Contains("healthui"))
 {
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var outDir = Path.Combine(work, "screens");
     Directory.CreateDirectory(outDir);
     void Snap(Form f, string name)
@@ -982,7 +1297,7 @@ if (tests.Contains("healthui"))
 
 if (tests.Contains("render"))
 {
-    ApplicationConfiguration.Initialize();
+    InitUi();
     var outDir = Path.Combine(work, "screens");
     Directory.CreateDirectory(outDir);
     void Shot(Control c, string name, Size size)
@@ -1012,6 +1327,41 @@ if (tests.Contains("render"))
     using (var bmp = new Bitmap(main.Width, main.Height)) { main.DrawToBitmap(bmp, new Rectangle(Point.Empty, main.Size)); bmp.Save(Path.Combine(outDir, "0_mainform.png")); }
     main.Close();
     Console.WriteLine("   rendered 0_mainform");
+}
+
+if (tests.Contains("livingdex"))
+{
+    // Renders the Living Dex window (reads the real saves set up in ShinyForge - only reads) with a few searches selected.
+    InitUi();
+    var outDir = Path.Combine(work, "screens");
+    Directory.CreateDirectory(outDir);
+    var f = new LivingDexForm { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
+    f.Show();
+    T Field<T>(string n) => (T)typeof(LivingDexForm).GetField(n, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(f)!;
+    var status = Field<Label>("_status");
+    var until = DateTime.Now.AddSeconds(240);
+    while (DateTime.Now < until && !(status.Text.StartsWith("Read ") || status.Text.StartsWith("No saves"))) { Application.DoEvents(); Thread.Sleep(50); }
+    Console.WriteLine("   " + status.Text);
+    Console.WriteLine("   " + Field<Label>("_counts").Text);
+    var grid = Field<DexGrid>("_grid");
+    var show = typeof(LivingDexForm).GetMethod("ShowInfo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+    foreach (var (q, name) in new[] { ("", "ld_all"), ("Unown", "ld_unown"), ("Rattata", "ld_rattata"), ("Alcremie", "ld_alcremie"), ("Pikachu", "ld_pikachu"), ("Pidgeot", "ld_pidgeot") })
+    {
+        Field<TextBox>("_search").Text = q;
+        Application.DoEvents();
+        var items = (System.Collections.IList)typeof(DexGrid).GetField("_items", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(grid)!;
+        if (items.Count > 0)
+        {
+            var first = ((ValueTuple<DexEntry, DexState>)items[Math.Min(1, items.Count - 1)]!).Item1;
+            show.Invoke(f, new object[] { first });
+        }
+        for (var i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
+        using var bmp = new Bitmap(f.Width, f.Height);
+        f.DrawToBitmap(bmp, new Rectangle(Point.Empty, f.Size));
+        bmp.Save(Path.Combine(outDir, name + ".png"));
+        Console.WriteLine($"   rendered {name} ({items.Count} entries)");
+    }
+    f.Close();
 }
 
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");

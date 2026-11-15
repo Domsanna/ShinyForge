@@ -5,7 +5,8 @@ Modes (config.yaml -> hunt: mode):
             (Birth Island, Navel Rock, Seafoam B4F, Power Plant, Mt. Ember, Cerulean Cave,
             Snorlax routes) -> static, anywhere else -> wild.
   static  - soft reset (A+B+X+Y) in front of any static Pokemon (legendaries, Snorlax,
-            Deoxys...), skip the intro, random 1-5 s on the title screen, mash A into the battle.
+            Deoxys...), skip the intro, mash A from the title screen into the battle (no title-screen
+            delay is needed: tested on the Switch, every reset already gives a different Pokemon).
   wild    - walk back and forth in grass / a cave / on water until a wild battle starts.
   fishing - use the rod registered to the item button until something bites.
   rng     - OPTIONAL (never chosen automatically): shiny RNG manipulation for static encounters,
@@ -321,12 +322,12 @@ class MemoryHunter:
         time.sleep(float(self.h.get("intro_skip_delay", 2.5)))
         for _ in range(int(self.h.get("intro_skip_presses", 3))):
             self.tap("A", float(self.h.get("intro_skip_interval", 1.2)))
-        lo, hi = float(self.t.get("title_delay_min", 1)), float(self.t.get("title_delay_max", 5))
-        delay = random.uniform(lo, hi)
+        # No fixed title-screen delay: tested on the Switch, back-to-back resets with identical timing still land on
+        # different RNG frames. Random timing is only added after the same-Pokemon guard has seen a repeat.
         if self.extra_jitter > 0:
-            delay += random.uniform(0, self.extra_jitter)
-        print(f"  title screen: random delay {delay:.2f}s")
-        time.sleep(delay)
+            delay = random.uniform(0, self.extra_jitter)
+            print(f"  title screen: extra random delay {delay:.2f}s (a repeat was seen earlier)")
+            time.sleep(delay)
         t0 = time.time()
         warned = False
         a_interval = float(self.t.get("a_interval", 0.6))

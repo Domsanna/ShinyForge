@@ -8,6 +8,7 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\MockFtpd.cs" Link="MockFtpd.cs" />
     <ProjectReference Include="..\..\ShinyForge\ShinyForge.csproj" />
   </ItemGroup>
 </Project>

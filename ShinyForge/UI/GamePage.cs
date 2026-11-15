@@ -930,6 +930,14 @@ public sealed class GamePage : UserControl
                 return;
             CheckpointWarned.Add(_game.Id);
         }
+        var console = _game.IsSwitch ? "Switch" : "3DS";
+        var source = MessageBox.Show(owner,
+            "Where are the Checkpoint backups?\n\n" +
+            $"Yes = on the SD card INSIDE the {console} - read over WiFi (Checkpoint's FTP server, or the ftpd app)\n" +
+            "No = an SD card put into this PC (or a copy of it)",
+            "ShinyForge - Checkpoint saves", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (source == DialogResult.Cancel) return;
+        var wifi = source == DialogResult.Yes;
         if (rescan)
         {
             var r = MessageBox.Show(owner,
@@ -943,17 +951,29 @@ public sealed class GamePage : UserControl
                     $"1. Save your game in Pokémon {_game.Title}, then close the game.\n" +
                     "2. Open Checkpoint on the console and select the game.\n" +
                     "3. Choose Backup and confirm (the suggested date-and-time name is fine).\n" +
-                    "4. Put the console's SD card into this PC (or reconnect it).\n\n" +
-                    "Click OK when the fresh backup is on the SD card and the card is connected.",
+                    (wifi ? "4. Leave Checkpoint open with its FTP server on (Checkpoint's settings).\n\n" +
+                            "Click OK when the fresh backup is made."
+                          : "4. Put the console's SD card into this PC (or reconnect it).\n\n" +
+                            "Click OK when the fresh backup is on the SD card and the card is connected."),
                     "ShinyForge - make a fresh backup", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
                 return;
         }
 
         _saveStatus.ForeColor = Theme.Muted;
-        _saveStatus.Text = "Looking for Checkpoint on the SD card...";
-        var roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+        List<string> roots;
         var where = _game.IsSwitch ? @"switch\Checkpoint\saves" : @"3ds\Checkpoint\saves";
-        if (roots.Count == 0)
+        if (wifi)
+        {
+            var root = await MirrorFromConsole(owner);
+            if (root == null) return;
+            roots = new List<string> { root };
+        }
+        else
+        {
+            _saveStatus.Text = "Looking for Checkpoint on the SD card...";
+            roots = await Task.Run(() => CheckpointService.FindRoots(_game.IsSwitch));
+        }
+        if (!wifi && roots.Count == 0)
         {
             if (MessageBox.Show(owner, $"No Checkpoint folder ({where}) was found on any drive.\n\n" +
                                        "Put the console's SD card into this PC - or, if you copied it to the PC, choose that folder.\n\nChoose a folder now?",
@@ -1000,6 +1020,130 @@ public sealed class GamePage : UserControl
         _saveStatus.Text = $"✔ Checkpoint backup \"{chosen.BackupName}\" ({chosen.Time:yyyy-MM-dd HH:mm}) copied to this PC.\n" +
                            $"    Trainer {copied.Save.OT}  •  TID {copied.Save.DisplayTID}  •  {copied.Save.Version}  •  {copied.Save.PlayedHours}h {copied.Save.PlayedMinutes:00}m";
         UpdateTrackerSaveLabel();
+    }
+
+    /// <summary>
+    /// Reads this game's Checkpoint backups from the SD card inside the console over WiFi (FTP) into the local mirror.
+    /// Returns the mirrored saves folder, or null if cancelled / it failed (the status line says why).
+    /// </summary>
+    private async Task<string?> MirrorFromConsole(IWin32Window? owner)
+    {
+        var console = _game.IsSwitch ? "Switch" : "3DS";
+        var ip = _game.IsSwitch ? IpPrompt.GetOrAskSwitch(owner) : IpPrompt.GetOrAsk(owner);
+        if (ip == null) { _saveStatus.Text = ""; return null; }
+        int? port;
+        var startedApp = false;
+        if (!_game.IsSwitch)
+        {
+            // The 3DS can't be controlled from here: the user closes the game and opens the FTP app.
+            var host3 = ip;
+            if (await Task.Run(() => ConsoleSdService.FindPort(host3)) == null &&
+                MessageBox.Show(owner,
+                    "Before ShinyForge continues, on the 3DS:\n\n" +
+                    "  1. Save your game, then close it (HOME → Close).\n" +
+                    "  2. Open Checkpoint (with its FTP server turned on in Checkpoint's settings) or the ftpd app.\n" +
+                    "  3. Leave it open while ShinyForge reads the saves.\n\n" +
+                    "Click OK when the FTP app is running.",
+                    "ShinyForge - open the FTP app on the 3DS", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+            { _saveStatus.Text = ""; return null; }
+        }
+        while (true)
+        {
+            _saveStatus.Text = $"Connecting to the {console} at {ip} (FTP)...";
+            var host = ip;
+            port = await Task.Run(() => ConsoleSdService.FindPort(host));
+            if (port != null) break;
+            if (_game.IsSwitch && !startedApp)
+            {
+                startedApp = true;
+                var (started, cancelled) = await StartSwitchFtpApp(owner, ip);
+                if (cancelled) { _saveStatus.Text = ""; return null; }
+                if (started != null) { port = started; break; }
+            }
+            var r = MessageBox.Show(owner, ConsoleSdService.HowToTurnOn(_game.IsSwitch, ip) +
+                                           "\n\nYes = try again    No = enter a different IP address",
+                "ShinyForge - read the console's SD card", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Information);
+            if (r == DialogResult.Cancel) { _saveStatus.Text = ""; return null; }
+            if (r == DialogResult.No)
+            {
+                ip = _game.IsSwitch ? IpPrompt.AskSwitch(owner) : IpPrompt.Ask(owner);
+                if (ip == null) { _saveStatus.Text = ""; return null; }
+            }
+        }
+        try
+        {
+            var (h, p) = (ip, port.Value);
+            var result = await Task.Run(() => ConsoleSdService.Mirror(_game, h, p, msg => Ui(() => _saveStatus.Text = msg)));
+            _saveStatus.Text = $"Read {result.TitleFolders} Checkpoint folder(s) of this game from the {console} ({result.Downloaded} file(s) downloaded).";
+            if (startedApp && _game.IsSwitch)
+                MessageBox.Show(owner, "Done reading the Switch's SD card.\n\nThe FTP app is still open on the Switch: press HOME and close it " +
+                                       "before you start your game again.", "ShinyForge - read the console's SD card", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return result.Root;
+        }
+        catch (Exception ex)
+        {
+            _saveStatus.ForeColor = Theme.Bad;
+            _saveStatus.Text = $"Couldn't read the {console}'s SD card: {ex.Message}";
+            AppPaths.Log("Console SD read failed: " + ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Switch only: makes sure no game is open (the user closes it - ShinyForge waits for their OK and checks), then opens the
+    /// Homebrew Menu by starting a game while holding R, finds ftpd / Checkpoint there and starts it (sys-botbase).
+    /// Returns the FTP port, or null when it couldn't (Cancelled = the user stopped).
+    /// </summary>
+    private async Task<(int? Port, bool Cancelled)> StartSwitchFtpApp(IWin32Window? owner, string ip)
+    {
+        var botPort = AppSettings.Current.SwitchPort;
+        if (!HealthMonitor.CanReach(ip, botPort, 2500)) return (null, false); // no sys-botbase: the user starts the FTP app
+        if (HuntService.IsPythonHuntRunning())
+        {
+            MessageBox.Show(owner, "The FireRed/LeafGreen hunter is running on the Switch. Stop the hunt first - ShinyForge won't press " +
+                                   "buttons on the Switch while it's hunting.", "ShinyForge - open the FTP app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return (null, true);
+        }
+        while (true)
+        {
+            _saveStatus.Text = "Checking whether a game is open on the Switch...";
+            string? running;
+            try { running = await Task.Run(() => ConsoleFtpLauncher.RunningGame(ip, botPort)); }
+            catch (Exception ex)
+            {
+                // never press buttons without knowing that no game is open
+                AppPaths.Log("Switch game check failed: " + ex.Message);
+                return (null, false);
+            }
+            if (running == null) break;
+            if (MessageBox.Show(owner,
+                    "A game is open on the Switch. It has to be closed before ShinyForge can open the FTP app.\n\n" +
+                    "  1. Save your game.\n" +
+                    "  2. Press HOME, then X on the game, and choose Close.\n\n" +
+                    "Click OK once the game is closed.",
+                    "ShinyForge - close the game first", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+                return (null, true);
+        }
+        if (MessageBox.Show(owner,
+                "The game is closed. ShinyForge will now, through sys-botbase:\n\n" +
+                "  • start a game while holding R - the Homebrew Menu opens instead of the game,\n" +
+                "  • find ftpd (or Checkpoint) in the Homebrew Menu and start it.\n\n" +
+                "Don't touch the Switch's controller until it's done (about a minute).",
+                "ShinyForge - open the FTP app", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+            return (null, true);
+        try
+        {
+            var port = await Task.Run(() => ConsoleFtpLauncher.StartFtpApp(ip, botPort, msg => Ui(() => _saveStatus.Text = msg)));
+            return (port, false);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("Starting the Switch FTP app failed: " + ex);
+            MessageBox.Show(owner, "ShinyForge couldn't start the FTP app on the Switch:\n\n" + ex.Message +
+                                   "\n\nYou can start it yourself instead (the steps are shown next).",
+                "ShinyForge - open the FTP app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return (null, false);
+        }
     }
 
     private void ScanSaves()

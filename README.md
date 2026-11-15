@@ -31,9 +31,9 @@
 | 🎥 **Recording & shiny clips** | Gap-free recordings in numbered segments, plus an automatic clip and screenshot of every shiny. |
 | 📋 **Pokédex tracker** | Updates your Excel Pokédex spreadsheet from your save. The Pokédex window uses each game's own sprites, forms and silhouettes. |
 | 📡 **Wireless trades & Mystery Gift** | Trade with and send Mystery Gifts to Switch games over local wireless through an **ESP32-S3** board, powered by [pokeldn](https://github.com/Decryptu/pokeldn). ShinyForge checks the board, installs pokeldn and its firmware, and asks for your `prod.keys`. |
-| 🗂️ **Checkpoint saves** | Finds your Checkpoint backups on the SD card by title ID, lets you pick one, and copies it to the PC before using it. |
+| 🗂️ **Checkpoint saves** | Finds your Checkpoint backups on the SD card by title ID, or reads them over WiFi from the SD card inside the Switch / 3DS (Checkpoint's FTP server or ftpd; on the Switch ShinyForge starts the FTP app itself through sys-botbase). Lets you pick a backup and copies it to the PC before using it. |
 | 💾 **Saves & Game Info** | Reads saves from Red/Blue to Legends: Z-A and exports every Pokémon into a Pokémon HOME-ready folder. Also writes a readable Game Info report. |
-| 🧬 **Living Dex planner** | Combines all your saves to show what you own, where, and what's missing. |
+| 🧬 **Living Dex planner** | Every Pokémon HOME box slot (1,391: species, regional forms, other forms, female looks, Alcremie sweets) with Pokémon HOME pictures. Combines all your saves to show what you own, where, and what's missing. |
 | 📈 **Hunt statistics** | Odds, the chance you'd have found a shiny by now, encounters per hour, ETA and a 24-hour chart. |
 | 🔔 **Alerts, overlay & remote** | Discord / ntfy phone alerts, a stream overlay for OBS / Streamlabs, and a PIN-protected phone remote. |
 | 🛡️ **Safety** | A system check every minute, a same-Pokémon guard, IP-change detection, keep-awake, automatic backups, and automatic updates from this page. |
@@ -126,7 +126,10 @@ ShinyForge is built on the work of many people. Thank you!
 - **[esptool](https://github.com/espressif/esptool)** and **ESP-IDF**: Espressif Systems. Firmware installation.
 - **[Avalonia](https://github.com/AvaloniaUI/Avalonia)**: AvaloniaUI OÜ and contributors. The macOS / Linux interface. **SkiaSharp** and **HarfBuzzSharp** (Microsoft / Mono) for its drawing.
 - **[rcodesign](https://github.com/indygreg/apple-platform-rs)**: Gregory Szorc. Signs the macOS app.
-- **[Checkpoint](https://github.com/BernardoGiordano/Checkpoint)**: Bernardo Giordano (FlagBrew). The save backups ShinyForge reads.
+- **[Checkpoint](https://github.com/BernardoGiordano/Checkpoint)**: Bernardo Giordano (FlagBrew). The save backups ShinyForge reads, on the SD card or over WiFi.
+- **[ftpd](https://github.com/mtheall/ftpd)**: Michael Theall. The FTP server (inside Checkpoint and as its own app) ShinyForge reads the console's SD card through.
+- **[Serebii.net](https://www.serebii.net)**: Joe Merrick. The Pokémon HOME depositable list behind the Living Dex, and the Pokédex pages ShinyForge links to.
+- **Pokémon HOME renders**: © Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokémon Company. The Living Dex pictures.
 - **[PokeAPI](https://github.com/PokeAPI/pokeapi)** and **[PokeAPI/sprites](https://github.com/PokeAPI/sprites)**: Pokédex data and sprites.
 - **[FFmpeg](https://ffmpeg.org)**, with Windows builds by [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).
 - **[OpenCV](https://opencv.org)**, **[NumPy](https://numpy.org)**, **[python-mss](https://github.com/BoboTiG/python-mss)** and **[PyYAML](https://pyyaml.org)**.

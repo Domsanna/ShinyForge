@@ -11,17 +11,26 @@ public sealed record CheckpointBackup(string Folder, string TitleFolder, string 
 }
 
 /// <summary>
-/// Finds a game's saves in Checkpoint's backup folders (Checkpoint by Bernardo Giordano, on the 3DS and the Switch):
-///   3DS:    sdmc:/3ds/Checkpoint/saves/0x&lt;unique id&gt; &lt;title&gt;/&lt;backup&gt;/
-///   Switch: sdmc:/switch/Checkpoint/saves/&lt;title id&gt; &lt;title&gt;/&lt;backup&gt;/
-/// The SD card is read on any drive of this PC (or a folder chosen in Settings). Matching is by title ID, then by name.
+/// Finds a game's saves in Checkpoint's backup folders (Checkpoint by Bernardo Giordano, on the 3DS and the Switch).
+/// Folder names as Checkpoint writes them (checked against its source):
+///   3DS:      sdmc:/3ds/Checkpoint/saves/0x&lt;unique id&gt; &lt;English short title&gt;/&lt;backup&gt;/main (VC: sav.dat)
+///   DS cart:  sdmc:/3ds/Checkpoint/saves/&lt;game code&gt; &lt;ROM header title&gt;/&lt;backup&gt;/&lt;ROM title&gt;.sav  (e.g. "IRBO POKEMON B")
+///   Switch:   sdmc:/switch/Checkpoint/saves/0x&lt;title id&gt; &lt;title&gt;/&lt;date&gt; &lt;user&gt;/main (BDSP SaveData.bin, LGPE savedata.bin).
+///             Titles with non-ASCII characters (every "Pokémon" game) get the ID again instead of the name:
+///             "0x0100ABF008968000 0x0100ABF008968000" - so Switch games MUST be matched by title ID.
+/// The SD card is read on any drive of this PC (or a folder chosen in Settings). Matching is by title ID / game code, then by name.
+/// The save file itself is recognised by its content (PKHeX), whatever it is called.
 /// ShinyForge only reads there; the chosen backup is copied to <see cref="AppPaths.SavesDir"/> before it is used.
 /// </summary>
 public static class CheckpointService
 {
-    /// <summary>Game id → title IDs (Switch: 16 hex digits; 3DS: Checkpoint's 5-digit unique ID).</summary>
+    /// <summary>Game id → title IDs (Switch: 16 hex digits; 3DS: Checkpoint's 5-digit unique ID; DS: the first 3 letters of the
+    /// cartridge game code - the 4th letter is the region).</summary>
     public static readonly Dictionary<string, string[]> TitleIds = new()
     {
+        ["nds_diamond"] = new[] { "ADA" }, ["nds_pearl"] = new[] { "APA" }, ["nds_platinum"] = new[] { "CPU" },
+        ["nds_heartgold"] = new[] { "IPK" }, ["nds_soulsilver"] = new[] { "IPG" },
+        ["nds_black"] = new[] { "IRB" }, ["nds_white"] = new[] { "IRA" }, ["nds_black2"] = new[] { "IRE" }, ["nds_white2"] = new[] { "IRD" },
         ["3ds_x"] = new[] { "0055D" }, ["3ds_y"] = new[] { "0055E" },
         ["3ds_or"] = new[] { "011C4" }, ["3ds_as"] = new[] { "011C5" },
         ["3ds_sun"] = new[] { "01648" }, ["3ds_moon"] = new[] { "0175E" },
@@ -29,7 +38,7 @@ public static class CheckpointService
         ["sw_lgp"] = new[] { "010003F003A34000" }, ["sw_lge"] = new[] { "0100187003A36000" },
         ["sw_sword"] = new[] { "0100ABF008968000" }, ["sw_shield"] = new[] { "01008DB008C2C000" },
         ["sw_bd"] = new[] { "0100000011D90000" }, ["sw_sp"] = new[] { "010018E011D92000" },
-        ["sw_pla"] = new[] { "01001F5010DFA000" },
+        ["sw_pla"] = new[] { "01001F5010DFA000" }, ["sw_za"] = new[] { "0100F43008C44000" },
         ["sw_scarlet"] = new[] { "0100A3D008C5C000" }, ["sw_violet"] = new[] { "01008F6008C5E000" },
         // FireRed / LeafGreen on Switch: one title per language (JPN, ENG, FRA, ITA, GER, SPA)
         ["sw_frlg_fr"] = new[] { "01006FA0233F8000", "0100554023408000", "01004B3023412000", "010092302342A000", "01007F8023416000", "0100EB702342C000" },
@@ -103,9 +112,17 @@ public static class CheckpointService
     {
         var (id, name) = SplitFolder(folderName);
         if (id != null && TitleIds.TryGetValue(g.Id, out var ids))
-            return ids.Any(x => x.TrimStart('0').Equals(id.TrimStart('0'), StringComparison.OrdinalIgnoreCase));
+        {
+            var dsCode = id.Length == 4 && !folderName.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+            return dsCode
+                ? ids.Any(x => x.Length == 3 && id.StartsWith(x, StringComparison.OrdinalIgnoreCase))
+                : ids.Any(x => x.TrimStart('0').Equals(id.TrimStart('0'), StringComparison.OrdinalIgnoreCase));
+        }
         var n = NormalizeName(name);
-        return n.Length > 0 && NamesFor(g).Contains(n);
+        // Exact, or the title plus a subtitle ("Pokémon Yellow Version: Special Pikachu Edition" -> "yellowspecialpikachuedition"),
+        // but never a numbered sequel ("black2" is not "black").
+        var pokemon = System.Text.RegularExpressions.Regex.IsMatch(name, @"pok[eé]\p{Mn}?mon", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return n.Length > 0 && NamesFor(g).Any(x => x.Length > 0 && (n == x || (pokemon && n.StartsWith(x) && !char.IsDigit(n[x.Length]))));
     }
 
     /// <summary>Every backup of the game in the given roots that holds a readable save, newest first.</summary>

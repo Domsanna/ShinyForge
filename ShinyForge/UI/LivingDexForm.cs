@@ -5,26 +5,31 @@ using ShinyForge.Services;
 namespace ShinyForge.UI;
 
 /// <summary>
-/// Living Dex planner across ALL your games: every species #1-1025, coloured if you own it in any of your saves
+/// Living Dex planner across ALL your games: every Pokémon HOME box slot (each species, form, regional form, gender look and
+/// Alcremie sweet - see <see cref="LivingDex"/>) with Pokémon HOME's pictures, coloured if you own it in any of your saves
 /// (which game / box / shiny), silhouette if not - with the games it can be found in (★ = a game you have a save for)
 /// and where exactly in those games.
 /// </summary>
 public sealed class LivingDexForm : Form
 {
     private readonly DexGrid _grid = new() { Dock = DockStyle.Fill };
-    private readonly TextBox _search = new() { Width = 200, PlaceholderText = "Search name or #" };
+    private readonly TextBox _search = new() { Width = 200, PlaceholderText = "Search name, form or #" };
     private readonly ComboBox _filter = new() { Width = 130 };
+    private readonly CheckBox _forms = new() { Text = "Forms && genders", Checked = true, AutoSize = true, Margin = new Padding(12, 6, 0, 0) };
     private readonly Label _counts = new() { AutoSize = true, ForeColor = Theme.Gold, Font = Theme.H2 };
     private readonly Label _status = new() { AutoSize = true, ForeColor = Theme.Muted };
     private readonly RichTextBox _info = new() { ReadOnly = true, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill, DetectUrls = true };
-    private readonly Label _title = new() { AutoSize = false, Height = 36, Dock = DockStyle.Top, Font = new Font("Segoe UI Semibold", 15f) };
+    private readonly Label _title = new() { AutoSize = false, Height = 56, Dock = DockStyle.Top, Font = new Font("Segoe UI Semibold", 14f) };
     private readonly PictureBox _sprite = new() { Height = 150, Dock = DockStyle.Top, SizeMode = PictureBoxSizeMode.Zoom };
 
-    private readonly List<DexEntry> _all = new();
+    private List<DexEntry> _all = new();
+    private List<DexEntry> _species = new();
+    private HashSet<(ushort, byte)> _genderSplit = new();
     private readonly Dictionary<ushort, List<(Game Game, Collection.Owned Mon)>> _owned = new();
-    private readonly Dictionary<ushort, List<Game>> _availableIn = new();
+    private readonly Dictionary<string, HashSet<(ushort, byte)>> _formsIn = new();
     private readonly HashSet<string> _gamesWithSave = new();
     private CancellationTokenSource? _infoCts;
+    private Image? _bigImage;
 
     public LivingDexForm()
     {
@@ -32,7 +37,7 @@ public sealed class LivingDexForm : Form
         BackColor = Theme.Bg;
         ForeColor = Theme.Text;
         Font = Theme.Body;
-        Size = new Size(1200, 820);
+        Size = new Size(1240, 840);
         StartPosition = FormStartPosition.CenterScreen;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
@@ -41,8 +46,9 @@ public sealed class LivingDexForm : Form
         Theme.StyleInput(_filter);
         _filter.Items.AddRange(new object[] { "All", "Owned", "Missing", "Shiny" });
         _filter.SelectedIndex = 0;
+        _forms.ForeColor = Theme.Text;
         var rescan = new FancyButton("Rescan saves", Theme.GlyphSync, Theme.Accent) { Height = 32, Margin = new Padding(12, 0, 0, 0) };
-        bar.Controls.AddRange(new Control[] { _search, _filter, rescan });
+        bar.Controls.AddRange(new Control[] { _search, _filter, _forms, rescan });
         var countsBar = new Panel { Dock = DockStyle.Top, Height = 34 };
         _counts.Location = new Point(12, 6);
         countsBar.Controls.Add(_counts);
@@ -70,32 +76,18 @@ public sealed class LivingDexForm : Form
         _grid.Selected += ShowInfo;
         _search.TextChanged += (_, _) => ApplyFilter();
         _filter.SelectedIndexChanged += (_, _) => ApplyFilter();
+        _forms.CheckedChanged += (_, _) => ApplyFilter();
         rescan.Click += async (_, _) => await Scan();
-        FormClosed += (_, _) => _grid.DisposeImages();
+        FormClosed += (_, _) => { _grid.DisposeImages(); _bigImage?.Dispose(); };
         Shown += async (_, _) =>
         {
-            for (ushort sp = 1; sp <= 1025; sp++)
-            {
-                var name = DexEntry.Plain(SpeciesName.GetSpeciesName(sp, 2));
-                _all.Add(new DexEntry { Species = sp, Name = name, Sprite = Path.Combine("Dex", $"{sp}.png") });
-            }
-            FixSprites();
+            _all = LivingDex.Load();
+            _species = LivingDex.SpeciesOnly(_all);
+            _genderSplit = LivingDex.GenderSplit(_all);
             ApplyFilter();
             _info.Text = "Scanning your saves...";
             await Scan();
         };
-    }
-
-    /// <summary>Species whose default sprite has a form name (Unown A, Burmy...) - use the first file the generic set has.</summary>
-    private void FixSprites()
-    {
-        for (int i = 0; i < _all.Count; i++)
-        {
-            var e = _all[i];
-            if (File.Exists(Path.Combine(AppPaths.AssetsDir, e.Sprite))) continue;
-            var alt = Directory.EnumerateFiles(DexData.DexDir, $"{e.Species}-*.png").FirstOrDefault();
-            if (alt != null) _all[i] = new DexEntry { Species = e.Species, Name = e.Name, Sprite = Path.Combine("Dex", Path.GetFileName(alt)) };
-        }
     }
 
     private async Task Scan()
@@ -103,19 +95,14 @@ public sealed class LivingDexForm : Form
         _status.Text = "Reading the saves of every game...";
         var owned = new Dictionary<ushort, List<(Game, Collection.Owned)>>();
         var withSave = new HashSet<string>();
-        var available = new Dictionary<ushort, List<Game>>();
+        var formsIn = new Dictionary<string, HashSet<(ushort, byte)>>();
         await Task.Run(() =>
         {
             foreach (var g in GameCatalog.All)
             {
                 try
                 {
-                    // which species exist in this game
-                    foreach (var sp in DexData.Build(g, includeForms: false).Select(e => e.Species).Distinct())
-                    {
-                        if (!available.TryGetValue(sp, out var l)) available[sp] = l = new();
-                        l.Add(g);
-                    }
+                    formsIn[g.Id] = LivingDex.FormsIn(g); // which species and forms exist in this game
                     var gs = AppSettings.Current.For(g.Id);
                     FoundSave? save = null;
                     if (!string.IsNullOrWhiteSpace(gs.SaveFilePath) && File.Exists(gs.SaveFilePath) && SaveUtil.TryGetSaveFile(gs.SaveFilePath, out var sv) && sv != null)
@@ -135,7 +122,7 @@ public sealed class LivingDexForm : Form
             }
         });
         _owned.Clear(); foreach (var kv in owned) _owned[kv.Key] = kv.Value;
-        _availableIn.Clear(); foreach (var kv in available) _availableIn[kv.Key] = kv.Value;
+        _formsIn.Clear(); foreach (var kv in formsIn) _formsIn[kv.Key] = kv.Value;
         _gamesWithSave.Clear(); _gamesWithSave.UnionWith(withSave);
         _status.Text = withSave.Count == 0
             ? "No saves found - set each game's save file (Collection Tracker card) or game folder (Pokémon HOME card)."
@@ -145,28 +132,53 @@ public sealed class LivingDexForm : Form
         else _info.Text = "Click a Pokémon to see which of your games have it, and where to get the ones you're missing.";
     }
 
-    private DexState StateOf(DexEntry e) =>
-        !_owned.TryGetValue(e.Species, out var l) || l.Count == 0 ? DexState.Missing : l.Any(x => x.Mon.Pk.IsShiny) ? DexState.Shiny : DexState.Owned;
+    private bool FormsView => _forms.Checked;
+
+    /// <summary>The Pokémon that fill this slot: the exact form / gender look / sweet, or (species view) any of the species.</summary>
+    private List<(Game Game, Collection.Owned Mon)> MonsFor(DexEntry e) =>
+        !_owned.TryGetValue(e.Species, out var l) ? new()
+        : FormsView ? l.Where(m => LivingDex.Fills(e, m.Mon.Pk, _genderSplit)).ToList() : l;
+
+    private DexState StateOf(DexEntry e)
+    {
+        var mons = MonsFor(e);
+        return mons.Count == 0 ? DexState.Missing : mons.Any(x => x.Mon.Pk.IsShiny) ? DexState.Shiny : DexState.Owned;
+    }
 
     private void ApplyFilter()
     {
         var q = _search.Text.Trim();
         var f = _filter.SelectedItem as string ?? "All";
-        var list = _all.Select(e => (e, StateOf(e)))
-            .Where(x => q.Length == 0 || x.e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || x.e.Species.ToString() == q.TrimStart('#', '0'))
+        var source = FormsView ? _all : _species;
+        var states = source.ToDictionary(e => e, StateOf);
+        var list = source.Select(e => (e, states[e]))
+            .Where(x => q.Length == 0 || x.e.Display.Contains(q, StringComparison.OrdinalIgnoreCase) || x.e.Species.ToString() == q.TrimStart('#', '0'))
             .Where(x => f switch { "Owned" => x.Item2 != DexState.Missing, "Missing" => x.Item2 == DexState.Missing, "Shiny" => x.Item2 == DexState.Shiny, _ => true })
             .ToList();
         _grid.SetItems(list);
-        var have = _all.Count(e => StateOf(e) != DexState.Missing);
-        _counts.Text = $"Living Dex: {have}/1025 ({have * 100 / 1025}%)  •  ★ {_all.Count(e => StateOf(e) == DexState.Shiny)} shiny species";
+        var have = states.Count(s => s.Value != DexState.Missing);
+        var speciesHave = _species.Count(e => _owned.ContainsKey(e.Species));
+        _counts.Text = FormsView
+            ? $"Living Dex: {have}/{source.Count} forms ({have * 100 / Math.Max(1, source.Count)}%)  •  {speciesHave}/{_species.Count} species  •  ★ {states.Count(s => s.Value == DexState.Shiny)} shiny"
+            : $"Living Dex: {have}/{source.Count} species ({have * 100 / Math.Max(1, source.Count)}%)  •  ★ {states.Count(s => s.Value == DexState.Shiny)} shiny species";
     }
 
     private void ShowInfo(DexEntry e)
     {
-        _sprite.Image = _grid.GetImage(e, StateOf(e) == DexState.Missing);
-        _title.Text = $"#{e.Species:0000} {e.Name}";
+        var state = StateOf(e);
+        // the detail picture: Pokémon HOME's render at full size (shiny when you have a shiny one), silhouette when missing
+        var old = _bigImage;
+        _bigImage = null;
+        var file = Path.Combine(AppPaths.AssetsDir, state == DexState.Shiny && e.ShinySprite.Length > 0 ? e.ShinySprite : e.Sprite);
+        if (state != DexState.Missing && File.Exists(file))
+            try { using var src = Image.FromFile(file); _bigImage = new Bitmap(src); } catch { }
+        _sprite.Image = _bigImage ?? _grid.GetImage(e, state == DexState.Missing);
+        old?.Dispose();
+        _title.Text = $"#{e.Species:0000} {e.Name}" + (FormsView && (e.FormName.Length > 0 || e.Female)
+            ? "\n" + (e.FormName.Length > 0 ? e.FormName : "") + (e.Female ? (e.FormName.Length > 0 ? " - " : "") + "female" : "") : "");
         var sb = new System.Text.StringBuilder();
-        if (_owned.TryGetValue(e.Species, out var mons) && mons.Count > 0)
+        var mons = MonsFor(e);
+        if (mons.Count > 0)
         {
             sb.AppendLine($"YOU HAVE {mons.Count}:");
             foreach (var grp in mons.GroupBy(m => m.Game.Title))
@@ -174,10 +186,17 @@ public sealed class LivingDexForm : Form
                               $"  - {string.Join(", ", grp.Take(3).Select(m => m.Mon.Where))}{(grp.Count() > 3 ? "..." : "")}");
             sb.AppendLine();
         }
-        else sb.AppendLine("You don't have this one in any of your saves yet.\n");
-        var games = _availableIn.TryGetValue(e.Species, out var g) ? g : new();
+        else
+        {
+            sb.AppendLine(FormsView && _owned.TryGetValue(e.Species, out var other) && other.Count > 0
+                ? $"You don't have this one yet ({other.Count} {e.Name} of other forms / genders).\n"
+                : "You don't have this one in any of your saves yet.\n");
+        }
+        // forms view: games with this exact form (Alolan Vulpix: Gen 7 on); species view: games with any form of it
+        var games = GameCatalog.All.Where(g => _formsIn.TryGetValue(g.Id, out var s) &&
+                                               (FormsView ? s.Contains((e.Species, e.Form)) : s.Any(x => x.Item1 == e.Species))).ToList();
         sb.AppendLine("IN THESE GAMES (★ = you have a save):");
-        sb.AppendLine(games.Count == 0 ? "None of the supported games." : string.Join(", ", games.Select(x => (_gamesWithSave.Contains(x.Id) ? "★ " : "") + x.Title)));
+        sb.AppendLine(games.Count == 0 ? "None of the supported games - get it in Pokémon HOME / an event." : string.Join(", ", games.Select(x => (_gamesWithSave.Contains(x.Id) ? "★ " : "") + x.Title)));
         sb.AppendLine();
         _info.Text = sb + "Looking up where to find it in your games...";
         _infoCts?.Cancel();
@@ -190,10 +209,8 @@ public sealed class LivingDexForm : Form
             foreach (var game in mine)
             {
                 if (cts.IsCancellationRequested) return "";
-                var entry = DexData.Build(game, false).FirstOrDefault(x => x.Species == e.Species);
-                if (entry == null) continue;
                 more.AppendLine($"WHERE IN {game.Title.ToUpperInvariant()}:");
-                foreach (var l in DexData.WhereToFind(game, entry, 8)) more.AppendLine("  • " + l);
+                foreach (var l in DexData.WhereToFind(game, LivingDex.ForGame(game, e), 8)) more.AppendLine("  • " + l);
                 more.AppendLine();
             }
             more.AppendLine(DexData.BulbapediaUrl(e));

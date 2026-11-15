@@ -16,6 +16,8 @@ public sealed class DexEntry
     public string Types { get; init; } = "";
     public string Sprite { get; init; } = "";        // path relative to Assets: "DexVersions\<set>\x.png" (this game's own sprite) or "Dex\x.png"
     public bool GameSprite { get; init; }            // true when the sprite is from this game's own sprite set
+    public string ShinySprite { get; init; } = "";   // Living Dex: the shiny Pokémon HOME picture ("Home\s\x.png")
+    public int Sweet { get; init; } = -1;            // Living Dex: Alcremie's sweet (0 Strawberry ... 6 Ribbon), -1 = any
     public string Display => FormName.Length == 0 ? Name + (Female ? " (female)" : "") : $"{Name} ({FormName}){(Female ? " (female)" : "")}";
 
     /// <summary>"Nidoran♀" → "Nidoran (F)": the ♀/♂ signs don't exist in the UI font.</summary>
@@ -207,56 +209,188 @@ public static class DexData
     }
 
     // ------------------------------------------------------------------ info for a selected Pokémon
+    /// <summary>
+    /// The whole evolution family in this game, one line per branch, read left to right:
+    ///   "Pidgey at Lv. 18 > [Pidgeotto] at Lv. 36 > Pidgeot"   ([ ] = the Pokémon you're looking at)
+    ///   "Eevee with a Water Stone > Vaporeon", "Eevee with high friendship during the day > Espeon"...
+    /// Every method (level, item, friendship, trade, held item, move, time of day, place, party, gender...) is written out,
+    /// with this game's own places (e.g. Magnezone: Mt. Coronet in Diamond/Pearl, Chargestone Cave in Black/White).
+    /// </summary>
     public static string Evolution(Game game, DexEntry e)
     {
-        var sb = new StringBuilder();
         try
         {
-            var tree = EvolutionTree.GetEvolutionTree(Context(game));
+            var context = Context(game);
+            var tree = EvolutionTree.GetEvolutionTree(context);
+            var table = GameData.GetPersonal(MainVersion(game));
             var pre = tree.Reverse.GetPreEvolutions(e.Species, e.Form).ToList();
-            if (pre.Count > 0)
-                sb.AppendLine("Evolves from: " + string.Join(" ← ", pre.Select(p => SpeciesName.GetSpeciesName(p.Item1, 2))));
-            foreach (var m in tree.Forward.GetForward(e.Species, e.Form).Span)
-                sb.AppendLine($"Evolves into {SpeciesName.GetSpeciesName(m.Species, 2)}{FormSuffix(game, m.Species, m.Form)}: {Describe(game, m)}");
-            if (sb.Length == 0) sb.AppendLine("Does not evolve.");
+            var (rootSp, rootForm) = pre.Count > 0 ? pre[0] : (e.Species, e.Form);
+            var lines = new List<string>();
+
+            bool InGame(ushort sp, byte form)
+            {
+                if (sp > table.MaxSpeciesID) return false;
+                if (game.Id is "sw_lgp" or "sw_lge") return sp <= 151 || sp is 808 or 809;
+                return game.Gen < 8 || table.IsPresentInGame(sp, form);
+            }
+
+            void Walk(ushort sp, byte form, string sofar, int depth)
+            {
+                var name = Name(game, sp, form);
+                if (sp == e.Species && form == e.Form) name = $"[{name}]";
+                // several methods to the same Pokémon (Feebas: Beauty or trade with a Prism Scale) = one step with "or"
+                var steps = tree.Forward.GetForward(sp, form).ToArray()
+                    .Select(m => (m, To: m.Species, Form: m.GetDestinationForm(form)))
+                    .Where(x => x.m.Method != EvolutionType.None && InGame(x.To, x.Form))
+                    .GroupBy(x => (x.To, x.Form)).ToList();
+                if (steps.Count == 0 || depth > 4) { lines.Add(sofar + name); return; }
+                foreach (var g in steps)
+                {
+                    var how = string.Join(" or ", g.Select(x => Describe(game, x.m)).Distinct());
+                    Walk(g.Key.To, g.Key.Form, $"{sofar}{name} {how} > ", depth + 1);
+                }
+            }
+
+            Walk(rootSp, rootForm, "", 0);
+            if (lines.Count == 1 && !lines[0].Contains(" > ")) return "Does not evolve.";
+            return string.Join(Environment.NewLine, lines);
         }
-        catch (Exception ex) { sb.AppendLine("Evolution data unavailable: " + ex.Message); }
-        return sb.ToString().TrimEnd();
+        catch (Exception ex) { return "Evolution data unavailable: " + ex.Message; }
     }
 
-    private static string FormSuffix(Game game, ushort species, byte form)
+    /// <summary>"Raichu", "Raichu (Alola)", "Meowstic" - a species with its form name in this game.</summary>
+    private static string Name(Game game, ushort species, byte form)
     {
-        if (form == 0) return "";
+        var n = DexEntry.Plain(SpeciesName.GetSpeciesName(species, 2));
         try
         {
             var names = FormConverter.GetFormList(species, GameInfo.Strings.types, GameInfo.Strings.forms, new[] { "♂", "♀", "-" }, Context(game));
-            return form < names.Length && !string.IsNullOrWhiteSpace(names[form]) ? $" ({names[form]})" : "";
+            // form 0 is named too when the species has other forms (Maushold (Family of Three) vs (Family of Four))
+            if (form == 0 && names.Length < 2) return n;
+            return form < names.Length && !string.IsNullOrWhiteSpace(names[form]) && names[form] is not ("♂" or "♀" or "Normal" or "-") ? $"{n} ({DexEntry.Plain(names[form])})" : n;
         }
-        catch { return ""; }
+        catch { return n; }
     }
 
+    private static string A(string word) => (word.Length > 0 && "AEIOUaeiou".Contains(word[0]) ? "an " : "a ") + word;
+
+    /// <summary>Where a place-based evolution happens in this game.</summary>
+    private static string Place(Game game, string kind) => (kind, game.Id) switch
+    {
+        ("magnetic", "nds_heartgold" or "nds_soulsilver") => "at Mt. Coronet in Diamond, Pearl or Platinum (not possible in HeartGold / SoulSilver)",
+        ("magnetic", _) when game.Gen == 4 => "at Mt. Coronet",
+        ("magnetic", _) when game.Gen == 5 => "in Chargestone Cave",
+        ("magnetic", "3ds_x" or "3ds_y") => "on Route 13",
+        ("magnetic", "3ds_or" or "3ds_as") => "in New Mauville",
+        ("magnetic", _) when game.Gen == 7 => "at Vast Poni Canyon or Blush Mountain",
+        ("magnetic", _) => "in a special magnetic field",
+        ("moss", "nds_heartgold" or "nds_soulsilver") => "near the Moss Rock in Eterna Forest in Diamond, Pearl or Platinum (not possible in HeartGold / SoulSilver)",
+        ("moss", "sw_bd" or "sw_sp") => "near the Moss Rock in Eterna Forest",
+        ("moss", _) when game.Gen == 4 => "near the Moss Rock in Eterna Forest",
+        ("moss", _) when game.Gen == 5 => "near the Moss Rock in Pinwheel Forest",
+        ("moss", "3ds_x" or "3ds_y") => "near the Moss Rock on Route 20",
+        ("moss", "3ds_or" or "3ds_as") => "near the Moss Rock in Petalburg Woods",
+        ("moss", _) when game.Gen == 7 => "near the Moss Rock in Lush Jungle",
+        ("moss", _) => "near a Moss Rock",
+        ("ice", "nds_heartgold" or "nds_soulsilver") => "near the Ice Rock on Route 217 in Diamond, Pearl or Platinum (not possible in HeartGold / SoulSilver)",
+        ("ice", "sw_bd" or "sw_sp") => "near the Ice Rock on Route 217",
+        ("ice", _) when game.Gen == 4 => "near the Ice Rock on Route 217",
+        ("ice", _) when game.Gen == 5 => "near the Ice Rock in Twist Mountain",
+        ("ice", "3ds_x" or "3ds_y") => "near the Ice Rock in Frost Cavern",
+        ("ice", "3ds_or" or "3ds_as") => "near the Ice Rock in Shoal Cave",
+        ("ice", _) when game.Gen == 7 => "near the Ice Rock on Mount Lanakila",
+        ("ice", _) => "near an Ice Rock",
+        _ => "",
+    };
+
+    /// <summary>One evolution step in plain words, written to follow the Pokémon's name ("Pidgey at Lv. 18 > Pidgeotto").</summary>
     private static string Describe(Game game, EvolutionMethod m)
     {
         var s = GameInfo.Strings;
         var items = s.GetItemStrings(Context(game), MainVersion(game));
-        var method = m.Method.ToString();
-        var text = SplitWords(method);
-        if (method.Contains("Item") && m.Argument > 0 && m.Argument < items.Length) text += $" ({items[m.Argument]})";
-        else if (method.Contains("Move") && m.Argument > 0 && m.Argument < s.movelist.Length) text += $" ({s.movelist[m.Argument]})";
-        else if (method.Contains("Species") && m.Argument > 0) text += $" ({SpeciesName.GetSpeciesName(m.Argument, 2)})";
-        if (m.Level > 0) text += $", level {m.Level}+";
-        return text;
-    }
-
-    private static string SplitWords(string s)
-    {
-        var sb = new StringBuilder();
-        for (int i = 0; i < s.Length; i++)
+        string Item() => m.Argument > 0 && m.Argument < items.Length ? items[m.Argument] : "an item";
+        string Move() => m.Argument > 0 && m.Argument < s.movelist.Length ? s.movelist[m.Argument] : "a certain move";
+        string Type() => m.Argument < s.types.Length ? s.types[m.Argument] : "?";
+        string Mon() => m.Argument > 0 ? DexEntry.Plain(SpeciesName.GetSpeciesName(m.Argument, 2)) : "a certain Pokémon";
+        var lv = m.Level > 0 ? $"at Lv. {m.Level}" : "when it levels up";
+        var lvPlus = m.Level > 0 ? $" at Lv. {m.Level}+" : "";
+        var noClock = game.Id is "gba_firered" or "gba_leafgreen" or "sw_frlg_fr" or "sw_frlg_lg"
+            ? " - not possible in FireRed / LeafGreen (no clock): evolve it in Ruby, Sapphire or Emerald" : "";
+        // Gen 2's data doesn't store Tyrogue's stat rule
+        if (m.Method == EvolutionType.LevelUp && m.Species is 106 or 107 or 237)
+            return lv + (m.Species == 106 ? " with Attack higher than Defense" : m.Species == 107 ? " with Defense higher than Attack" : " with Attack equal to Defense");
+        // Legends: Arceus uses these two for "use an item during the day / at night" (Razor Claw: Sneasler, Weavile)
+        if (Context(game) == EntityContext.Gen8a && m.Argument > 0 && m.Method is EvolutionType.TowerOfDarkness or EvolutionType.TowerOfWaters)
+            return $"with {A(Item())} {(m.Method == EvolutionType.TowerOfDarkness ? "during the day" : "at night")}";
+        return m.Method switch
         {
-            if (i > 0 && char.IsUpper(s[i]) && !char.IsUpper(s[i - 1])) sb.Append(' ');
-            sb.Append(s[i]);
-        }
-        return sb.ToString();
+            EvolutionType.LevelUp => lv,
+            EvolutionType.LevelUpFriendship => $"with high friendship (level up){lvPlus}",
+            EvolutionType.LevelUpFriendshipMorning => "with high friendship during the day (level up)" + noClock,
+            EvolutionType.LevelUpFriendshipNight => "with high friendship at night (level up)" + noClock,
+            EvolutionType.LevelUpMorning => $"{lv} during the day",
+            EvolutionType.LevelUpNight => $"{lv} at night",
+            EvolutionType.LevelUpDusk => $"{lv} at dusk (5-6 PM)",
+            EvolutionType.Trade => "when traded",
+            EvolutionType.TradeHeldItem => $"when traded holding {A(Item())}",
+            EvolutionType.TradeShelmetKarrablast => $"when traded for {A(Mon())}",
+            EvolutionType.UseItem => $"with {A(Item())}",
+            EvolutionType.UseItemMale => $"with {A(Item())} (male only)",
+            EvolutionType.UseItemFemale => $"with {A(Item())} (female only)",
+            EvolutionType.UseItemWormhole => $"with {A(Item())} in Ultra Space",
+            EvolutionType.UseItemFullMoon => $"with {A(Item())} on a full moon night",
+            EvolutionType.LevelUpWormhole => $"{lv} in Ultra Space",
+            EvolutionType.LevelUpATK => $"{lv} with Attack higher than Defense",
+            EvolutionType.LevelUpAeqD => $"{lv} with Attack equal to Defense",
+            EvolutionType.LevelUpDEF => $"{lv} with Defense higher than Attack",
+            EvolutionType.LevelUpECl5 or EvolutionType.LevelUpECgeq5 => $"{lv} (Silcoon or Cascoon is decided at random)",
+            EvolutionType.LevelUpNinjask => lv,
+            EvolutionType.LevelUpShedinja => $"{lv} with a free party slot and a spare Poké Ball (Shedinja appears next to Ninjask)",
+            EvolutionType.LevelUpBeauty => "with high Beauty (level up)",
+            EvolutionType.LevelUpHeldItemDay => $"{lv} during the day holding {A(Item())}",
+            EvolutionType.LevelUpHeldItemNight => $"{lv} at night holding {A(Item())}",
+            EvolutionType.LevelUpKnowMove => $"{lv} knowing {Move()}",
+            EvolutionType.LevelUpKnowMoveEC100 => $"{lv} knowing {Move()} (rare - about 1 in 100)",
+            EvolutionType.LevelUpKnowMoveECElse => $"{lv} knowing {Move()} (most of the time)",
+            EvolutionType.LevelUpWithTeammate => $"{lv} with {A(Mon())} in the party",
+            EvolutionType.LevelUpMale => $"{lv} (male only)",
+            EvolutionType.LevelUpFemale => $"{lv} (female only)",
+            EvolutionType.LevelUpFormFemale1 => $"{lv} (female)",
+            EvolutionType.LevelUpElectric => $"when it levels up {Place(game, "magnetic")}",
+            EvolutionType.LevelUpForest => $"when it levels up {Place(game, "moss")}",
+            EvolutionType.LevelUpCold => $"when it levels up {Place(game, "ice")}",
+            EvolutionType.LevelUpSummit => "when it levels up at Mount Lanakila",
+            EvolutionType.LevelUpInverted => $"{lv} with the console held upside down",
+            EvolutionType.LevelUpAffection50MoveType => game.Gen >= 8
+                ? $"with high friendship (level up) knowing {A(Type())}-type move"
+                : $"with two or more hearts of affection (level up) knowing {A(Type())}-type move",
+            EvolutionType.LevelUpMoveType => $"{lv} with {A(Type())}-type Pokémon in the party",
+            EvolutionType.LevelUpWeather => $"{lv} while it's raining (or foggy) outside",
+            EvolutionType.LevelUpVersion => $"{lv} (which one depends on the game version)",
+            EvolutionType.LevelUpVersionDay => $"{lv} during the day (which one depends on the game version)",
+            EvolutionType.LevelUpVersionNight => $"{lv} at night (which one depends on the game version)",
+            EvolutionType.CriticalHitsInBattle => "after landing 3 critical hits in one battle",
+            EvolutionType.HitPointsLostInBattle => $"after losing at least {Math.Max(49, (int)m.Argument)} HP in battle without fainting, then passing under the stone arch (Dusty Bowl)",
+            EvolutionType.Spin => "when you spin around while it holds a Sweet",
+            EvolutionType.LevelUpNatureAmped => $"{lv} with a Hardy, Brave, Adamant, Naughty, Docile, Impish, Lax, Hasty, Jolly, Naive, Rash, Sassy or Quirky nature",
+            EvolutionType.LevelUpNatureLowKey => $"{lv} with a Lonely, Bold, Relaxed, Timid, Serious, Modest, Mild, Quiet, Bashful, Calm, Gentle or Careful nature",
+            EvolutionType.TowerOfDarkness => "after clearing the Tower of Darkness (Scroll of Darkness)",
+            EvolutionType.TowerOfWaters => "after clearing the Tower of Waters (Scroll of Waters)",
+            EvolutionType.LevelUpWalkStepsWith => $"{lv} after walking 1,000 steps with it in Let's Go mode",
+            EvolutionType.LevelUpUnionCircle => $"{lv} while in a Union Circle with another player",
+            EvolutionType.LevelUpInBattleEC100 => $"{lv} (rare - about 1 in 100)",
+            EvolutionType.LevelUpInBattleECElse => $"{lv} (most of the time)",
+            EvolutionType.LevelUpCollect999 => "when it levels up with 999 Gimmighoul Coins in the bag",
+            EvolutionType.LevelUpDefeatEquals => "after defeating 3 Bisharp that hold a Leader's Crest (level up)",
+            EvolutionType.LevelUpUseMoveSpecial => $"after using {Move()} 20 times (level up)",
+            // Legends: Arceus doesn't store the move: Wyrdeer = Psyshield Bash, Overqwil = Barb Barrage
+            EvolutionType.UseMoveAgileStyle => $"after using {(m.Argument > 0 ? Move() : m.Species == 899 ? "Psyshield Bash" : "a certain move")} 20 times in the Agile Style (level up)",
+            EvolutionType.UseMoveStrongStyle => $"after using {(m.Argument > 0 ? Move() : m.Species == 904 ? "Barb Barrage" : "a certain move")} 20 times in the Strong Style (level up)",
+            EvolutionType.UseMoveBarbBarrage => "after using Barb Barrage 20 times in the Strong Style (level up)",
+            EvolutionType.LevelUpRecoilDamageMale => "after losing 294 HP to recoil damage without fainting (male, level up)",
+            EvolutionType.LevelUpRecoilDamageFemale => "after losing 294 HP to recoil damage without fainting (female, level up)",
+            _ => lv,
+        };
     }
 
     /// <summary>Where/how to get this Pokémon in this game (wild areas, static/gift, trades, eggs, events), from PKHeX's encounter data.</summary>
@@ -343,5 +477,24 @@ public static class DexData
 
     public static string BulbapediaUrl(DexEntry e) =>
         $"https://bulbapedia.bulbagarden.net/wiki/{Uri.EscapeDataString(SpeciesName.GetSpeciesName(e.Species, 2).Replace(' ', '_'))}_(Pok%C3%A9mon)";
-    public static string SerebiiUrl(DexEntry e) => $"https://www.serebii.net/pokedex-sv/{e.Species:000}.shtml";
+    /// <summary>
+    /// Serebii's Pokédex page for THIS game's generation (checked against serebii.net): each generation has its own Pokédex,
+    /// and Let's Go is on the Gen 7 page, BD/SP and Legends: Arceus on the Sword/Shield page, Legends: Z-A on the
+    /// Scarlet/Violet page. Gen 8/9 number links redirect to the name page (/pokedex-sv/pidgeot/).
+    /// </summary>
+    public static string SerebiiUrl(Game game, DexEntry e)
+    {
+        var dex = game.Id switch
+        {
+            "sw_lgp" or "sw_lge" => "pokedex-sm",
+            "sw_bd" or "sw_sp" or "sw_pla" or "sw_sword" or "sw_shield" => "pokedex-swsh",
+            "sw_scarlet" or "sw_violet" or "sw_za" => "pokedex-sv",
+            _ => game.Gen switch
+            {
+                1 => "pokedex", 2 => "pokedex-gs", 3 => "pokedex-rs", 4 => "pokedex-dp", 5 => "pokedex-bw",
+                6 => "pokedex-xy", 7 => "pokedex-sm", 8 => "pokedex-swsh", _ => "pokedex-sv",
+            },
+        };
+        return $"https://www.serebii.net/{dex}/{e.Species:000}.shtml";
+    }
 }

@@ -39,8 +39,10 @@ public static class SaveService
         return result.OrderByDescending(s => File.GetLastWriteTime(s.Path)).ToList();
     }
 
-    // Some saves only know their pair (e.g. a Gen 3 FR/LG save before the version is set).
-    private static bool IsSameFamily(Game game, SaveFile sav) => sav.Generation == game.Gen && game.Gen <= 3 && sav.Version is GameVersion.Any or GameVersion.Invalid;
+    // Some saves only know their pair: a Gen 1 save is "RB" (Red or Blue), a Gen 2 save "GS" (Gold or Silver) - the save
+    // itself can't tell which cartridge it came from - and a Gen 3 FR/LG save before the version is set.
+    private static bool IsSameFamily(Game game, SaveFile sav) => sav.Generation == game.Gen && game.Gen <= 3 &&
+        (sav.Version is GameVersion.Any or GameVersion.Invalid || game.Versions.Any(v => sav.Version.Contains(v)));
 
     private static IEnumerable<string> EnumerateFiles(string folder, int depth)
     {
@@ -141,16 +143,16 @@ public static class SaveService
         sb.AppendLine();
         sb.AppendLine("GAME");
         sb.AppendLine($"  Version ......... {sav.Version} (Generation {sav.Generation})");
-        sb.AppendLine($"  Play time ....... {sav.PlayedHours}h {sav.PlayedMinutes:00}m {sav.PlayedSeconds:00}s");
+        sb.AppendLine($"  Play time ....... {Safe(() => $"{sav.PlayedHours}h {sav.PlayedMinutes:00}m {sav.PlayedSeconds:00}s")}");
         var start = StartDate(sav);
         sb.AppendLine($"  Game started .... {(start is null ? "not recorded in this game's save" : start.Value.ToString("yyyy-MM-dd HH:mm"))}");
-        sb.AppendLine($"  Money ........... {sav.Money:N0}");
+        sb.AppendLine($"  Money ........... {Safe(() => sav.Money.ToString("N0"))}");
         sb.AppendLine($"  Save file ....... {sourcePath}");
         sb.AppendLine($"  Last saved ...... {File.GetLastWriteTime(sourcePath):yyyy-MM-dd HH:mm}");
         sb.AppendLine();
         sb.AppendLine("POKéDEX");
-        sb.AppendLine($"  Seen ............ {sav.SeenCount}");
-        sb.AppendLine($"  Caught .......... {sav.CaughtCount}");
+        sb.AppendLine($"  Seen ............ {Safe(() => sav.SeenCount.ToString())}");
+        sb.AppendLine($"  Caught .......... {Safe(() => sav.CaughtCount.ToString())}");
         sb.AppendLine();
         sb.AppendLine("COLLECTION");
         sb.AppendLine($"  Party ........... {party.Count}");
@@ -172,6 +174,14 @@ public static class SaveService
                 sb.AppendLine($"  ★ {Name(p.Species),-14} Lv.{p.CurrentLevel,-3} OT {p.OriginalTrainerName}");
         }
         return sb.ToString();
+    }
+
+    /// <summary>A value from the save, or "not readable" when this save doesn't have it (a missing / damaged block must not
+    /// stop the whole Game Info document).</summary>
+    private static string Safe(Func<string> read)
+    {
+        try { return read(); }
+        catch (Exception e) { AppPaths.Log("Game info: " + e.Message); return "not readable from this save"; }
     }
 
     public static bool IsOwnOT(PKM pk, SaveFile sav) =>

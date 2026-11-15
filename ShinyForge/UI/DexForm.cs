@@ -280,7 +280,7 @@ public sealed class DexForm : Form
             sb.AppendLine();
             sb.AppendLine("MORE INFO");
             sb.AppendLine(DexData.BulbapediaUrl(e));
-            sb.AppendLine(DexData.SerebiiUrl(e));
+            sb.AppendLine(DexData.SerebiiUrl(_game, e));
             return sb.ToString();
         }).ContinueWith(t =>
         {
@@ -447,7 +447,7 @@ public sealed class DexGrid : Panel
                 using var p = new Pen(border, state == DexState.Missing ? 1f : 1.6f);
                 g.DrawPath(p, path);
             }
-            var img = GetImage(entry, missing);
+            var img = GetImage(entry, missing, state == DexState.Shiny);
             if (img != null)
                 g.DrawImage(img, new Rectangle(r.X + (CellW - Img) / 2, r.Y + 6, Img, Img));
             TextRenderer.DrawText(g, $"#{entry.Species:0000}", NumFont, new Rectangle(r.X + 4, r.Y + 2, CellW - 8, 14),
@@ -462,13 +462,14 @@ public sealed class DexGrid : Panel
         }
     }
 
-    /// <summary>Sprite (cropped to the Pokémon and scaled) in colour, or as a dark silhouette.</summary>
-    public Image? GetImage(DexEntry e, bool silhouette)
+    /// <summary>Sprite (cropped to the Pokémon and scaled) in colour, or as a dark silhouette; the shiny picture when there is one.</summary>
+    public Image? GetImage(DexEntry e, bool silhouette, bool shiny = false)
     {
-        if (e.Sprite.Length == 0) return null;
-        if (!_cache.TryGetValue(e.Sprite, out var pair))
+        var sprite = shiny && e.ShinySprite.Length > 0 ? e.ShinySprite : e.Sprite;
+        if (sprite.Length == 0) return null;
+        if (!_cache.TryGetValue(sprite, out var pair))
         {
-            var path = Path.Combine(AppPaths.AssetsDir, e.Sprite);
+            var path = Path.Combine(AppPaths.AssetsDir, sprite);
             if (!File.Exists(path)) return null;
             try
             {
@@ -477,7 +478,7 @@ public sealed class DexGrid : Panel
                 pair = (color, Shadow(color));
             }
             catch { return null; }
-            _cache[e.Sprite] = pair;
+            _cache[sprite] = pair;
         }
         return silhouette ? pair.Shadow : pair.Color;
     }

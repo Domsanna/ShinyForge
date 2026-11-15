@@ -58,7 +58,7 @@ timing:
   skip_intro: true              # tap A through the intro movie (needs a title reference)
   intro_skip_delay: 2.0         # seconds after the reset before the first skip tap
   intro_skip_interval: 1.0      # seconds between skip taps
-  title_delay_min: 1.0          # random delay on the title screen (seconds)
+  title_delay_min: 1.0          # vision mode only: random delay on the title screen (seconds)
   title_delay_max: 5.0
   press_hold: 0.15              # how long each A press is held (shorter gets dropped over WiFi)
   a_interval: 0.6               # seconds between A presses while mashing

@@ -261,7 +261,7 @@
   <ul>
     <li><b>Auto mode</b> reads the game's memory to see where you are.
       <ul>
-        <li>At a legendary or static spot (Deoxys, the legendary birds, Mewtwo, Lugia, Ho-Oh, Snorlax), it soft resets with a random 1–5 second wait on the title screen, so every attempt is different.</li>
+        <li>At a legendary or static spot (Deoxys, the legendary birds, Mewtwo, Lugia, Ho-Oh, Snorlax), it soft resets and goes straight from the title screen into the battle (tested: every reset gives a different Pokémon; a little random timing is added only if a repeat ever shows up).</li>
         <li>Anywhere else, it walks for wild encounters and runs from ordinary Pokémon. It <b>never runs from a legendary</b>.</li>
       </ul></li>
     <li>Every encounter is logged with its species, level, IVs, EVs, nature, Hidden Power, PID and shiny value. The log is used by <a href="#stats">Hunt statistics</a>.</li>
@@ -378,6 +378,8 @@
     <li>Pokémon you own are shown in colour. Missing ones appear as silhouettes.</li>
     <li>Includes forms, regional variants and visible female differences, where the game has them.</li>
     <li>Click a Pokémon for its info panel: types, where to find it in this game, how it evolves, and links to Bulbapedia and Serebii.</li>
+    <li><b>Evolution</b> shows the whole family, one line per branch, with the Pokémon you clicked in [brackets]. For example: <i>Pidgey at Lv. 18 &gt; [Pidgeotto] at Lv. 36 &gt; Pidgeot</i>, or <i>Eevee with high friendship at night (level up) &gt; Umbreon</i>. Every method is written out: level, item, friendship, trade (and the held item), known move, time of day, a place in that game (for example Magnezone: Mt. Coronet in Platinum), party members, gender and more. Evolutions a game can't do are marked, such as Espeon and Umbreon in FireRed/LeafGreen, which have no clock.</li>
+    <li>The <b>Serebii</b> link opens Serebii's Pokédex for <b>that game's generation</b>, for example the Gen 3 page with the FireRed/LeafGreen data when you're in LeafGreen. Let's Go uses the Sun/Moon Pokédex, Brilliant Diamond/Shining Pearl and Legends: Arceus the Sword/Shield one, and Legends: Z-A the Scarlet/Violet one, because that's where Serebii keeps them.</li>
   </ul>
 </section>
 
@@ -398,15 +400,29 @@
   <p>ShinyForge reads saves from every main-series game from Red/Blue to Legends: Z-A, using PKHeX's core library. It only reads them and never writes to them.</p>
 
   <h3 id="checkpoint">Saves from Checkpoint (SD card)</h3>
-  <p>If you back up your saves with <b>Checkpoint</b> on the console, ShinyForge can find them on the SD card. Click <b>Find in Checkpoint</b>.</p>
+  <p>If you back up your saves with <b>Checkpoint</b> on the console, ShinyForge can find them on the SD card. Click <b>Find in Checkpoint</b>, then choose where the card is:</p>
   <ul>
-    <li>It searches every drive of this PC for Checkpoint's folders:
+    <li><b>Inside the console, over WiFi</b> (no need to take the card out):
       <ul>
-        <li>3DS: <code>sdmc:/3ds/Checkpoint/saves/&lt;unique ID&gt; &lt;game title&gt;/</code></li>
-        <li>Switch: <code>sdmc:/switch/Checkpoint/saves/&lt;title ID&gt; &lt;game title&gt;/</code></li>
+        <li><b>Switch: ShinyForge starts the FTP app for you</b> (through sys-botbase):
+          <ol>
+            <li>If a game is open, ShinyForge asks you to <b>save and close it</b> (HOME, then X on the game, then Close) and waits for your OK. It checks that the game really is closed before it continues.</li>
+            <li>It starts a game from the HOME menu while <b>holding R</b>, so Atmosphère opens the <b>Homebrew Menu</b> instead of the game. If the Switch asks "Who is using the software?", it picks the <b>first user</b> while still holding R.</li>
+            <li>It steps through the Homebrew Menu, recognises <b>ftpd</b> or <b>Checkpoint</b> by its icon, and starts it. ftpd comes first because it always serves FTP. Checkpoint's FTP server only runs when it's turned on in Checkpoint's settings.</li>
+            <li>Don't touch the controller while this runs (about a minute). When ShinyForge has finished reading, close the FTP app (HOME, then close it) before you start your game again.</li>
+          </ol></li>
+        <li><b>3DS:</b> ShinyForge asks you to <b>save and exit the game</b> and open Checkpoint (with its FTP server turned on) or ftpd, then click OK.</li>
+        <li>You can also start the FTP app yourself: Checkpoint's FTP server shows <i>FTP server running on &lt;IP&gt;:50000</i>, ftpd uses port 5000.</li>
+      </ul>
+      ShinyForge uses the console's IP address (the one you entered for the Switch or 3DS) and downloads <b>only this game's</b> Checkpoint backups.
+      It only reads: it lists folders and downloads files, and never changes anything on the console. The downloaded backups are kept in a <code>Console SD</code> folder next to ShinyForge's settings, and unchanged files aren't downloaded again.</li>
+    <li><b>In this PC</b>: it searches every drive for Checkpoint's folders:
+      <ul>
+        <li>3DS: <code>sdmc:/3ds/Checkpoint/saves/0x&lt;unique ID&gt; &lt;game title&gt;/</code> (DS cartridges: <code>&lt;game code&gt; &lt;cartridge title&gt;</code>, e.g. <code>IRBO POKEMON B</code>)</li>
+        <li>Switch: <code>sdmc:/switch/Checkpoint/saves/0x&lt;title ID&gt; 0x&lt;title ID&gt;/</code> (Checkpoint repeats the ID instead of names with "é")</li>
       </ul>
       If you copied the SD card to the PC, choose that folder when asked. It's remembered in Settings.</li>
-    <li>The game you opened is matched by its <b>title ID</b> (e.g. <code>0x01B51</code> for Ultra Moon, <code>0100ABF008968000</code> for Sword), or by its name for games without a listed ID (DS cartridges, Legends: Z-A).</li>
+    <li>The game you opened is matched by its <b>title ID</b> (e.g. <code>0x01B51</code> for Ultra Moon, <code>0x0100ABF008968000</code> for Sword), its <b>game code</b> for DS cartridges, or its name for the Game Boy games (Virtual Console).</li>
     <li>When several backups are found, you choose which one to use. The newest is selected.</li>
     <li>The chosen backup is <b>copied to this PC</b> (<code>Documents\ShinyForge\Saves\&lt;game&gt;</code>, or <code>Saves</code> next to the portable program). The HOME folder, Game Info and the Pokédex tracker then use that copy.</li>
   </ul>
@@ -437,11 +453,13 @@
 <!-- ============================================================ 10 -->
 <section id="livingdex">
   <h2><span class="num">11</span> Living Dex planner</h2>
-  <p>Click <b>Living Dex</b> in the top bar. ShinyForge reads the saves you've set up for every game and builds one list of all 1,025 species:</p>
+  <p>Click <b>Living Dex</b> in the top bar. ShinyForge reads the saves you've set up for every game and builds one list of <b>every Pokémon you can put in a Pokémon HOME box</b>, in HOME's box order with Pokémon HOME's own pictures:</p>
   <ul>
-    <li>Which species you own, and <b>in which game</b>.</li>
-    <li>Which ones you have as <b>shiny</b>.</li>
-    <li>What's still missing, so you know what to hunt next.</li>
+    <li><b>1,391 slots</b>: all 1,025 species plus every boxable form. That covers regional forms (Alolan, Galarian, Hisuian, Paldean), visible female differences, Unown letters, Vivillon patterns, cap Pikachu, every Alcremie cream and sweet, Minior cores and more. The list follows Serebii's <a href="https://www.serebii.net/pokemonhome/depositablepokemon.shtml">Pokémon HOME depositable Pokémon</a> list and was checked slot by slot. Mega Evolutions, Gigantamax and other battle-only forms aren't included because they can't be put in a box.</li>
+    <li>A slot counts as owned only when the Pokémon matches it exactly: its form, its male or female look where those differ, and its Alcremie sweet. You can see which slots you own, <b>in which game</b> and where in that save.</li>
+    <li>Shiny ones show their <b>shiny</b> HOME picture and a ★.</li>
+    <li><b>In these games</b> lists the games that have that exact form (for example Alolan Vulpix only from Sun/Moon on), and where to find it in the games you have saves for.</li>
+    <li>Turn off <b>Forms &amp; genders</b> to see one slot per species (1,025) instead.</li>
   </ul>
   <p>Click <b>Rescan saves</b> after you've played or added a new save.</p>
 </section>
@@ -629,6 +647,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>The phone remote doesn't load</td><td>The phone must be on the same WiFi. Allow ShinyForge in the Windows firewall for private networks. Check the PIN in the address.</td></tr>
     <tr><td>No notifications</td><td>Use Test notification in Settings. Check the webhook URL, or that the ntfy topic name matches exactly.</td></tr>
     <tr><td>No Checkpoint folder found</td><td>Put the console's SD card into the PC (or connect it), or choose the copied folder when asked. Checkpoint must have made at least one backup of the game.</td></tr>
+    <tr><td>"No FTP server answers" (reading over WiFi)</td><td>Open Checkpoint on the console and turn on its FTP server in Checkpoint's settings (or start the ftpd app), and keep it open. Check that the console's IP address is right (choose <b>No</b> to enter a new one) and that it's on the same WiFi.</td></tr>
+    <tr><td>"Couldn't start the FTP app on the Switch"</td><td>ShinyForge needs sys-botbase, Atmosphère's Homebrew Menu (a game started while holding R), and ftpd or Checkpoint in the Homebrew Menu. It uses the default Homebrew Menu theme to recognise the apps. If it can't, start the FTP app yourself; ShinyForge then carries on.</td></tr>
     <tr><td>ESP32-S3 not found</td><td>Use a USB <b>data</b> cable and the board's native USB socket. The board appears as a COM port in Device Manager; ESP32-S3 boards need no driver on Windows 10/11.</td></tr>
     <tr><td>Firmware "not answering"</td><td>Close pokeldn (it holds the port), then click <b>Check again</b>. If it still doesn't answer, use <b>Install firmware on the board</b>.</td></tr>
     <tr><td>RNG mode keeps missing</td><td>A miss of a frame or two is normal, and the bot adjusts its timing. Fewer nature or IV requirements make matching frames more common.</td></tr>
@@ -698,7 +718,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>LDN library &amp; NintendoClients wiki</td><td>kinnay</td><td>The Switch local wireless protocol pokeldn builds on</td></tr>
     <tr><td>esptool</td><td>Espressif Systems and contributors. GPL-2.0</td><td>Installing the radio firmware on the ESP32-S3</td></tr>
     <tr><td>ESP-IDF</td><td>Espressif Systems. Apache-2.0</td><td>The framework pokeldn's firmware is built with</td></tr>
-    <tr><td>Checkpoint</td><td>Bernardo Giordano (FlagBrew) and contributors. GPL-3.0</td><td>The console save manager whose backups ShinyForge reads</td></tr>
+    <tr><td>Checkpoint</td><td>Bernardo Giordano (FlagBrew) and contributors. GPL-3.0</td><td>The console save manager whose backups ShinyForge reads, on the SD card or over WiFi through its FTP server</td></tr>
+    <tr><td>ftpd</td><td>Michael Theall (mtheall) and contributors. GPL-3.0</td><td>The FTP server inside Checkpoint (and the standalone ftpd app) that ShinyForge reads the console's SD card through</td></tr>
   </table></div>
 
   <h3>Services &amp; other tools</h3>
@@ -708,7 +729,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>ntfy</td><td>Philipp C. Heckel (binwiederhier). Apache-2.0 / GPL-2.0</td><td>Free phone push notifications</td></tr>
     <tr><td>Discord webhooks</td><td>Discord Inc.</td><td>Discord alerts</td></tr>
     <tr><td>Microsoft Excel</td><td>Microsoft</td><td>Updating the tracker spreadsheets</td></tr>
-    <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>Linked from the Pokédex info panel</td></tr>
+    <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>Linked from the Pokédex info panel; Serebii's Pokémon HOME depositable list is the reference for the Living Dex's slots</td></tr>
+    <tr><td>Pokémon HOME renders</td><td>© Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokémon Company</td><td>The Living Dex pictures (normal and shiny), shrunk to 128 px</td></tr>
     <tr><td>Inno Setup</td><td>Jordan Russell and Martijn Laan</td><td>The Windows installer</td></tr>
     <tr><td>Segoe UI &amp; Segoe Fluent Icons</td><td>Microsoft (part of Windows)</td><td>Fonts and icons</td></tr>
   </table></div>

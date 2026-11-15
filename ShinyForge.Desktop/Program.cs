@@ -9,6 +9,7 @@ internal static class Program
     {
         var i = Array.IndexOf(args, "--screenshot");
         if (i >= 0 && i + 1 < args.Length) UI.App.ScreenshotDir = args[i + 1];
+        Services.ConsoleFtpLauncher.Decode = UI.AvaloniaImage.Decode; // reading Switch screenshots (finding the FTP app)
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

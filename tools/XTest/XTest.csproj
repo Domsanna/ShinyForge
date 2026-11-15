@@ -8,6 +8,8 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\MockFtpd.cs" Link="MockFtpd.cs" />
+    <None Include="..\..\ShinyForge\Assets\Home\home_dex.json" Link="Assets\Home\home_dex.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\..\ShinyForge\Core\**\*.cs" LinkBase="Core" />
     <Compile Include="..\..\ShinyForge\Services\**\*.cs" LinkBase="Services" />
     <None Include="..\..\ShinyForge\Assets\Dex\dex_index.json" Link="Assets\Dex\dex_index.json" CopyToOutputDirectory="PreserveNewest" />

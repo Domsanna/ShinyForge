@@ -31,7 +31,8 @@ internal static class Program
             : UI.GamePage.Any3DSHunt ? "the 3DS hunt"
             : Services.HuntService.IsPythonHuntRunning() ? "the Python hunter" : null;
         Services.PowerGuard.Start();
-        Services.WebServer.Apply();               // stream overlay / phone remote (if turned on)
+        Services.ConsoleFtpLauncher.Decode = GdiImage.Decode; // reading Switch screenshots (finding the FTP app)
+        Services.WebServer.Apply();              // stream overlay / phone remote (if turned on)
         Application.Run(new MainForm());
         Services.WebServer.Stop();
         Services.HealthMonitor.Stop();
