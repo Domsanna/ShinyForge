@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packages the published macOS / Linux builds (called by build-unix.ps1, runs in WSL / Linux).
 #   $1 = dist-unix folder (with publish-osx-arm64, publish-osx-x64, publish-linux-x64, ShinyForge.icns)
-#   $2 = version (1.0.N)   $3 = build number
+#   $2 = version (1.X.Z)   $3 = macOS bundle version (the same 1.X.Z)
 set -euo pipefail
 DIST="$1"; VERSION="$2"; BUILD="$3"
 WORK="$(mktemp -d)"

@@ -11,13 +11,10 @@ $dist = Join-Path $root "dist-unix"
 for ($i = 0; $i -lt 5 -and (Test-Path $dist); $i++) { cmd /c "rd /s /q `"$dist`" 2>nul"; if (Test-Path $dist) { Start-Sleep 3 } }
 New-Item -ItemType Directory -Force $dist | Out-Null
 
-# Same build number as the Windows version: the number of changes (git commits).
-$git = (Get-Command git -ErrorAction SilentlyContinue).Source
-if (-not $git -and (Test-Path "C:\Program Files\Git\cmd\git.exe")) { $git = "C:\Program Files\Git\cmd\git.exe" }
-$build = 0
-if ($git) { try { $build = [int](& $git -C $root rev-list --count HEAD 2>$null) } catch { $build = 0 } }
-$version = "1.0.$build"
-Write-Host "ShinyForge $version (build $build) for macOS and Linux"
+# Same version as the Windows build: 1.X.Z from version.txt.
+$version = (Get-Content (Join-Path $root "version.txt") -TotalCount 1).Trim()
+if ($version -notmatch '^1\.\d+\.\d+$') { throw "version.txt must hold a version like 1.2.3 (found '$version')" }
+Write-Host "ShinyForge $version for macOS and Linux"
 
 foreach ($rid in @("osx-arm64", "osx-x64", "linux-x64")) {
     $out = Join-Path $dist "publish-$rid"
@@ -36,6 +33,6 @@ if ($LASTEXITCODE -ne 0) { throw "icon failed" }
 # Package in WSL (Ubuntu).
 $wslDist = (& wsl.exe -d Ubuntu-24.04 -- wslpath -a "$dist").Trim()
 $wslScript = (& wsl.exe -d Ubuntu-24.04 -- wslpath -a (Join-Path $root "installer\package-unix.sh")).Trim()
-& wsl.exe -d Ubuntu-24.04 -- bash "$wslScript" "$wslDist" "$version" "$build"
+& wsl.exe -d Ubuntu-24.04 -- bash "$wslScript" "$wslDist" "$version" "$version"
 if ($LASTEXITCODE -ne 0) { throw "packaging failed" }
 Get-ChildItem $dist -File | Where-Object { $_.Extension -ne ".icns" } | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}}

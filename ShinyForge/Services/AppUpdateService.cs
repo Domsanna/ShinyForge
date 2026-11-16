@@ -10,7 +10,8 @@ namespace ShinyForge.Services;
 public sealed record AppRelease(string Tag, Version Version, string Name, string Notes, string PageUrl, DateTime Published,
     string? ZipUrl, long ZipSize)
 {
-    public int Build => Version.Build;
+    /// <summary>"1.1.0"</summary>
+    public string VersionText => AppInfo.Text(Version);
     public bool IsNewer => Version > AppInfo.Comparable;
 }
 

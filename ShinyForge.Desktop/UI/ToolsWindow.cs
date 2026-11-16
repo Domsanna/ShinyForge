@@ -64,7 +64,7 @@ public sealed class ToolsWindow : Window
         var check = new FancyButton("Check now", Skin.GlyphSync, Skin.Accent) { Height = 34 };
         check.Click += async (_, _) => { if (Owner is MainWindow main) await main.CheckAppUpdate(quiet: false); Populate(); };
         _list.Children.Add(RowPanel(Color.FromRgb(36, 30, 70), Skin.GlyphSparkle, Skin.Gold,
-            $"ShinyForge {AppInfo.Display} for {OsInfo.Name}   —   " + (latest == null ? "installed" : latest.IsNewer ? $"build {latest.Build} available" : "up to date"),
+            $"ShinyForge {AppInfo.Display} for {OsInfo.Name}   —   " + (latest == null ? "installed" : latest.IsNewer ? $"{latest.VersionText} available" : "up to date"),
             "New versions are published on GitHub: " + AppInfo.ReleasesUrl, check));
         var open = new FancyButton("Open folder", Skin.GlyphFolder, Skin.PanelHi) { Height = 34 };
         open.Click += (_, _) => OpenBackupFolder();

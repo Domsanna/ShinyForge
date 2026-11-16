@@ -97,7 +97,7 @@ The Windows version uses Windows Forms (`ShinyForge/`). The macOS / Linux versio
 
 Or double-click `Install tools and build.bat`, which installs the SDK and Inno Setup with winget and then builds.
 
-**Version numbers:** the build number counts the changes ShinyForge has gone through (the number of commits), so every build is `1.0.<build>`. Releases are tagged `v1.0.<build>`, and the in-app updater compares against the latest tag.
+**Version numbers:** versions are `1.X.Z`. `X` goes up for big updates (and `Z` starts again at 0); `Z` goes up for patches and small fixes, such as fixes for error reports. The version is set in `version.txt`, which both build scripts read. Releases are tagged `v1.X.Z`, and the in-app updater compares against the latest tag. Versions up to 1.0.15 were numbered by commit count.
 
 | Folder | Contents |
 |---|---|

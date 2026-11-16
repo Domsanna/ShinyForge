@@ -17,7 +17,7 @@ A clear description of the problem.
 **What did you expect to happen?**
 
 **Your setup**
-- ShinyForge version and build (bottom-right of the window, e.g. `v1.0 (build 3)`):
+- ShinyForge version (bottom-right of the window, e.g. `v1.0.15`):
 - Installed or portable:
 - Console and game (e.g. Switch – FireRed, 3DS – Ultra Moon):
 - Windows version:

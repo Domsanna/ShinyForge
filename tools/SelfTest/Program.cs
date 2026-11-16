@@ -723,8 +723,10 @@ if (tests.Contains("update"))
            {"name":"ShinyForge-Portable.zip","browser_download_url":"https://example/portable.zip","size":157000000}]}
         """)!.AsObject();
     var rel = AppUpdateService.Parse(json)!;
-    Check(rel.Build == 500 && rel.IsNewer && rel.ZipUrl!.EndsWith("portable.zip") && rel.ZipSize == 157000000,
-        $"release parsed: build {rel.Build}, newer={rel.IsNewer}, program zip found");
+    Check(rel.VersionText == "9.0.500" && rel.IsNewer && rel.ZipUrl!.EndsWith("portable.zip") && rel.ZipSize == 157000000,
+        $"release parsed: {rel.VersionText}, newer={rel.IsNewer}, program zip found");
+    // 1.X.Z: a big update (X) is newer than any patch of the one before
+    Check(ShinyForge.Core.AppInfo.ParseTag("v1.1.0") > ShinyForge.Core.AppInfo.ParseTag("v1.0.99"), "1.1.0 is newer than 1.0.99");
     var old = AppUpdateService.Parse(System.Text.Json.Nodes.JsonNode.Parse("""{"tag_name":"v0.9.1","assets":[]}""")!.AsObject())!;
     Check(!old.IsNewer, "an older release is not offered");
     var plain = ShinyForge.UI.UpdateForm.Plain("## What's new\n- **Faster** hunts\nauto - catch");
@@ -1388,7 +1390,7 @@ if (tests.Contains("sheetsdl"))
 if (tests.Contains("updatelive"))
 {
     var rel = await AppUpdateService.CheckAsync();
-    Console.WriteLine($"   GitHub latest: {rel?.Tag} build {rel?.Build}, program zip {rel?.ZipSize / 1048576} MB, page {rel?.PageUrl}");
+    Console.WriteLine($"   GitHub latest: {rel?.Tag} ({rel?.VersionText}), program zip {rel?.ZipSize / 1048576} MB, page {rel?.PageUrl}");
     Check(rel != null && rel.ZipUrl != null, "latest release found on GitHub with the program download");
     Check(rel != null && rel.IsNewer == (rel.Version > ShinyForge.Core.AppInfo.Comparable), $"this copy ({ShinyForge.Core.AppInfo.Display}) compares correctly");
 }

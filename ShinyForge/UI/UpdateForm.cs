@@ -23,7 +23,7 @@ public sealed class UpdateForm : Form
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
         var head = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = Theme.Panel, Padding = new Padding(20, 14, 20, 0) };
-        var title = Theme.Label($"ShinyForge {r.Version.Major}.{r.Version.Minor} (build {r.Build}) is available", Theme.Title);
+        var title = Theme.Label($"ShinyForge {r.VersionText} is available", Theme.Title);
         title.Location = new Point(20, 12);
         var sub = Theme.Label($"You have {AppInfo.Display}.  Released {(r.Published == default ? "" : r.Published.ToLocalTime().ToString("yyyy-MM-dd"))}  •  " +
                               $"download {Mb(r.ZipSize)} - your spreadsheets, saves and settings are kept", Theme.Body, Theme.Muted);

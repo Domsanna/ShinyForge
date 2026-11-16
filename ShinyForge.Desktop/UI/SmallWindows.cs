@@ -290,7 +290,7 @@ public sealed class UpdateWindow : Window
             Margin = new Thickness(20, 14), Spacing = 6,
             Children =
             {
-                Skin.Title($"ShinyForge {r.Version.Major}.{r.Version.Minor} (build {r.Build}) is available"),
+                Skin.Title($"ShinyForge {r.VersionText} is available"),
                 Skin.MutedText($"You have {AppInfo.Display}.  Released {(r.Published == default ? "" : r.Published.ToLocalTime().ToString("yyyy-MM-dd"))}" +
                             (OsInfo.IsWindows ? "" : $"  •  the {OsInfo.Name} download is on the release page")),
             },

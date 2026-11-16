@@ -11,14 +11,10 @@ if (Test-Path $oldBackup) { if (Test-Path $keptBackup) { Remove-Item $keptBackup
 for ($i = 0; $i -lt 5 -and (Test-Path $dist); $i++) { cmd /c "rd /s /q `"$dist`" 2>nul"; if (Test-Path $dist) { Start-Sleep 3 } }
 if (Test-Path $dist) { throw "Couldn't delete $dist - close any program or Explorer window using it and try again." }
 
-# Build number = how many changes (git commits) ShinyForge has gone through. Version = 1.0.<build>.
-$git = (Get-Command git -ErrorAction SilentlyContinue).Source
-if (-not $git -and (Test-Path "C:\Program Files\Git\cmd\git.exe")) { $git = "C:\Program Files\Git\cmd\git.exe" }
-$build = 0
-if ($git) { try { $build = [int](& $git -C $root rev-list --count HEAD 2>$null) } catch { $build = 0 } }
-if ($build -eq 0) { Write-Warning "Not a git repository (or git missing) - building as build 0." }
-$version = "1.0.$build"
-Write-Host "ShinyForge $version (build $build)"
+# Version 1.X.Z from version.txt: X = big updates (Z back to 0), Z = patches / small fixes. Change version.txt before a release.
+$version = (Get-Content (Join-Path $root "version.txt") -TotalCount 1).Trim()
+if ($version -notmatch '^1\.\d+\.\d+$') { throw "version.txt must hold a version like 1.2.3 (found '$version')" }
+Write-Host "ShinyForge $version"
 
 & "C:\Program Files\dotnet\dotnet.exe" publish (Join-Path $root "ShinyForge\ShinyForge.csproj") -c Release -r win-x64 --self-contained true `
     -p:PublishReadyToRun=true -p:Version=$version -o $publish -nologo -v q

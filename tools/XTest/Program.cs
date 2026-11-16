@@ -105,7 +105,7 @@ catch (Exception e) { Check(false, "tracker download: " + e.Message); }
 try
 {
     var rel = AppUpdateService.CheckAsync().GetAwaiter().GetResult();
-    Check(rel != null && rel.Build >= 6, $"latest ShinyForge on GitHub: {rel?.Tag}");
+    Check(rel != null && rel.Version >= new Version(1, 0, 6), $"latest ShinyForge on GitHub: {rel?.Tag}");
 }
 catch (Exception e) { Check(false, "update check: " + e.Message); }
 

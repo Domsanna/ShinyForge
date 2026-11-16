@@ -53,7 +53,7 @@ public sealed class ToolsForm : Form
         aIcon.Location = new Point(14, 22);
         var latest = AppUpdateService.Latest;
         var aName = Theme.Label($"ShinyForge {AppInfo.Display}   —   " +
-                                (latest == null ? "installed" : latest.IsNewer ? $"build {latest.Build} available" : "up to date"), Theme.H2, Theme.Text);
+                                (latest == null ? "installed" : latest.IsNewer ? $"{latest.VersionText} available" : "up to date"), Theme.H2, Theme.Text);
         aName.Location = new Point(48, 8);
         var aInfo = Theme.Label("New versions are published on GitHub: " + AppInfo.ReleasesUrl, Theme.Small, Theme.Muted);
         aInfo.Location = new Point(50, 38);
