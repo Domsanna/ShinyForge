@@ -1275,103 +1275,6 @@ if (tests.Contains("health"))
     HealthMonitor.RunNow();
     Check(HealthMonitor.Items.All(i => !i.Message.Contains("boom")), "unregistered check's problems are cleared");
 
-    // same-Pokemon detection in the Python bot's log
-    var csvPath = Path.Combine(work, "encounters_test.csv");
-    var since = DateTime.Now.AddMinutes(-1);
-    string Row(int n, string pid) => $"{n},{DateTime.Now:yyyy-MM-dd HH:mm:ss},normal,Deoxys,30,71,71,97,42,95,38,95,5,7,26,1,11,1,51,0,0,0,0,0,0,Bashful,0,Dragon 54,False,57940,{pid},";
-    File.WriteAllLines(csvPath, new[] { "header", Row(1, "11111111"), Row(2, "22222222"), Row(3, "33333333") });
-    Check(HuntService.FindRepeat(csvPath, since) == null, "different Pokémon -> no repeat");
-    File.WriteAllLines(csvPath, new[] { "header", Row(1, "11111111"), Row(2, "50CA8977"), Row(3, "50CA8977"), Row(4, "50CA8977") });
-    Check(HuntService.FindRepeat(csvPath, since)?.Pid == "50CA8977", "same Pokémon 3x in a row -> detected");
-    Check(HuntService.FindRepeat(csvPath, DateTime.Now.AddMinutes(5)) == null, "old rows (before the hunt started) are ignored");
-    var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\encounters.csv");
-    if (File.Exists(real))
-        Console.WriteLine($"   real log since 09:52: {HuntService.FindRepeat(real, new DateTime(2026, 11, 13, 9, 52, 0))?.Pid ?? "no 3-in-a-row at the end"}");
-
-    // Switch IP is written into the Python bot's config.yaml
-    var cfgDir = Path.Combine(work, "botcfg");
-    Directory.CreateDirectory(cfgDir);
-    File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\config.yaml"), Path.Combine(cfgDir, "config.yaml"), true);
-    HuntService.SyncBotConfig(cfgDir, "192.168.1.77", 6000);
-    var cfgText = File.ReadAllText(Path.Combine(cfgDir, "config.yaml"));
-    Check(cfgText.Contains("host: 192.168.1.77") && cfgText.Contains("# <-- CHANGE") && cfgText.Contains("port: 6000"), "Switch IP synced into config.yaml (comments kept)");
-
-    // reachability
-    Check(HealthMonitor.CanReach(AppSettings.Current.SwitchIP, 6000), $"Switch answers at {AppSettings.Current.SwitchIP}:6000");
-    Check(!HealthMonitor.CanReach("192.168.0.250", 6000, 1500), "a wrong IP is detected as unreachable");
-
-    // recording: ffmpeg dies -> the health check restarts it
-    InitUi();
-    var win = new Form { Text = "ShinyForgeHealthTest", Size = new Size(320, 240), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50), BackColor = Color.SteelBlue };
-    win.Show(); Application.DoEvents();
-    var recDir = Path.Combine(work, "health_rec");
-    if (Directory.Exists(recDir)) Directory.Delete(recDir, true);
-    var rec = new RecordingService();
-    rec.Start(RecordingService.WindowPrefix + "ShinyForgeHealthTest", RecordingService.NoAudio, recDir, 1, 60);
-    for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(100); }
-    Check(rec.CheckHealth() == null, "healthy recording -> nothing to report");
-    foreach (var p in System.Diagnostics.Process.GetProcessesByName("ffmpeg")) try { p.Kill(); } catch { }
-    Thread.Sleep(1000);
-    var res = rec.CheckHealth();
-    for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(100); }
-    Check(res is { Error: true } && res.Value.Message.Contains("restarted") && rec.IsRecording, $"crashed recording restarted automatically: {res?.Message}");
-    rec.Stop();
-    Check(rec.CheckHealth() == null, "stopped by the user -> not restarted");
-    win.Close();
-}
-
-if (tests.Contains("features"))
-{
-    var s = AppSettings.Current;
-    var keep = (s.DiscordWebhookUrl, s.NtfyTopic, s.NtfyServer, s.OverlayEnabled, s.RemoteEnabled, s.WebPort, s.AutoBackups);
-
-    // ---- notifications against a fake Discord + ntfy server on localhost
-    var got = new List<string>();
-    var fake = new System.Net.HttpListener();
-    fake.Prefixes.Add("http://127.0.0.1:8798/");
-    fake.Start();
-    _ = Task.Run(async () =>
-    {
-        while (fake.IsListening)
-        {
-            try
-            {
-                var ctx = await fake.GetContextAsync();
-                using var rd = new StreamReader(ctx.Request.InputStream);
-                lock (got) got.Add($"{ctx.Request.Url!.AbsolutePath} title={ctx.Request.Headers["Title"]} body={rd.ReadToEnd()}");
-                ctx.Response.StatusCode = 200; ctx.Response.Close();
-            }
-            catch { break; }
-        }
-    });
-    s.DiscordWebhookUrl = "http://127.0.0.1:8798/discord"; s.NtfyServer = "http://127.0.0.1:8798"; s.NtfyTopic = "test-topic";
-    var res = await NotifyService.SendAsync("Test shiny", "Deoxys appeared", important: true);
-    Thread.Sleep(500);
-    Check(res.Contains("Discord: sent") && res.Contains("ntfy: sent") && got.Any(g => g.StartsWith("/discord") && g.Contains("Deoxys")) && got.Any(g => g.StartsWith("/test-topic") && g.Contains("Test shiny")),
-        $"notifications sent to Discord + ntfy ({res})");
-    // the Python bot's notifier
-    var py = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python",
-        "-c \"import sys; sys.path.insert(0, r'" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot") + "'); " +
-        "from shinybot.extras import notify; notify({'notify': {'discord_webhook': 'http://127.0.0.1:8798/pydiscord', 'ntfy_topic': 'pytopic', 'ntfy_server': 'http://127.0.0.1:8798'}}, 'Py shiny', 'from python', important=True)\"")
-        { UseShellExecute = false, RedirectStandardOutput = true })!;
-    Console.WriteLine("   python: " + py.StandardOutput.ReadToEnd().Trim());
-    py.WaitForExit();
-    Thread.Sleep(300);
-    Check(got.Any(g => g.StartsWith("/pydiscord")) && got.Any(g => g.StartsWith("/pytopic") && g.Contains("Py shiny")), "the Python bot sends notifications too");
-    fake.Stop();
-
-    // ---- backups
-    s.AutoBackups = true;
-    var bdir = Path.Combine(work, "backup_test"); Directory.CreateDirectory(bdir);
-    var savePath = Path.Combine(bdir, "test.sav");
-    File.WriteAllText(savePath, "version 1");
-    var b1 = BackupService.Backup(savePath, false);
-    var b2 = BackupService.Backup(savePath, false);
-    Thread.Sleep(1100);
-    File.WriteAllText(savePath, "version 2 - changed");
-    var b3 = BackupService.Backup(savePath, false);
-    Check(b1 != null && b2 == null && b3 != null, "backup made, skipped when unchanged, made again after a change");
-    var entry = BackupService.List().First(e => e.Copy == b1);
     // ---- self-diagnosis, minor (non-gameplay) problems, GitHub error reports
     {
         HealthItem H(string f, HealthState st, string m, string? det = null) => new(f, st, m, DateTime.Now, det);
@@ -1436,6 +1339,107 @@ if (tests.Contains("features"))
               && !decoded.Contains("192.168.0.16"), "report link has no personal details");
         Check(ErrorDoctor.ReportPrompt(crash, ErrorDoctor.Diagnose(crash), null).Contains("Nothing is sent until you press"), "the user confirms before anything opens");
     }
+
+    // same-Pokemon detection in the Python bot's log
+    var csvPath = Path.Combine(work, "encounters_test.csv");
+    var since = DateTime.Now.AddMinutes(-1);
+    string Row(int n, string pid) => $"{n},{DateTime.Now:yyyy-MM-dd HH:mm:ss},normal,Deoxys,30,71,71,97,42,95,38,95,5,7,26,1,11,1,51,0,0,0,0,0,0,Bashful,0,Dragon 54,False,57940,{pid},";
+    File.WriteAllLines(csvPath, new[] { "header", Row(1, "11111111"), Row(2, "22222222"), Row(3, "33333333") });
+    Check(HuntService.FindRepeat(csvPath, since) == null, "different Pokémon -> no repeat");
+    File.WriteAllLines(csvPath, new[] { "header", Row(1, "11111111"), Row(2, "50CA8977"), Row(3, "50CA8977"), Row(4, "50CA8977") });
+    Check(HuntService.FindRepeat(csvPath, since)?.Pid == "50CA8977", "same Pokémon 3x in a row -> detected");
+    Check(HuntService.FindRepeat(csvPath, DateTime.Now.AddMinutes(5)) == null, "old rows (before the hunt started) are ignored");
+    var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\encounters.csv");
+    if (File.Exists(real))
+        Console.WriteLine($"   real log since 09:52: {HuntService.FindRepeat(real, new DateTime(2026, 11, 13, 9, 52, 0))?.Pid ?? "no 3-in-a-row at the end"}");
+
+    // Switch IP is written into the Python bot's config.yaml
+    var cfgDir = Path.Combine(work, "botcfg");
+    Directory.CreateDirectory(cfgDir);
+    File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\config.yaml"), Path.Combine(cfgDir, "config.yaml"), true);
+    HuntService.SyncBotConfig(cfgDir, "192.168.1.77", 6000);
+    var cfgText = File.ReadAllText(Path.Combine(cfgDir, "config.yaml"));
+    Check(cfgText.Contains("host: 192.168.1.77") && cfgText.Contains("# <-- CHANGE") && cfgText.Contains("port: 6000"), "Switch IP synced into config.yaml (comments kept)");
+
+    // reachability
+    Check(HealthMonitor.CanReach(AppSettings.Current.SwitchIP, 6000), $"Switch answers at {AppSettings.Current.SwitchIP}:6000");
+    Check(!HealthMonitor.CanReach("192.168.0.250", 6000, 1500), "a wrong IP is detected as unreachable");
+
+    // recording: ffmpeg dies -> the health check restarts it
+    InitUi();
+    var win = new Form { Text = "ShinyForgeHealthTest", Size = new Size(320, 240), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50), BackColor = Color.SteelBlue };
+    win.Show(); Application.DoEvents();
+    var recDir = Path.Combine(work, "health_rec");
+    if (Directory.Exists(recDir)) Directory.Delete(recDir, true);
+    var rec = new RecordingService();
+    rec.Start(RecordingService.WindowPrefix + "ShinyForgeHealthTest", RecordingService.NoAudio, recDir, 1, 60);
+    for (int i = 0; i < 30; i++) { Application.DoEvents(); Thread.Sleep(100); }
+    Check(rec.CheckHealth() == null, "healthy recording -> nothing to report");
+    // kill only this test's own FFmpeg - never the user's running recordings or shiny-clip buffer
+    var ownFfmpeg = (System.Diagnostics.Process?)typeof(RecordingService).GetField("_ffmpeg", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(rec);
+    Check(ownFfmpeg is { HasExited: false }, "test recording has its own FFmpeg process");
+    try { ownFfmpeg?.Kill(); } catch { }
+    Thread.Sleep(1000);
+    var res = rec.CheckHealth();
+    for (int i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(100); }
+    Check(res is { Error: true } && res.Value.Message.Contains("restarted") && rec.IsRecording, $"crashed recording restarted automatically: {res?.Message}");
+    rec.Stop();
+    Check(rec.CheckHealth() == null, "stopped by the user -> not restarted");
+    win.Close();
+}
+
+if (tests.Contains("features"))
+{
+    var s = AppSettings.Current;
+    var keep = (s.DiscordWebhookUrl, s.NtfyTopic, s.NtfyServer, s.OverlayEnabled, s.RemoteEnabled, s.WebPort, s.AutoBackups);
+
+    // ---- notifications against a fake Discord + ntfy server on localhost
+    var got = new List<string>();
+    var fake = new System.Net.HttpListener();
+    fake.Prefixes.Add("http://127.0.0.1:8798/");
+    fake.Start();
+    _ = Task.Run(async () =>
+    {
+        while (fake.IsListening)
+        {
+            try
+            {
+                var ctx = await fake.GetContextAsync();
+                using var rd = new StreamReader(ctx.Request.InputStream);
+                lock (got) got.Add($"{ctx.Request.Url!.AbsolutePath} title={ctx.Request.Headers["Title"]} body={rd.ReadToEnd()}");
+                ctx.Response.StatusCode = 200; ctx.Response.Close();
+            }
+            catch { break; }
+        }
+    });
+    s.DiscordWebhookUrl = "http://127.0.0.1:8798/discord"; s.NtfyServer = "http://127.0.0.1:8798"; s.NtfyTopic = "test-topic";
+    var res = await NotifyService.SendAsync("Test shiny", "Deoxys appeared", important: true);
+    Thread.Sleep(500);
+    Check(res.Contains("Discord: sent") && res.Contains("ntfy: sent") && got.Any(g => g.StartsWith("/discord") && g.Contains("Deoxys")) && got.Any(g => g.StartsWith("/test-topic") && g.Contains("Test shiny")),
+        $"notifications sent to Discord + ntfy ({res})");
+    // the Python bot's notifier
+    var py = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python",
+        "-c \"import sys; sys.path.insert(0, r'" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot") + "'); " +
+        "from shinybot.extras import notify; notify({'notify': {'discord_webhook': 'http://127.0.0.1:8798/pydiscord', 'ntfy_topic': 'pytopic', 'ntfy_server': 'http://127.0.0.1:8798'}}, 'Py shiny', 'from python', important=True)\"")
+        { UseShellExecute = false, RedirectStandardOutput = true })!;
+    Console.WriteLine("   python: " + py.StandardOutput.ReadToEnd().Trim());
+    py.WaitForExit();
+    Thread.Sleep(300);
+    Check(got.Any(g => g.StartsWith("/pydiscord")) && got.Any(g => g.StartsWith("/pytopic") && g.Contains("Py shiny")), "the Python bot sends notifications too");
+    fake.Stop();
+
+    // ---- backups
+    s.AutoBackups = true;
+    var bdir = Path.Combine(work, "backup_test"); Directory.CreateDirectory(bdir);
+    var savePath = Path.Combine(bdir, "test.sav");
+    File.WriteAllText(savePath, "version 1");
+    var b1 = BackupService.Backup(savePath, false);
+    var b2 = BackupService.Backup(savePath, false);
+    Thread.Sleep(1100);
+    File.WriteAllText(savePath, "version 2 - changed");
+    var b3 = BackupService.Backup(savePath, false);
+    Check(b1 != null && b2 == null && b3 != null, "backup made, skipped when unchanged, made again after a change");
+    var entry = BackupService.List().First(e => e.Copy == b1);
 
 
     BackupService.Restore(entry);
