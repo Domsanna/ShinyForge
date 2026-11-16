@@ -2,6 +2,17 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 11)
+
+### New
+- **3DS Virtual Console hunting: Red, Blue, Yellow, Gold, Silver, Crystal** (English). ShinyForge finds the Game Boy's memory inside the 3DS's Virtual Console emulator by searching for your party list. Your save must be loaded. It then reads the wild Pokémon's species, level and DVs, using the RAM addresses from the pret disassemblies. Soft resets use A+B+Start+Select, and running away picks RUN. Tested on a simulated 3DS; not yet on a real one.
+- **Shiny after moving up.** A game's Pokédex now says for each Pokémon you own whether it will be shiny in later games:
+  - **Gen 1 / Gen 2:** its DVs, and whether Pokémon Bank makes it shiny after Poké Transporter (the Gen 2 rule: Def, Spe and Spc DV 10, Atk 2, 3, 6, 7, 10, 11, 14 or 15).
+  - **Gen 3 - 5:** shinies stay shiny, since the PID is kept. "Shiny value" 8 - 15 is noted, but not promised, because Bank is reported to keep those normal.
+
+### Changed
+- **Living Dex:** no more locations ("where in ..."). They're in each game's own Pokédex.
+
 ## 1.0 (build 10)
 
 ### New

@@ -304,7 +304,22 @@
     <li>For walking, pick <b>Left / Right</b> or <b>Up / Down</b>, then click <b>Start hunting</b>. Every encounter appears in the log on the card.</li>
   </ol>
   <p><b>Stop rules</b> and <b>Statistics</b> work for 3DS hunts too.</p>
-  <div class="callout"><strong>Other handheld games</strong>DS and GBA games run in a special compatibility mode on the 3DS where Luma3DS's WiFi tools aren't available, so they can't be hunted automatically. Game Boy / Game Boy Color Virtual Console games aren't supported for hunting yet. Recording, tracking and save export work for all of them.</div>
+
+  <h3 id="hunt-3ds-vc">Nintendo 3DS Virtual Console: Red, Blue, Yellow, Gold, Silver, Crystal</h3>
+  <p>The Game Boy and Game Boy Color games from the 3DS eShop (English versions) work with the same 3DS hunt card.</p>
+  <ul>
+    <li>Start the game on the 3DS and <b>CONTINUE into your save</b>, with at least one Pokémon in your party. Then click <b>Test connection</b>.</li>
+    <li>The first time, ShinyForge searches the 3DS memory for the Game Boy's memory inside the Virtual Console emulator. This can take a minute. It recognises it by your party list, then reads the wild Pokémon's species, level and DVs from it (the addresses come from the pret disassemblies).</li>
+    <li>Soft resets use <b>A + B + Start + Select</b>. Running away picks RUN (bottom right of the battle menu).</li>
+    <li><b>Shiny</b> means shiny the way <b>Pokémon Bank</b> sees it after Poké Transporter, which uses the Gold/Silver rule. Defense, Speed and Special DVs must all be 10, and Attack must be 2, 3, 6, 7, 10, 11, 14 or 15. Red, Blue and Yellow never show shinies in the game itself, but a Pokémon with those DVs comes out shiny in Bank.</li>
+  </ul>
+
+  <div class="callout"><strong>Shiny after moving up to later games</strong>A game's Pokédex shows, for each Pokémon you own:
+    <ul>
+      <li><b>Gen 1 / Gen 2:</b> its DVs, and whether it will be shiny in Pokémon Bank (the rule above).</li>
+      <li><b>Gen 3 - 5:</b> a shiny stays shiny in every later game, because Pal Park, Poké Transfer and Pokémon Bank keep its PID. From Gen 6 on, the shiny limit is 16 instead of 8. But Pokémon Bank is reported to adjust Pokémon with a "shiny value" of 8 - 15 so they stay normal, so ShinyForge doesn't count those as shiny.</li>
+    </ul></div>
+  <div class="callout"><strong>Other handheld games</strong>DS and GBA games run in a special compatibility mode on the 3DS where Luma3DS's WiFi tools aren't available, so they can't be hunted automatically. Recording, tracking and save export work for all of them.</div>
 </section>
 
 <!-- ============================================================ 6 -->
@@ -471,7 +486,7 @@
     <li><b>1,391 slots</b>: all 1,025 species plus every boxable form. That covers regional forms (Alolan, Galarian, Hisuian, Paldean), visible female differences, Unown letters, Vivillon patterns, cap Pikachu, every Alcremie cream and sweet, Minior cores and more. The list follows Serebii's <a href="https://www.serebii.net/pokemonhome/depositablepokemon.shtml">Pokémon HOME depositable Pokémon</a> list and was checked slot by slot. Mega Evolutions, Gigantamax and other battle-only forms aren't included because they can't be put in a box.</li>
     <li>A slot counts as owned only when the Pokémon matches it exactly: its form, its male or female look where those differ, and its Alcremie sweet. You can see which slots you own, <b>in which game</b> and where in that save.</li>
     <li>Shiny ones show their <b>shiny</b> HOME picture and a ★.</li>
-    <li><b>In these games</b> lists the games that have that exact form (for example Alolan Vulpix only from Sun/Moon on), and where to find it in the games you have saves for.</li>
+    <li><b>In these games</b> lists the games that have that exact form (for example Alolan Vulpix only from Sun/Moon on). Where to find it in a game (its locations) is shown in that game's own Pokédex, not in the Living Dex.</li>
     <li>Turn off <b>Forms &amp; genders</b> to see one slot per species (1,025) instead.</li>
   </ul>
   <p>Click <b>Rescan saves</b> after you've played or added a new save.</p>
@@ -703,6 +718,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Luma3DS &amp; Rosalina</td><td>AuroraWright, TuxSH and contributors. GPL-3.0</td><td>3DS custom firmware: InputRedirection and the debugger used for 3DS hunting</td></tr>
     <tr><td>3DSShinyHunter</td><td>SirSnorealot. GPL-2.0</td><td>Reference for the InputRedirection and debugger protocols and 3DS memory layout</td></tr>
     <tr><td>PKMN-NTR</td><td>drgoku282 and contributors</td><td>3DS game memory offsets</td></tr>
+    <tr><td>pret disassemblies (pokered, pokeyellow, pokegold, pokecrystal)</td><td>The pret contributors</td><td>The Game Boy RAM addresses of the Virtual Console games</td></tr>
     <tr><td>Pokebot-3ds</td><td>SHGliscor</td><td>Reference for 3DS hunting</td></tr>
     <tr><td>NXBT</td><td>Brikwerk. MIT</td><td>Optional Raspberry Pi Bluetooth controller bridge</td></tr>
     <tr><td>Gen 3 RNG research</td><td>The Pokémon RNG research community</td><td>Method 1 PID/IV generation behind the optional shiny RNG mode</td></tr>

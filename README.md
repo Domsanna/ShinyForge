@@ -25,7 +25,7 @@
 
 | | |
 |---|---|
-| ✨ **Automatic shiny hunting** | Soft resets, wild encounters and fishing on the Switch (FireRed/LeafGreen hunter, SysBot routines for Let's Go, Sword/Shield, BD/SP) and the 3DS (X/Y, ORAS, Sun/Moon, USUM over Luma3DS). Stops the moment a shiny appears. |
+| ✨ **Automatic shiny hunting** | Soft resets, wild encounters and fishing on the Switch (FireRed/LeafGreen hunter, SysBot routines for Let's Go, Sword/Shield, BD/SP) and the 3DS (X/Y, ORAS, Sun/Moon, USUM, plus the Red/Blue/Yellow/Gold/Silver/Crystal Virtual Console games, over Luma3DS). Stops the moment a shiny appears. |
 | 🎯 **Stop rules** | Also stop on chosen species, natures or IVs. |
 | 🧪 **Optional extras** | Auto-catch and shiny RNG manipulation (FRLG). Both are **off by default** and only run when you turn them on. |
 | 🎥 **Recording & shiny clips** | Gap-free recordings in numbered segments, plus an automatic clip and screenshot of every shiny. |
@@ -121,6 +121,7 @@ ShinyForge is built on the work of many people. Thank you!
 - **FRLG RAM research**: [Lusamine](https://github.com/Lusamine/SysBot.NET/tree/moarencounterbots), also used by LegoFigure11's GRASS.
 - **[Luma3DS](https://github.com/LumaTeam/Luma3DS)** and Rosalina: AuroraWright, TuxSH and contributors.
 - **3DSShinyHunter** (SirSnorealot), **PKMN-NTR** (drgoku282) and **Pokebot-3ds** (SHGliscor): 3DS protocols and memory offsets.
+- **[pret](https://github.com/pret)** (pokered, pokeyellow, pokegold, pokecrystal disassemblies): the Game Boy RAM addresses of the Virtual Console games.
 - **[NXBT](https://github.com/Brikwerk/nxbt)**: Brikwerk. Optional Raspberry Pi controller bridge.
 - **[pokeldn](https://github.com/Decryptu/pokeldn)**: Decryptu and contributors, built on MercuryEnigma's and tornadus' frlg-ldn-trade and kinnay's LDN library. Wireless trades and Mystery Gift.
 - **[esptool](https://github.com/espressif/esptool)** and **ESP-IDF**: Espressif Systems. Firmware installation.

@@ -29,7 +29,6 @@ public sealed class LivingDexWindow : Window
     private readonly Dictionary<ushort, List<(Game Game, Collection.Owned Mon)>> _owned = new();
     private readonly Dictionary<string, HashSet<(ushort, byte)>> _formsIn = new();
     private readonly HashSet<string> _gamesWithSave = new();
-    private CancellationTokenSource? _infoCts;
     private Bitmap? _big; // the detail picture (disposed when the next one is shown)
 
     public LivingDexWindow()
@@ -173,23 +172,9 @@ public sealed class LivingDexWindow : Window
         sb.AppendLine("IN THESE GAMES (★ = you have a save):");
         sb.AppendLine(games.Count == 0 ? "None of the supported games - get it in Pokémon HOME / an event." : string.Join(", ", games.Select(x => (_gamesWithSave.Contains(x.Id) ? "★ " : "") + x.Title)));
         sb.AppendLine();
-        _info.Text = sb + "Looking up where to find it in your games...";
-        _infoCts?.Cancel();
-        var cts = _infoCts = new CancellationTokenSource();
-        var mine = games.Where(x => _gamesWithSave.Contains(x.Id)).Reverse().Take(3).ToList();
-        if (mine.Count == 0) mine = games.AsEnumerable().Reverse().Take(2).ToList();
-        Task.Run(() =>
-        {
-            var more = new StringBuilder();
-            foreach (var game in mine)
-            {
-                if (cts.IsCancellationRequested) return "";
-                more.AppendLine($"WHERE IN {game.Title.ToUpperInvariant()}:");
-                foreach (var l in DexData.WhereToFind(game, LivingDex.ForGame(game, e), 8)) more.AppendLine("  • " + l);
-                more.AppendLine();
-            }
-            more.AppendLine(DexData.BulbapediaUrl(e));
-            return more.ToString();
-        }).ContinueWith(t => Dialogs.Ui(() => { if (!cts.IsCancellationRequested) _info.Text = sb + (t.IsFaulted ? "" : t.Result); }));
+        sb.AppendLine("Where to find it: open that game's Pokédex.");
+        sb.AppendLine();
+        sb.AppendLine(DexData.BulbapediaUrl(e));
+        _info.Text = sb.ToString();
     }
 }

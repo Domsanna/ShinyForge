@@ -62,13 +62,4 @@ public static class LivingDex
     /// <summary>The (species, form) pairs that exist in a game (for "in these games").</summary>
     public static HashSet<(ushort, byte)> FormsIn(Game game) =>
         DexData.Build(game, includeForms: true).Select(x => (x.Species, x.Form)).ToHashSet();
-
-    /// <summary>A Pokédex entry of this game for the slot (its species + form), for "where to find it".</summary>
-    public static DexEntry ForGame(Game game, DexEntry e)
-    {
-        var dex = DexData.Build(game, includeForms: true);
-        return dex.FirstOrDefault(x => x.Species == e.Species && x.Form == e.Form && x.Female == e.Female)
-               ?? dex.FirstOrDefault(x => x.Species == e.Species && x.Form == e.Form)
-               ?? e;
-    }
 }

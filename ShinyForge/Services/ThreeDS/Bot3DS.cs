@@ -20,7 +20,8 @@ public sealed class Bot3DSOptions
 }
 
 /// <summary>
-/// Shiny-hunting bot for the 3DS Pokémon games (X/Y, ORAS, Sun/Moon, Ultra Sun/Ultra Moon) on a real 3DS with Luma3DS:
+/// Shiny-hunting bot for the 3DS Pokémon games (X/Y, ORAS, Sun/Moon, Ultra Sun/Ultra Moon) and the Gen 1 / Gen 2 Virtual
+/// Console games (Red, Blue, Yellow, Gold, Silver, Crystal - see <see cref="VirtualConsoleGb"/>) on a real 3DS with Luma3DS:
 /// presses buttons through Rosalina InputRedirection and reads the wild Pokémon through Rosalina's debugger.
 /// Recognises the game, logs every encounter (stats, IVs, EVs, nature, where it was met), stops on shinies, soft resets for
 /// static/legendary encounters and runs from ordinary wild Pokémon (never from legendaries).
@@ -31,6 +32,7 @@ public sealed class Bot3DS
     private LumaGdb? _gdb;
     private InputRedirection? _input;
     private uint? _wildAddress;           // remembered wild slot (Gen 6 scans once)
+    private uint? _wram;                  // Virtual Console: where the Game Boy's 0xC000 is in the emulator (found once)
     private ulong _lastKey;
     private int _count;
     public Game3DS? Game { get; private set; }
@@ -54,6 +56,7 @@ public sealed class Bot3DS
         Game = Games3DS.Detect(procs, preferredGameId)
                ?? throw new InvalidOperationException("No supported Pokémon game is running on the 3DS (X/Y, ORAS, Sun/Moon, US/UM). " +
                                                       "Running: " + string.Join(", ", procs.Select(p => p.Name).Where(n => n.Length > 0).Take(12)));
+        if (Game.Gb != null) { ConnectVirtualConsole(procs); return Game; }
         var proc = Games3DS.FindProcess(procs, Game)!;
         _gdb.Attach(proc.Pid);
         Say($"Detected {Game.Name} (process {proc.Name}, pid {proc.Pid}).");
@@ -61,10 +64,46 @@ public sealed class Bot3DS
         return Game;
     }
 
+    /// <summary>Virtual Console: try the newest non-system processes until one holds the Game Boy RAM (the search runs once).</summary>
+    private void ConnectVirtualConsole(List<GdbProcess> procs)
+    {
+        foreach (var proc in VirtualConsoleGb.Candidates(procs).Take(3))
+        {
+            _gdb!.Attach(proc.Pid);
+            Say($"Looking for {Game!.Name} in process {proc.Name} (pid {proc.Pid})...");
+            if (_wram is { } known && Probe(known)) { Say($"Game Boy RAM at 0x{known:X8} (remembered)."); ReadTrainer(); return; }
+            var found = VirtualConsoleGb.FindWram(_gdb, Game.Gb!, Say);
+            if (found != null)
+            {
+                _wram = found;
+                Say($"Detected {Game.Name}: Game Boy RAM at 0x{found:X8} in process {proc.Name}.");
+                ReadTrainer();
+                return;
+            }
+            _gdb.Detach();
+        }
+        throw new InvalidOperationException($"Couldn't find {Game!.Name}'s memory on the 3DS. Start the game, CONTINUE into your save " +
+                                            "(with at least one Pokémon in your party), then connect again.");
+    }
+
+    /// <summary>Is the remembered Game Boy RAM still there (the party list checks out)?</summary>
+    private bool Probe(uint wram)
+    {
+        try { return VirtualConsoleGb.IsWram(_gdb!.Read(wram, 0x2000), 0, Game!.Gb!); }
+        catch { return false; }
+    }
+
     private void ReadTrainer()
     {
         try
         {
+            if (Game!.Gb is { } gb && _wram is { } wram)
+            {
+                var (gbName, gbId) = VirtualConsoleGb.ReadTrainer(_gdb!, wram, gb);
+                Trainer = (gbName, gbId, 0);
+                Say($"Trainer {gbName}, ID {gbId:00000}.");
+                return;
+            }
             var id = _gdb!.Read(Game!.TrainerTID, 4);
             var nameRaw = _gdb.Read(Game.TrainerName, 26);
             var name = Encoding.Unicode.GetString(nameRaw).Split('\0')[0];
@@ -86,6 +125,8 @@ public sealed class Bot3DS
     /// <summary>The Pokémon in the current/last wild battle, or null.</summary>
     public PKM? ReadWild()
     {
+        if (Game!.Gb is { } gb)
+            return _wram is { } wram ? VirtualConsoleGb.ReadWild(_gdb!, wram, gb) : null;
         if (_wildAddress is { } known && ReadAt(known) is { } k)
             return k;
         foreach (var a in Game!.WildAddresses)
@@ -124,7 +165,7 @@ public sealed class Bot3DS
     // ------------------------------------------------------------------ actions
     private void SoftReset()
     {
-        Say("Soft resetting (L+R+Start+Select)...");
+        Say(Game!.Gb != null ? "Soft resetting (A+B+Start+Select)..." : "Soft resetting (L+R+Start+Select)...");
         _input!.Press(Game!.SoftReset, _resetHoldMs, 300);
     }
 
@@ -152,10 +193,11 @@ public sealed class Bot3DS
              $"Fixing automatically: holding the reset buttons {_resetHoldMs} ms and reconnecting to the 3DS.");
         try
         {
+            var id = Game?.ShinyForgeId;
             _input?.Dispose();
             _gdb?.Dispose();
             Game = null;
-            Connect(null);
+            Connect(id);
         }
         catch (Exception e) { Warn("Reconnecting failed: " + e.Message); }
         if (_stuck >= 6) throw new InvalidOperationException("The soft reset still doesn't work after the automatic fixes - stopping.");
@@ -192,7 +234,8 @@ public sealed class Bot3DS
         return null;
     }
 
-    /// <summary>Run from a wild battle: B through the intro text, then Run (D-pad Down from FIGHT, then A), repeated.</summary>
+    /// <summary>Run from a wild battle: B through the intro text, then Run (D-pad Down from FIGHT, then A), repeated.
+    /// Game Boy games: RUN is bottom-right of FIGHT / PKMN / ITEM (PACK) / RUN - Down, Right, A.</summary>
     private void Flee(CancellationToken token)
     {
         Say("Running away...");
@@ -202,7 +245,9 @@ public sealed class Bot3DS
             _input!.Press(N3DSButton.B, 120, 300);
             _input.Press(N3DSButton.B, 120, 300);
             _input.Press(N3DSButton.Down, 120, 250);
+            if (Game!.Gb != null) _input.Press(N3DSButton.Right, 120, 250);
             _input.Press(N3DSButton.A, 120, 1800);
+            if (Game.Gb != null && ReadWild() == null) break; // the battle is over
         }
         for (int i = 0; i < 6; i++) _input!.Press(N3DSButton.B, 100, 400);
     }
@@ -317,6 +362,13 @@ public sealed class Bot3DS
 
     public static string Format(PKM pk)
     {
+        if (pk.Format <= 2)
+        {
+            // Game Boy: DVs (0-15). Shiny = the Gen 2 rule, which Pokémon Bank uses for Gen 1 / Gen 2 Pokémon too.
+            var dv = $"DVs Atk {pk.IV_ATK} Def {pk.IV_DEF} Spe {pk.IV_SPE} Spc {pk.IV_SPA} (HP {pk.IV_HP})";
+            return $"{SpeciesName.GetSpeciesName(pk.Species, 2)}  Lv.{pk.CurrentLevel}  Shiny: {(pk.IsShiny ? "Yes" : "No")}{Environment.NewLine}" +
+                   $"   {dv}" + (pk.IsShiny ? $"{Environment.NewLine}   Shiny in Pokémon Bank too (Gen 2 DV rule)." : "");
+        }
         var s = pk.Clone();
         s.ResetPartyStats();
         var shiny = !pk.IsShiny ? "No" : pk.ShinyXor == 0 ? "Square" : "Star";
@@ -338,10 +390,12 @@ public sealed class Bot3DS
                             "nature,ability,shiny,legendary,pid");
             w.WriteLine(string.Join(",", new object[]
             {
-                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), Game?.Name ?? "", _count, SpeciesName.GetSpeciesName(pk.Species, 2), pk.MetLevel,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), Game?.Name ?? "", _count, SpeciesName.GetSpeciesName(pk.Species, 2), pk.Format <= 2 ? pk.CurrentLevel : pk.MetLevel,
                 $"\"{LocationName(pk)}\"", s.Stat_HPMax, s.Stat_ATK, s.Stat_DEF, s.Stat_SPA, s.Stat_SPD, s.Stat_SPE,
-                pk.IV_HP, pk.IV_ATK, pk.IV_DEF, pk.IV_SPA, pk.IV_SPD, pk.IV_SPE, pk.IVTotal, (Nature)pk.Nature,
-                GameInfo.Strings.Ability[pk.Ability], pk.IsShiny, Games3DS.IsLegendaryOrMythical(pk), pk.PID.ToString("X8"),
+                pk.IV_HP, pk.IV_ATK, pk.IV_DEF, pk.IV_SPA, pk.IV_SPD, pk.IV_SPE, pk.IVTotal,
+                // Game Boy Pokémon have no nature, ability or PID (Gen 1 / 2): the DVs go in the pid column instead
+                pk.Format <= 2 ? "" : ((Nature)pk.Nature).ToString(), pk.Format <= 2 ? "" : GameInfo.Strings.Ability[pk.Ability],
+                pk.IsShiny, Games3DS.IsLegendaryOrMythical(pk), pk.Format <= 2 ? $"DV{((GBPKM)pk).DV16:X4}" : pk.PID.ToString("X8"),
             }));
         }
         catch (Exception e) { Say("Couldn't write the encounter log: " + e.Message); }

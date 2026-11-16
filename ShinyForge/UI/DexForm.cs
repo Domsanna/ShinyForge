@@ -301,6 +301,7 @@ public sealed class DexForm : Form
         if (pk.Format >= 3)
             sb.AppendLine($"Nature {Get(s.natures, (int)pk.Nature)}  •  Ability {Get(s.abilitylist, pk.Ability)}");
         sb.AppendLine($"IVs {pk.IV_HP}/{pk.IV_ATK}/{pk.IV_DEF}/{pk.IV_SPA}/{pk.IV_SPD}/{pk.IV_SPE}  (HP/Atk/Def/SpA/SpD/Spe)");
+        if (TransferShiny.Line(pk) is { } transfer) sb.AppendLine(transfer); // shiny after moving to Bank / later games?
         sb.AppendLine($"EVs {pk.EV_HP}/{pk.EV_ATK}/{pk.EV_DEF}/{pk.EV_SPA}/{pk.EV_SPD}/{pk.EV_SPE}");
         var moves = new[] { pk.Move1, pk.Move2, pk.Move3, pk.Move4 }.Where(x => x != 0).Select(x => Get(s.movelist, x));
         sb.AppendLine("Moves: " + string.Join(", ", moves));

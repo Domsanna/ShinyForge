@@ -7,8 +7,8 @@ namespace ShinyForge.UI;
 /// <summary>
 /// Living Dex planner across ALL your games: every Pokémon HOME box slot (each species, form, regional form, gender look and
 /// Alcremie sweet - see <see cref="LivingDex"/>) with Pokémon HOME's pictures, coloured if you own it in any of your saves
-/// (which game / box / shiny), silhouette if not - with the games it can be found in (★ = a game you have a save for)
-/// and where exactly in those games.
+/// (which game / box / shiny), silhouette if not - with the games it's in (★ = a game you have a save for).
+/// Where to find it in a game (locations) is in that game's own Pokédex, not here.
 /// </summary>
 public sealed class LivingDexForm : Form
 {
@@ -28,7 +28,6 @@ public sealed class LivingDexForm : Form
     private readonly Dictionary<ushort, List<(Game Game, Collection.Owned Mon)>> _owned = new();
     private readonly Dictionary<string, HashSet<(ushort, byte)>> _formsIn = new();
     private readonly HashSet<string> _gamesWithSave = new();
-    private CancellationTokenSource? _infoCts;
     private Image? _bigImage;
 
     public LivingDexForm()
@@ -198,27 +197,9 @@ public sealed class LivingDexForm : Form
         sb.AppendLine("IN THESE GAMES (★ = you have a save):");
         sb.AppendLine(games.Count == 0 ? "None of the supported games - get it in Pokémon HOME / an event." : string.Join(", ", games.Select(x => (_gamesWithSave.Contains(x.Id) ? "★ " : "") + x.Title)));
         sb.AppendLine();
-        _info.Text = sb + "Looking up where to find it in your games...";
-        _infoCts?.Cancel();
-        var cts = _infoCts = new CancellationTokenSource();
-        var mine = games.Where(x => _gamesWithSave.Contains(x.Id)).Reverse().Take(3).ToList();
-        if (mine.Count == 0) mine = games.AsEnumerable().Reverse().Take(2).ToList();
-        Task.Run(() =>
-        {
-            var more = new System.Text.StringBuilder();
-            foreach (var game in mine)
-            {
-                if (cts.IsCancellationRequested) return "";
-                more.AppendLine($"WHERE IN {game.Title.ToUpperInvariant()}:");
-                foreach (var l in DexData.WhereToFind(game, LivingDex.ForGame(game, e), 8)) more.AppendLine("  • " + l);
-                more.AppendLine();
-            }
-            more.AppendLine(DexData.BulbapediaUrl(e));
-            return more.ToString();
-        }).ContinueWith(t =>
-        {
-            if (cts.IsCancellationRequested || IsDisposed) return;
-            try { BeginInvoke(() => { if (!cts.IsCancellationRequested) _info.Text = sb + (t.IsFaulted ? "" : t.Result); }); } catch { }
-        });
+        sb.AppendLine("Where to find it: open that game's Pokédex.");
+        sb.AppendLine();
+        sb.AppendLine(DexData.BulbapediaUrl(e));
+        _info.Text = sb.ToString();
     }
 }

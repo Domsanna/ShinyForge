@@ -302,6 +302,150 @@ if (tests.Contains("3ds"))
     Check(rows.Length == 4, $"encounter log has {rows.Length - 1} rows: {string.Join(" | ", rows.Skip(1).Select(r => string.Join(",", r.Split(',').Skip(3).Take(3))))}");
 }
 
+if (tests.Contains("3dsvc"))
+{
+    // ---- Simulated 3DS running Pokémon Crystal from the Virtual Console: the Game Boy RAM sits at an odd address inside a
+    // 2 MB region of an unnamed process; Luma's getmemregions lists the regions. The bot must find the RAM, read the trainer,
+    // soft reset (A+B+Start+Select) through encounters and stop on the one that is shiny by the Gen 2 DV rule.
+    var map = ShinyForge.Services.ThreeDS.GbMap.Crystal;
+    const uint regionStart = 0x08000000, wramAt = 0x08123457; // not aligned on purpose
+    var region = new byte[0x200000];
+    var decoy = new byte[0x40000];
+    void Put(uint gbAddr, params byte[] b) => b.CopyTo(region, (int)(wramAt - regionStart) + gbAddr - 0xC000);
+    Put(map.PartyCount, 2, 155, 158, 0xFF);                    // Cyndaquil, Totodile
+    Put(map.PartyMons, 155); Put((ushort)(map.PartyMons + 0x1F), 14); // first party Pokémon: species + level 14
+    Put(map.PlayerId, 0x30, 0x39);                              // ID 12345
+    Put(map.PlayerName, 0x83, 0x8E, 0x8C, 0x50);                // "DOM"
+    decoy[0x100] = 3; decoy[0x101] = 1; decoy[0x102] = 0xFF;    // a broken party-like pattern (count 3, but 0xFF too early)
+    // encounters: Suicune (DVs 0x5A 0x3C), Raikou, Entei with DVs Atk 10 Def 10 / Spe 10 Spc 10 = shiny
+    var wild = new (byte Species, byte Level, byte Dv0, byte Dv1)[] { (245, 40, 0x5A, 0x3C), (243, 40, 0x7B, 0x21), (244, 40, 0xAA, 0xAA) };
+    int nextVc = 0, aVc = 0, resetsVc = 0;
+    var udpVc = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 4950));
+    var ctsVc = new CancellationTokenSource();
+    uint lastHidVc = 0xFFF;
+    _ = Task.Run(() =>
+    {
+        var ep = new System.Net.IPEndPoint(System.Net.IPAddress.Any, 0);
+        while (!ctsVc.IsCancellationRequested)
+        {
+            byte[] p;
+            try { p = udpVc.Receive(ref ep); } catch { break; }
+            if (p.Length != 20) continue;
+            var hid = BitConverter.ToUInt32(p, 0);
+            var pressed = ~hid & lastHidVc & 0xFFF;
+            lastHidVc = hid;
+            lock (region)
+            {
+                if ((~hid & 0x00F) == 0x00F && (pressed & 0x00F) != 0) { Put(map.BattleFlag, 0); resetsVc++; aVc = 0; } // A+B+Start+Select
+                else if ((pressed & 1) != 0 && region[(int)(wramAt - regionStart) + map.BattleFlag - 0xC000] == 0 && ++aVc >= 3 && nextVc < wild.Length)
+                {
+                    var w = wild[nextVc++];
+                    Put(map.Enemy, w.Species);
+                    Put(map.EnemyDVs, w.Dv0, w.Dv1);
+                    Put(map.EnemyLevel, w.Level);
+                    Put(map.BattleFlag, 1);
+                }
+            }
+        }
+    });
+    var listenerVc = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 4000);
+    listenerVc.Start();
+    var regionText = $"00100000 - 00300000 R-X Code\n0ff00000 - 10000000 RW- Private\n{regionStart:x8} - {regionStart + region.Length:x8} RW- Private\n14000000 - {0x14000000 + decoy.Length:x8} RW- Continuous\n";
+    _ = Task.Run(() =>
+    {
+        using var client = listenerVc.AcceptTcpClient();
+        var s = client.GetStream();
+        void Send(string payload)
+        {
+            var sum = (payload.Sum(c => (int)c) & 0xFF).ToString("x2");
+            var b = System.Text.Encoding.ASCII.GetBytes($"${payload}#{sum}");
+            s.Write(b, 0, b.Length);
+        }
+        while (!ctsVc.IsCancellationRequested)
+        {
+            int c;
+            try { c = s.ReadByte(); } catch { break; }
+            if (c < 0) break;
+            if (c == 0x03) { Send("T02"); continue; }
+            if (c != '$') continue;
+            var sb = new System.Text.StringBuilder();
+            while ((c = s.ReadByte()) != '#') sb.Append((char)c);
+            s.ReadByte(); s.ReadByte(); s.WriteByte((byte)'+');
+            var cmd = sb.ToString();
+            if (cmd.StartsWith("qSupported")) Send("PacketSize=400;multiprocess+");
+            else if (cmd == "!") Send("OK");
+            else if (cmd.StartsWith("qXfer:osdata:read:processes"))
+                Send("l<?xml version=\"1.0\"?><osdata type=\"processes\">" +
+                     "<item><column name=\"pid\">0x10</column><column name=\"command\">pm</column></item>" +
+                     "<item><column name=\"pid\">0x20</column><column name=\"command\">menu</column></item>" +
+                     "<item><column name=\"pid\">0x2c</column><column name=\"command\">QBRA</column></item></osdata>");
+            else if (cmd.StartsWith("qRcmd,")) Send(Convert.ToHexString(System.Text.Encoding.ASCII.GetBytes(regionText)).ToLowerInvariant());
+            else if (cmd.StartsWith("vAttach")) Send("T05");
+            else if (cmd.StartsWith("vCont")) { }
+            else if (cmd.StartsWith("D")) Send("OK");
+            else if (cmd.StartsWith("m"))
+            {
+                var parts = cmd[1..].Split(',');
+                uint addr = Convert.ToUInt32(parts[0], 16); int len = Convert.ToInt32(parts[1], 16);
+                var outb = new byte[len];
+                lock (region)
+                    for (int i = 0; i < len; i++)
+                    {
+                        long a = addr + i;
+                        if (a >= regionStart && a < regionStart + region.Length) outb[i] = region[a - regionStart];
+                        else if (a >= 0x14000000 && a < 0x14000000 + decoy.Length) outb[i] = decoy[a - 0x14000000];
+                    }
+                Send(Convert.ToHexString(outb).ToLowerInvariant());
+            }
+            else Send("");
+        }
+    });
+
+    Check(ShinyForge.Services.ThreeDS.VirtualConsoleGb.Make(1, 0x83, 70, 0xAA, 0xAA) is { Species: 150, IsShiny: true },
+        "Gen 1: internal species 0x83 = Mewtwo, DVs 10/10/10/10 = shiny");
+    Check(ShinyForge.Services.ThreeDS.VirtualConsoleGb.Make(2, 249, 40, 0x9A, 0xAA) is { IsShiny: false } &&
+          ShinyForge.Services.ThreeDS.VirtualConsoleGb.Make(2, 249, 40, 0xFA, 0xAA) is { IsShiny: true },
+        "Gen 2 DV rule: Attack 9 not shiny, Attack 15 shiny (Def/Spe/Spc 10)");
+    // the transfer rule agrees with PKHeX for every Pokémon in real Gen 1 / Gen 2 saves (copies are only read)
+    var bakDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PKHeX (26.10.18)", "bak");
+    int checkedMons = 0, disagree = 0;
+    foreach (var f in Directory.Exists(bakDir) ? Directory.GetFiles(bakDir) : Array.Empty<string>())
+        if (SaveUtil.TryGetSaveFile(f, out var gbSav) && gbSav is { Generation: <= 2 })
+            foreach (var pk in gbSav.BoxData.Concat(gbSav.PartyData).Where(p => p.Species != 0))
+            {
+                checkedMons++;
+                if (ShinyForge.Services.TransferShiny.IsShinyDV(pk.IV_ATK, pk.IV_DEF, pk.IV_SPE, pk.IV_SPA) != pk.IsShiny) disagree++;
+            }
+    Check(checkedMons > 0 && disagree == 0, $"transfer shiny rule = PKHeX's for {checkedMons} Pokémon in real Gen 1/2 saves");
+    var pk3 = new PK3 { Species = 25, TID16 = 0, SID16 = 0 };
+    pk3.PID = 0x00090000; // shiny value 9
+    var pk3b = new PK3 { Species = 25 }; pk3b.PID = 0x00030000; // shiny value 3
+    Check(ShinyForge.Services.TransferShiny.Line(pk3)!.Contains("Shiny value 9") && ShinyForge.Services.TransferShiny.Line(pk3b)!.StartsWith("★ Shiny in every later game") &&
+          ShinyForge.Services.TransferShiny.Line(VirtualConsoleShiny())!.Contains("shiny when moved to Pokémon Bank"),
+        "transfer lines: Gen 3 value 9 (stays normal), value 3 (shiny everywhere), Gen 1 DVs 10/10/10/10 (shiny in Bank)");
+    static PKM VirtualConsoleShiny() => ShinyForge.Services.ThreeDS.VirtualConsoleGb.Make(1, 0x83, 70, 0xAA, 0xAA)!;
+    var logVc = Path.Combine(work, "3ds_vc_encounters.csv");
+    if (File.Exists(logVc)) File.Delete(logVc);
+    var botVc = new ShinyForge.Services.ThreeDS.Bot3DS(new ShinyForge.Services.ThreeDS.Bot3DSOptions
+    {
+        Host = "127.0.0.1", Mode = ShinyForge.Services.ThreeDS.Hunt3DSMode.StaticSoftReset, ResetWaitMs = 500, LogFile = logVc,
+    });
+    var shinyVc = false;
+    botVc.Log += m => Console.WriteLine("   3DS: " + m.Replace("\n", "\n        "));
+    botVc.Encounter += (pk, stop) => shinyVc |= stop && pk.IsShiny;
+    var gameVc = botVc.Connect("gbc_crystal");
+    Check(gameVc.ShinyForgeId == "gbc_crystal" && botVc.Trainer is { Name: "DOM", TID: 12345 },
+        $"Virtual Console: {gameVc.Name} found by its Game Boy RAM; trainer {botVc.Trainer.Name} {botVc.Trainer.TID}");
+    var runVc = Task.Run(() => botVc.Run(new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token));
+    runVc.Wait(TimeSpan.FromMinutes(2.5));
+    botVc.Close();
+    ctsVc.Cancel(); udpVc.Dispose(); listenerVc.Stop();
+    var rowsVc = File.Exists(logVc) ? File.ReadAllLines(logVc) : Array.Empty<string>();
+    Check(shinyVc && nextVc == 3 && resetsVc >= 2, $"soft resets through {nextVc} encounters ({resetsVc} resets), stopped on the shiny Entei");
+    Check(rowsVc.Length == 4 && rowsVc[3].Contains("Entei") && rowsVc[3].Contains("True"),
+        $"encounter log: {string.Join(" | ", rowsVc.Skip(1).Select(r => string.Join(",", r.Split(',').Skip(3).Take(2))))}");
+}
+
 if (tests.Contains("sheets"))
 {
     // Every game must auto-recognize its tracker (Gen 7 / Let's Go included since build 4).

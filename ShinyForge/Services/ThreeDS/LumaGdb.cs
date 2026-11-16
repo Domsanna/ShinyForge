@@ -6,6 +6,13 @@ namespace ShinyForge.Services.ThreeDS;
 
 public sealed record GdbProcess(int Pid, string Name, string Raw);
 
+/// <summary>One mapped memory region of a 3DS process (end exclusive), e.g. "RW-" "Private".</summary>
+public sealed record GdbRegion(uint Start, uint End, string Perm, string State)
+{
+    public uint Size => End - Start;
+    public bool Writable => Perm.Contains('W', StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>
 /// Minimal GDB Remote Serial Protocol client for Luma3DS's built-in debugger (Rosalina → Debugger options → Enable debugger,
 /// TCP 4000). Lists processes, attaches to the game and reads memory; it never writes memory. Each read briefly pauses the
@@ -195,6 +202,31 @@ public sealed class LumaGdb : IDisposable
             {
                 Continue();
             }
+        }
+    }
+
+    /// <summary>
+    /// The attached process's memory map (Luma's "monitor getmemregions": hex-encoded text, one region per line,
+    /// "08000000 - 08100000 RW- Private" - format from Luma3DS rosalina/source/utils.c formatMemoryMapOfProcess).
+    /// </summary>
+    public List<GdbRegion> MemoryRegions()
+    {
+        lock (_lock)
+        {
+            if (_pid < 0) throw new InvalidOperationException("Not attached to the game.");
+            Interrupt();
+            try
+            {
+                var reply = Request("qRcmd," + Convert.ToHexString(Encoding.ASCII.GetBytes("getmemregions")).ToLowerInvariant());
+                if (reply.StartsWith("O")) reply = reply[1..];
+                if (reply.Length == 0 || reply.StartsWith("E") || reply.Length % 2 != 0) return new List<GdbRegion>();
+                var text = Encoding.ASCII.GetString(Convert.FromHexString(reply));
+                return Regex.Matches(text, @"^([0-9a-fA-F]{8}) - ([0-9a-fA-F]{8})\s+(\S+)\s+(.*)$", RegexOptions.Multiline)
+                    .Select(m => new GdbRegion(Convert.ToUInt32(m.Groups[1].Value, 16), Convert.ToUInt32(m.Groups[2].Value, 16),
+                                               m.Groups[3].Value, m.Groups[4].Value.Trim()))
+                    .ToList();
+            }
+            finally { Continue(); }
         }
     }
 

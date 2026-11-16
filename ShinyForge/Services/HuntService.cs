@@ -41,8 +41,8 @@ public static class HuntService
         Platform.NDS or Platform.GBA =>
             "A 3DS runs DS and GBA games in a special compatibility mode where Luma3DS's tools (input redirection, memory access) " +
             "aren't available, so these games can't be controlled over WiFi. Recording, collection tracking and save export all work.",
-        _ => "Game Boy / Game Boy Color Virtual Console: button control over WiFi is possible, but reading these games' memory " +
-             "inside the 3DS's VC emulator still has to be mapped on real hardware. Recording, collection tracking and save export all work.",
+        _ => "The 3DS Virtual Console hunter supports the English releases of Red, Blue, Yellow, Gold, Silver and Crystal " +
+             "(their Game Boy memory maps). Recording, collection tracking and save export all work for this game.",
     };
 
     public static Process? PythonHunt;
