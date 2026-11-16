@@ -584,7 +584,16 @@
   <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, and where.</p>
   <ul>
     <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
-    <li><b>Check for updates</b> compares your versions with the latest ones. Turn the automatic check on or off in <b>Settings → Updates</b>.</li>
+    <li><b>Check for updates</b> compares your versions with the latest ones. It runs at every start too (turn that on or off in <b>Settings → Updates</b>). What it checks:
+      <ul>
+        <li><b>ShinyForge</b> itself, and the PKHeX library inside it.</li>
+        <li><b>FFmpeg, Streamlabs Desktop, Python</b>: winget on Windows (one-click update), Homebrew on macOS (one-click), apt on Linux (shows the command, since it needs your password).</li>
+        <li><b>PKHeX</b>, <b>pokeldn</b> and <b>esptool</b>: against their latest releases, with one-click updates.</li>
+        <li><b>SysBot.exe</b>: a copy ShinyForge downloaded updates with one click. A copy you built from source (with your own routines, such as FRLG) is only reported, because the download wouldn't have your routines.</li>
+        <li><b>Pokémon Automation</b>: its version comes from the unzipped folder. The update opens their download page; unzip the new version next to the old one and ShinyForge uses the newest.</li>
+        <li><b>sys-botbase on the Switch</b>, when the Switch answers and no hunt is running: the original against olliz0r's latest release, sys-botbase-cpp against Pokémon Automation's.</li>
+      </ul>
+      3DS Capture and Microsoft Excel publish no version information, so they're only checked for being installed. Excel updates itself through Office.</li>
   </ul>
   <h3 id="updates">Updating ShinyForge</h3>
   <p>Versions are numbered <b>1.X.Z</b>, shown at the bottom-right of the window, e.g. <code>v1.0.15</code>. <b>X</b> goes up for big updates; <b>Z</b> goes up for patches and small fixes (it starts again at 0 after a big update). So 1.1.0 is newer than 1.0.20.</p>

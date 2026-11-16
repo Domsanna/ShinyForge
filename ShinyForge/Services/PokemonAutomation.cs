@@ -31,8 +31,9 @@ public static class PokemonAutomation
     });
 
     /// <summary>
-    /// SerialPrograms-Windows.cmd: the path in Settings, the Backup Tools folder, or a "PA-SerialPrograms-*" folder in Downloads,
-    /// Desktop or Documents (up to two folders deep). Windows only (the Mac version is an app the user opens).
+    /// SerialPrograms-Windows.cmd: the path in Settings, the Backup Tools folder, or the NEWEST "PA-SerialPrograms-*" folder in
+    /// Downloads, Desktop or Documents (up to two folders deep - an update is unzipped next to the old one). Windows only
+    /// (the Mac version is an app the user opens).
     /// </summary>
     public static string? Find()
     {
@@ -40,18 +41,22 @@ public static class PokemonAutomation
         var set = AppSettings.Current.PokemonAutomationPath;
         if (File.Exists(set)) return set;
         if (AppPaths.FindInBackupTools(Launcher) is { } b) return b;
-        foreach (var root in new[] { Environment.SpecialFolder.UserProfile, Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.MyDocuments })
-        {
-            var home = Environment.GetFolderPath(root);
-            var bases = root == Environment.SpecialFolder.UserProfile ? new[] { Path.Combine(home, "Downloads") } : new[] { home };
-            foreach (var dir in bases.Where(Directory.Exists))
-            {
-                var hit = SafeDirs(dir).Where(d => Path.GetFileName(d).StartsWith("PA-SerialPrograms", StringComparison.OrdinalIgnoreCase))
-                    .SelectMany(d => new[] { d }.Concat(SafeDirs(d)))
-                    .Select(d => Path.Combine(d, Launcher)).FirstOrDefault(File.Exists);
-                if (hit != null) return hit;
-            }
-        }
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return new[] { Path.Combine(home, "Downloads"), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                       Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) }
+            .Where(Directory.Exists)
+            .SelectMany(SafeDirs).Where(d => Path.GetFileName(d).StartsWith("PA-SerialPrograms", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(d => new[] { d }.Concat(SafeDirs(d)))
+            .Select(d => Path.Combine(d, Launcher)).Where(File.Exists)
+            .OrderByDescending(f => VersionOf(f) ?? new Version(0, 0)).FirstOrDefault();
+    }
+
+    /// <summary>Its version, from the unzipped folder's name ("PA-SerialPrograms-Windows-x64-0.71.6-20261029" → 0.71.6).</summary>
+    public static Version? VersionOf(string launcher)
+    {
+        for (var dir = Path.GetDirectoryName(launcher); dir != null; dir = Path.GetDirectoryName(dir))
+            if (Path.GetFileName(dir).StartsWith("PA-SerialPrograms", StringComparison.OrdinalIgnoreCase))
+                return System.Text.RegularExpressions.Regex.Match(Path.GetFileName(dir), @"\d+\.\d+\.\d+") is { Success: true } m ? Version.Parse(m.Value) : null;
         return null;
     }
 

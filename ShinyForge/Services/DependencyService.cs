@@ -250,6 +250,7 @@ public static class DependencyService
         var dest = Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot");
         if (Directory.Exists(dest)) Directory.Delete(dest, true);
         ZipFile.ExtractToDirectory(zipPath, dest);
+        File.WriteAllText(Path.Combine(dest, VersionMarker), tag); // what the update check compares with
         try { File.Delete(zipPath); } catch { }
 
         var exe = Directory.EnumerateFiles(dest, "SysBot.exe", SearchOption.AllDirectories).FirstOrDefault()
@@ -409,6 +410,10 @@ public static class DependencyService
         }
         catch (Exception e) { AppPaths.Log("PKHeX.Core check failed: " + e.Message); }
 
+        // The other tools, all at once (each check is independent and logs its own failure).
+        foreach (var found in await Task.WhenAll(CheckSysBot(), CheckEsptool(), CheckPokemonAutomation(), CheckSwitchSysBotBase(), CheckUnixPackages()))
+            list.AddRange(found);
+
         // Tile artwork files: re-download anything missing.
         var missing = GameCatalog.All.Select(g => g.Mascot).Distinct().Where(m => !File.Exists(Path.Combine(AppPaths.ArtDir, $"{m}.png"))).ToList();
         if (missing.Count > 0)
@@ -422,6 +427,161 @@ public static class DependencyService
                 }
                 return "Artwork restored.";
             }));
+        return list;
+    }
+
+    // ------------------------------------------------------------------ the other tools
+    private static async Task<string?> LatestTag(string repo) =>
+        (await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{repo}/releases/latest"))?["tag_name"]?.ToString();
+
+    /// <summary>The last "1.2" / "1.2.3" in a text ("v0.71.6-beta" → 0.71.6, "3.32/3.33" → 3.33), or null.</summary>
+    internal static Version? ParseVersion(string? text) =>
+        System.Text.RegularExpressions.Regex.Matches(text ?? "", @"\d+\.\d+(?:\.\d+)?").LastOrDefault() is { } m && Version.TryParse(m.Value, out var v) ? v : null;
+
+    /// <summary>Is <paramref name="latest"/> newer than <paramref name="installed"/>? False when either can't be read.</summary>
+    internal static bool IsNewer(string? latest, string? installed) =>
+        ParseVersion(latest) is { } l && ParseVersion(installed) is { } i && l > i;
+
+    /// <summary>Runs a command-line tool and returns what it printed (empty after <paramref name="timeoutMs"/>).</summary>
+    private static async Task<string> RunTool(string exe, string args, int timeoutMs = 20000)
+    {
+        var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        using var p = Process.Start(psi)!;
+        var read = p.StandardOutput.ReadToEndAsync();
+        using var cts = new CancellationTokenSource(timeoutMs);
+        try { await p.WaitForExitAsync(cts.Token); }
+        catch (OperationCanceledException) { try { p.Kill(true); } catch { } return ""; }
+        return await read;
+    }
+
+    /// <summary>Marker file ShinyForge writes next to tools it downloads, holding the release tag.</summary>
+    private const string VersionMarker = "shinyforge-installed-version.txt";
+
+    /// <summary>
+    /// SysBot.exe (Sys-EncounterBot.NET). A copy ShinyForge downloaded is updated with one click. A copy built from source
+    /// (…\bin\…\SysBot.exe - e.g. with the user's own FRLG routine) is only reported: the download wouldn't have those routines.
+    /// </summary>
+    private static async Task<List<UpdateInfo>> CheckSysBot()
+    {
+        var list = new List<UpdateInfo>();
+        if (!OsInfo.IsWindows || PathOf("SysBot.exe") is not { } exe) return list;
+        try
+        {
+            var dir = Path.GetDirectoryName(exe)!;
+            var marker = Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot", VersionMarker);
+            var installed = exe.StartsWith(Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot"), StringComparison.OrdinalIgnoreCase) && File.Exists(marker)
+                ? File.ReadAllText(marker).Trim()
+                : ParseVersion(dir)?.ToString();
+            var latest = await LatestTag("Manu098vm/Sys-EncounterBot.NET");
+            if (!IsNewer(latest, installed)) return list;
+            var selfBuilt = dir.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            list.Add(selfBuilt
+                ? new("SysBot.exe", $"Installed {installed}, latest is {latest}. Your copy is built from source (with your own routines, e.g. FRLG): " +
+                                    "update the source and rebuild - the download wouldn't have them.", null)
+                : new("SysBot.exe", $"Installed {installed ?? "unknown version"}, latest is {latest}.", InstallSysBot));
+        }
+        catch (Exception e) { AppPaths.Log("SysBot.exe update check failed: " + e.Message); }
+        return list;
+    }
+
+    /// <summary>esptool (only once the ESP32-S3 / pokeldn feature was set up): asks the program itself for its version.</summary>
+    private static async Task<List<UpdateInfo>> CheckEsptool()
+    {
+        var list = new List<UpdateInfo>();
+        if (!AppSettings.Current.PokeldnSetupDone || PokeldnService.FindEsptool() is not { } exe) return list;
+        try
+        {
+            var installed = ParseVersion((await RunTool(exe, "version")).Split('\n').FirstOrDefault())?.ToString();
+            var latest = await LatestTag(PokeldnService.EsptoolRepo);
+            if (IsNewer(latest, installed))
+                list.Add(new("esptool", $"Installed {installed}, latest is {latest}.", PokeldnService.InstallEsptool));
+        }
+        catch (Exception e) { AppPaths.Log("esptool update check failed: " + e.Message); }
+        return list;
+    }
+
+    /// <summary>
+    /// Pokémon Automation's Computer Control: its version is in the unzipped folder's name. Updating = their download page
+    /// (the user unzips it; ShinyForge doesn't download or bundle their program).
+    /// </summary>
+    private static async Task<List<UpdateInfo>> CheckPokemonAutomation()
+    {
+        var list = new List<UpdateInfo>();
+        if (PokemonAutomation.Find() is not { } cmd) return list;
+        try
+        {
+            var installed = PokemonAutomation.VersionOf(cmd)?.ToString();
+            var latest = await LatestTag("PokemonAutomation/ComputerControl");
+            if (IsNewer(latest, installed))
+                list.Add(new("Pokémon Automation", $"Installed {installed}, latest is {latest}.", _ =>
+                {
+                    OpenUrl(PokemonAutomation.Releases);
+                    return Task.FromResult("Pokémon Automation's download page was opened - unzip the new version next to the old one (not into OneDrive); ShinyForge uses the newest.");
+                }));
+        }
+        catch (Exception e) { AppPaths.Log("Pokémon Automation update check failed: " + e.Message); }
+        return list;
+    }
+
+    /// <summary>
+    /// sys-botbase on the Switch (when it answers and no hunt is using it): original 2.x vs olliz0r's latest release, or
+    /// sys-botbase-cpp vs Pokémon Automation's. Reported only - it's installed onto the Switch's SD card.
+    /// </summary>
+    private static async Task<List<UpdateInfo>> CheckSwitchSysBotBase()
+    {
+        var list = new List<UpdateInfo>();
+        var s = AppSettings.Current;
+        if (string.IsNullOrWhiteSpace(s.SwitchIP) || s.SwitchUsb || HuntService.IsPythonHuntRunning()) return list;
+        try
+        {
+            var installed = await Task.Run(() => HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 1500) ? SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort) : null);
+            if (installed == null || installed == "old") return list;
+            var cpp = SysBotBaseInstaller.IsCpp(installed);
+            var latest = await LatestTag(cpp ? SysBotBaseInstaller.Repo : "olliz0r/sys-botbase");
+            if (!IsNewer(latest, installed)) return list;
+            list.Add(cpp
+                ? new("sys-botbase (Switch)", $"The Switch runs sys-botbase-cpp {installed}, latest is {latest}. Update it from a Switch game page: Shiny Hunt card → sys-botbase.", null)
+                : new("sys-botbase (Switch)", $"The Switch runs sys-botbase {installed}, latest is {latest}.", _ =>
+                {
+                    OpenUrl("https://github.com/olliz0r/sys-botbase/releases/latest");
+                    return Task.FromResult("sys-botbase's download page was opened: copy its atmosphere folder onto the SD card, then restart the Switch.");
+                }));
+        }
+        catch (Exception e) { AppPaths.Log("sys-botbase update check failed: " + e.Message); }
+        return list;
+    }
+
+    /// <summary>
+    /// macOS / Linux: FFmpeg and Python come from the system's package manager (winget only exists on Windows). Homebrew
+    /// upgrades them with one click; on Linux the command is shown (it needs the user's password).
+    /// </summary>
+    private static async Task<List<UpdateInfo>> CheckUnixPackages()
+    {
+        var list = new List<UpdateInfo>();
+        if (OsInfo.IsWindows) return list;
+        try
+        {
+            if (OsInfo.IsMac && OsInfo.Which("brew") is { } brew)
+            {
+                var outdated = (await RunTool(brew, "outdated --quiet", 60000)).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var (name, formula) in new[] { ("FFmpeg", "ffmpeg"), ("Python 3", "python") })
+                    if (outdated.FirstOrDefault(f => f == formula || f.StartsWith(formula + "@")) is { } hit)
+                        list.Add(new(name, $"Homebrew has a newer {hit}.", async p =>
+                        {
+                            p($"brew upgrade {hit}...");
+                            var o = await RunTool(brew, $"upgrade {hit}", 600000);
+                            return $"{name}: {LastLine(o)}";
+                        }));
+            }
+            else if (File.Exists("/usr/bin/apt"))
+            {
+                var upgradable = (await RunTool("/usr/bin/apt", "list --upgradable", 30000)).Split('\n');
+                var pkgs = new[] { "ffmpeg", "python3" }.Where(p => upgradable.Any(l => l.StartsWith(p + "/"))).ToList();
+                if (pkgs.Count > 0)
+                    list.Add(new(string.Join(" + ", pkgs), $"Newer versions are available. Run in a terminal:  sudo apt install --only-upgrade {string.Join(' ', pkgs)}", null));
+            }
+        }
+        catch (Exception e) { AppPaths.Log("Package update check failed: " + e.Message); }
         return list;
     }
 

@@ -322,6 +322,28 @@ if (tests.Contains("deps"))
     foreach (var d in DependencyService.All) Console.WriteLine($"   {d.Name,-20} {d.State,-16} {d.Detail}");
     foreach (var u in updates) Console.WriteLine($"   UPDATE {u.Item}: {u.Message}");
     Check(DependencyService.All.First(d => d.Name == "FFmpeg").State != DepState.Missing, "FFmpeg detected");
+    // version texts as the tools / GitHub really write them
+    Check(DependencyService.ParseVersion("v0.71.6-beta") == new Version(0, 71, 6) && DependencyService.ParseVersion("3.32/3.33") == new Version(3, 33)
+          && DependencyService.ParseVersion("esptool v5.6.0") == new Version(5, 6, 0) && DependencyService.ParseVersion("v2.5") == new Version(2, 5),
+        "version texts parsed (v0.71.6-beta, 3.32/3.33, esptool v5.6.0, v2.5)");
+    Check(DependencyService.IsNewer("v5.6.0", "5.5.1") && !DependencyService.IsNewer("v2.5", "2.5") && !DependencyService.IsNewer("v0.71.6-beta", "0.71.10")
+          && !DependencyService.IsNewer("2.7.1", null), "newer / same / older / unknown compared correctly");
+    Check(PokemonAutomation.VersionOf(@"C:\x\PA-SerialPrograms-Windows-x64-0.71.6-20261029\SerialPrograms-Windows.cmd") == new Version(0, 71, 6)
+          && PokemonAutomation.VersionOf(@"C:\x\PA-SerialPrograms-Windows-x64-0.70.2-20260901\inner\SerialPrograms-Windows.cmd") == new Version(0, 70, 2),
+        "Pokémon Automation's version read from its folder name");
+    // an outdated copy must be reported: a fake old Pokémon Automation folder, set in memory only (settings aren't saved)
+    var fake = Path.Combine(work, "PA-SerialPrograms-Windows-x64-0.60.0-20250101", "SerialPrograms-Windows.cmd");
+    Directory.CreateDirectory(Path.GetDirectoryName(fake)!);
+    File.WriteAllText(fake, "rem test");
+    var keep = AppSettings.Current.PokemonAutomationPath;
+    AppSettings.Current.PokemonAutomationPath = fake;
+    try
+    {
+        var old = await DependencyService.CheckUpdates();
+        var pa = old.FirstOrDefault(u => u.Item == "Pokémon Automation");
+        Check(pa != null && pa.Message.Contains("0.60.0") && pa.Apply != null, $"an outdated Pokémon Automation is reported ({pa?.Message})");
+    }
+    finally { AppSettings.Current.PokemonAutomationPath = keep; }
 }
 
 if (tests.Contains("3ds"))
