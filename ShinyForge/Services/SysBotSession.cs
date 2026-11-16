@@ -37,21 +37,26 @@ internal sealed class SysBotSession : IDisposable
     {
         var s = AppSettings.Current;
         try { return s.SwitchUsb ? new UsbLink() : new WifiLink(host, port); }
-        catch (IOException first)
+        catch (IOException)
         {
-            SysBotLink other;
-            try
-            {
-                if (s.SwitchUsb) other = new WifiLink(host, port);
-                else if (WinUsbDevice.IsConnected(0x057E, 0x3000)) other = new UsbLink();
-                else throw first;
-            }
-            catch (IOException) { throw first; }
+            var other = OtherLink(host, port, s.SwitchUsb);
+            if (other == null) throw; // neither answers: the error for the set connection
             s.SwitchConnection = other.IsUsb ? "USB" : "WiFi";
             s.Save();
             AppPaths.Log($"sys-botbase answers over {s.SwitchConnection}, not the set connection - setting changed to match");
             return other;
         }
+    }
+
+    /// <summary>The connection that ISN'T set, if it answers (USB only when a Switch is plugged in).</summary>
+    private static SysBotLink? OtherLink(string host, int port, bool usbIsSet)
+    {
+        try
+        {
+            if (usbIsSet) return new WifiLink(host, port);
+            return WinUsbDevice.IsConnected(0x057E, 0x3000) ? new UsbLink() : null;
+        }
+        catch (IOException) { return null; }
     }
 
     internal SysBotSession(SysBotLink link, bool controller = true)
