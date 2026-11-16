@@ -2,6 +2,27 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.1.0
+
+### New
+- **The right game before recording.** Pressing **Start recording** on a Switch game first checks which game runs on the Switch. If nothing (or the FTP app) is open, ShinyForge starts your game. If your game waits behind the HOME menu, it brings it back. If another game is open:
+  - **FireRed / LeafGreen:** ShinyForge asks whether to save it first. **Yes** saves it in the game (START → SAVE, every step read from screenshots), closes it and starts your game. **No** closes it without saving.
+  - **Other Pokémon games:** save it yourself, press OK, and ShinyForge closes it and starts your game.
+  - **Any other game:** save and close it yourself, then press OK. ShinyForge never closes a game it doesn't know.
+- **sys-botbase button** on every Switch game page (Shiny Hunt card). It shows which sys-botbase the Switch runs and can install Pokémon Automation's **sys-botbase-cpp** onto the SD card over WiFi. The old files are backed up first, and **Restore previous sys-botbase** puts them back. After a restart ShinyForge checks that screenshots still work, because it needs them: on some consoles sys-botbase-cpp 3.33 runs out of memory taking one.
+- **USB connection (Windows).** With sys-botbase-cpp, ShinyForge can talk to an undocked Switch over a USB-C cable (WinUSB driver via Zadig). WiFi stays the default, since USB means no capture card picture: recording is off while on USB, and the Python hunter needs WiFi. If only the other connection answers, ShinyForge follows it by itself.
+- **Pokémon Automation button** on every Switch game page. It starts Pokémon Automation's Computer Control (unzip it yourself; nothing of theirs is bundled) and opens that game's program list. Their programs automate every Switch Pokémon game, including on an unmodified Switch with a microcontroller and a capture card.
+
+### Changed
+- Choosing a game on the HOME menu now starts on the **first game**, never a user icon. LEFT is pressed one step at a time with a screenshot each, because the row wraps around and quick presses get dropped. Missed presses are retried, and a Switch that ignores the controller is reported as such instead of "not installed".
+- Reading the Switch's title, the live collection and the phone remote's screenshot no longer touches the virtual controller, so a running hunt keeps it.
+
+### Fixed
+- After a failed memory read, ShinyForge waited 15 seconds for a line sys-botbase-cpp never sends and could fall out of step.
+- Python hunter: with no game open, sys-botbase's error lines were taken for a game ID, and later reads came back out of order. A failed read with sys-botbase-cpp ("0") could stop the hunter.
+- Closing a game no longer presses HOME blindly when a screenshot fails (that could open the game again).
+- Pokémon Automation's web pages now open on macOS and Linux.
+
 ## 1.0 (build 15)
 
 ### New
