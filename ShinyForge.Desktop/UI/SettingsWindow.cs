@@ -68,6 +68,7 @@ public sealed class SettingsWindow : Window
             Text("Streamlabs Desktop", () => s.StreamlabsPath, v => s.StreamlabsPath = v);
             Text("PKHeX.exe (blank = auto-detect)", () => s.PKHeXPath, v => s.PKHeXPath = v);
         }
+        Text("Console frame pictures (blank = Desktop/Console Frames)", () => s.ConsoleFramesFolder, v => s.ConsoleFramesFolder = v, "PNG console pictures with see-through screens, drawn around recordings.", folder: true);
         Text("Checkpoint folder (blank = search the SD card)", () => s.CheckpointFolder, v => s.CheckpointFolder = v, "A copy of the SD card (or its Checkpoint / saves folder) on this computer.", folder: true);
         Group("Bots");
         Text("Python hunting bot folder", () => s.PythonBotFolder, v => s.PythonBotFolder = v, "Blank or missing = the hunter that ships with ShinyForge.", folder: true);

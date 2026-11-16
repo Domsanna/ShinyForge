@@ -11,6 +11,10 @@ public sealed class GameSettings
     public int SegmentMinutes { get; set; } = 10;
     public string VideoSource { get; set; } = "";
     public string AudioDevice { get; set; } = "";
+    /// <summary>Console frame drawn around the recording (ConsoleFrames key, "" = none).</summary>
+    public string Overlay { get; set; } = "";
+    /// <summary>3DS Capture windows: cut off the black border around DS / Game Boy pictures.</summary>
+    public bool CropToGame { get; set; } = true;
     public string SpreadsheetPath { get; set; } = "";  // auto-detected if empty
     public bool AutoMonitor { get; set; }
     public string HuntBot { get; set; } = "";
@@ -89,6 +93,9 @@ public sealed class AppSettings
     // ---- shiny clips (rolling buffer while hunting)
     public bool ShinyClips { get; set; } = true;
     public int ShinyClipSeconds { get; set; } = 60;
+
+    /// <summary>Folder with the console frame PNGs for recordings (blank = Desktop\Console Frames).</summary>
+    public string ConsoleFramesFolder { get; set; } = "";
 
     // ---- stream overlay + phone remote (small built-in web server)
     public bool OverlayEnabled { get; set; }

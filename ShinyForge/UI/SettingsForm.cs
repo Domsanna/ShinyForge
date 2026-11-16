@@ -26,6 +26,9 @@ public sealed class SettingsForm : Form
         public string StreamlabsPath { get => AppSettings.Current.StreamlabsPath; set => AppSettings.Current.StreamlabsPath = value; }
         [Category("Paths"), DisplayName("FFmpeg (blank = auto-detect)")]
         public string FfmpegPath { get => AppSettings.Current.FfmpegPath; set => AppSettings.Current.FfmpegPath = value; }
+        [Category("Paths"), DisplayName("Console frame pictures (blank = Desktop\\Console Frames)"),
+         Description("PNG console pictures with see-through screens, drawn around recordings (Record Gameplay → Frame).")]
+        public string ConsoleFramesFolder { get => AppSettings.Current.ConsoleFramesFolder; set => AppSettings.Current.ConsoleFramesFolder = value.Trim(); }
         [Category("Paths"), DisplayName("PKHeX.exe (blank = auto-detect)")]
         public string PKHeXPath { get => AppSettings.Current.PKHeXPath; set => AppSettings.Current.PKHeXPath = value; }
         [Category("Bots"), DisplayName("Python hunting bot folder")]

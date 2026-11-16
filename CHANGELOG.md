@@ -2,6 +2,19 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 15)
+
+### New
+- **Both screens for DS and 3DS games.** Games from Gen 4 to 7 on DS and 3DS now record the top and bottom screens together, top above bottom like a real console (**3DS Capture – Top + Bottom (stacked)**). Game Boy, Game Boy Color and Game Boy Advance games record the one screen they use; Switch games record the capture card.
+- **3DS sound in recordings.** 3DS Capture plays the 3DS sound it gets over the USB cable on the speakers, so there was no input to record it from. ShinyForge now records that program's sound directly (Windows 10 2004 or newer) and picks it automatically for 3DS games. Switch games automatically get the capture card's own audio.
+- **Console frames.** Recordings can be placed inside a picture of the console: Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, 3DS, and Switch 1 or Switch 2 for Switch games. The game picture is fitted exactly into the console's screen holes. The PNGs go in `Desktop\Console Frames` (or a folder chosen in Settings), with a `screen_positions.json` saying where each screen is.
+- **Black borders cut off.** 3DS Capture shows DS, Game Boy and GBA games with black bars inside the 3DS screen; recordings keep only the game picture. Measured on real games: Pokémon Red (Game Boy), Ruby (GBA, shown 1.5× on the 3DS) and Pearl (DS).
+- **Streamlabs scenes.** A new button on the Record Gameplay card sets up Streamlabs Desktop while it's open (ShinyForge offers to start it): one scene per console with the game fitted into the console picture, the same way as the recordings. Scenes that already have a console's name are updated, not copied; existing capture sources are reused; with Dual Output the vertical canvas is laid out too.
+
+### Fixed
+- With a 3DS plugged in, 3DS Capture adds the board's id to its window names, so recording the 3DS windows by name could miss them. ShinyForge now finds them either way.
+- A minimized 3DS Capture window records nothing. ShinyForge now brings the screen windows back (without taking the focus) when a recording starts.
+
 ## 1.0 (build 13)
 
 ### New

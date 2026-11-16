@@ -20,8 +20,13 @@ public sealed class ShinyClipService
 
     public static string DefaultFolder => Path.Combine(AppPaths.DataDir, "Shiny Clips");
 
-    public void Start(string source, string audio, string gameId, string outFolder)
+    private ProcessAudioCapture? _appAudio;
+
+    public void Start(string source, string audio, string gameId, string outFolder) => Start(new RecordingService.CaptureSpec(source, audio), gameId, outFolder);
+
+    public void Start(RecordingService.CaptureSpec spec, string gameId, string outFolder)
     {
+        var source = spec.Source;
         Stop();
         var ff = RecordingService.FindFfmpeg();
         if (ff == null || string.IsNullOrWhiteSpace(source)) { LastError = "no FFmpeg or capture source"; return; }
@@ -31,9 +36,11 @@ public sealed class ShinyClipService
         Directory.CreateDirectory(_dir);
         var seconds = Math.Clamp(AppSettings.Current.ShinyClipSeconds, 20, 300);
         var wrap = seconds / 10 + 2;
-        var (input, maps, hasAudio) = RecordingService.BuildInput(source, audio, bigBuffers: false);
-        var args = $"-hide_banner -loglevel error -y {input} {maps} -c:v libx264 -preset veryfast -crf 23 " +
-                   "-pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -g 60 " + (hasAudio ? "-c:a aac -b:a 128k " : "") +
+        var cmd = RecordingService.BuildCapture(spec, bigBuffers: false);
+        _appAudio = cmd.AppAudio;
+        _appAudio?.Start();
+        var args = $"-hide_banner -loglevel error -y {cmd.Args} -c:v libx264 -preset veryfast -crf 23 " +
+                   "-g 60 " + (cmd.HasAudio ? "-c:a aac -b:a 128k " : "") +
                    $"-f segment -segment_time 10 -segment_wrap {wrap} -reset_timestamps 1 \"{Path.Combine(_dir, "buf%03d.ts")}\"";
         try
         {
@@ -55,6 +62,8 @@ public sealed class ShinyClipService
             try { _ff.StandardInput.WriteLine("q"); if (!_ff.WaitForExit(5000)) _ff.Kill(); } catch { try { _ff.Kill(); } catch { } }
         }
         _ff = null;
+        _appAudio?.Dispose();
+        _appAudio = null;
     }
 
     /// <summary>For the system check: the buffer should be running while wanted.</summary>

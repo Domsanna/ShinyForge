@@ -164,6 +164,141 @@ if (tests.Contains("record"))
     Check(RecordingService.NextNumber(dir) == files.Count + 1, "next recording continues the numbering");
 }
 
+if (tests.Contains("frames"))
+{
+    // every console frame: the screens are replaced by solid red test inputs; the red must fill each hole exactly
+    var ff = RecordingService.FindFfmpeg()!;
+    var dir = Path.Combine(work, "frames");
+    Directory.CreateDirectory(dir);
+    var cases = new (Platform P, string Source, string Overlay)[]
+    {
+        (Platform.GB, RecordingService.Top3DS, "gb"), (Platform.GBC, RecordingService.Top3DS, "gbc"), (Platform.GBA, RecordingService.Top3DS, "gba"),
+        (Platform.NDS, RecordingService.Both3DS, "nds"), (Platform.N3DS, RecordingService.Both3DS, "3ds"),
+        (Platform.Switch, RecordingService.DevicePrefix + "Test card", "switch1"), (Platform.Switch, RecordingService.DevicePrefix + "Test card", "switch2"),
+        (Platform.N3DS, RecordingService.Both3DS, ""), (Platform.NDS, RecordingService.Both3DS, ""),
+    };
+    foreach (var (p, source, overlay) in cases)
+        foreach (var pattern in new[] { "color=c=red", "testsrc2=rate=30" })
+        {
+            var cmd = RecordingService.BuildCapture(new RecordingService.CaptureSpec(source, RecordingService.NoAudio, p, overlay), false);
+            var args2 = System.Text.RegularExpressions.Regex.Replace(cmd.Args, "-f gdigrab .*?-i title=\"3DS Capture - (Top|Bottom)\"",
+                m => $"-f lavfi -i {pattern}:s={(m.Groups[1].Value == "Top" ? "400x240" : "320x240")}:r=30");
+            args2 = System.Text.RegularExpressions.Regex.Replace(args2, "-f dshow .*?-i video=\"[^\"]+\"", $"-f lavfi -i {pattern}:s=1920x1080:r=30");
+            var name = $"{p}_{(overlay == "" ? "noframe" : overlay)}_{(pattern.StartsWith("color") ? "red" : "pattern")}.png";
+            var outPng = Path.Combine(dir, name);
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ff, $"-hide_banner -loglevel error -y {args2} -frames:v 1 \"{outPng}\"")
+            { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true })!;
+            var err = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+            if (!File.Exists(outPng)) { Check(false, $"{name}: ffmpeg failed: {err.Trim()}"); continue; }
+            if (!pattern.StartsWith("color") || overlay == "") { if (overlay == "") Check(true, $"{name} rendered ({cmd.Description})"); continue; }
+            var frame = ConsoleFrames.Get(overlay)!;
+            using var bmp = new System.Drawing.Bitmap(outPng);
+            double sx = (double)bmp.Width / frame.Width, sy = (double)bmp.Height / frame.Height;
+            bool Red(int x, int y) { var c = bmp.GetPixel(x, y); return c.R > 180 && c.G < 90 && c.B < 90; }
+            int expected = RecordingService.HasTwoScreens(p) ? 2 : 1;
+            foreach (var r in frame.Screens.Take(expected))
+            {
+                // inside (2 px in, away from the rounded corners): all red; 3 px outside the hole: the frame, not red
+                int x0 = (int)Math.Ceiling(r.X * sx) + 2, y0 = (int)Math.Ceiling(r.Y * sy) + 2, x1 = (int)Math.Floor((r.X + r.Width) * sx) - 3, y1 = (int)Math.Floor((r.Y + r.Height) * sy) - 3;
+                int bad = 0, total = 0;
+                for (int x = x0 + 6; x <= x1 - 6; x += 3) { total += 2; if (!Red(x, y0)) bad++; if (!Red(x, y1)) bad++; }
+                for (int y = y0 + 6; y <= y1 - 6; y += 3) { total += 2; if (!Red(x0, y)) bad++; if (!Red(x1, y)) bad++; }
+                int leak = 0, ring = 0;
+                for (int x = x0 + 6; x <= x1 - 6; x += 3) { ring += 2; if (Red(x, y0 - 5)) leak++; if (Red(x, y1 + 5)) leak++; }
+                for (int y = y0 + 6; y <= y1 - 6; y += 3) { ring += 2; if (Red(x0 - 5, y)) leak++; if (Red(x1 + 5, y)) leak++; }
+                Check(bad == 0 && leak == 0, $"{name} ({bmp.Width}x{bmp.Height}) {r.Name} screen fills its hole: {total - bad}/{total} edge pixels red, {leak}/{ring} outside");
+            }
+        }
+    Console.WriteLine("   pictures: " + dir);
+}
+
+if (tests.Contains("streamlabs"))
+{
+    // the running Streamlabs Desktop: set up the console scenes (existing ones are updated)
+    Check(StreamlabsService.IsOpen, "Streamlabs Desktop is open");
+    if (StreamlabsService.IsOpen)
+    {
+        using var sl = StreamlabsService.Connect();
+        var before = sl.Call("ScenesService", "getSceneNames")!.AsArray().Count;
+        var report = sl.SetUpConsoleScenes(null, null);
+        foreach (var r in report) Console.WriteLine("   " + r);
+        var after = sl.Call("ScenesService", "getSceneNames")!.AsArray().Select(n => (string)n!).ToList();
+        Check(after.Count == before, $"no duplicate scenes ({before} before, {after.Count} after)");
+        foreach (var name in new[] { "Game Boy", "Game Boy Color", "Game Boy Advance", "Nintendo DS", "3DS", "Switch 1" })
+            Check(after.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase)), $"scene {name}");
+        Check(after.Any(a => a.Equals("switch 2", StringComparison.OrdinalIgnoreCase)), "scene Switch 2");
+    }
+}
+
+if (tests.Contains("framesnow"))
+{
+    // the real 3DS Capture windows, through the real capture command, one picture per console frame
+    var ff = RecordingService.FindFfmpeg()!;
+    var dir = Path.Combine(work, "framesnow");
+    Directory.CreateDirectory(dir);
+    foreach (var (p, overlay) in new[] { (Platform.GB, "gb"), (Platform.GBC, "gbc"), (Platform.GBA, "gba"), (Platform.NDS, "nds"), (Platform.N3DS, "3ds"), (Platform.N3DS, "") })
+    {
+        var src = RecordingService.HasTwoScreens(p) ? RecordingService.Both3DS : RecordingService.Top3DS;
+        var cmd = RecordingService.BuildCapture(new RecordingService.CaptureSpec(src, RecordingService.NoAudio, p, overlay), false);
+        var outPng = Path.Combine(dir, $"{p}_{(overlay == "" ? "noframe" : overlay)}.png");
+        using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ff, $"-hide_banner -loglevel error -y {cmd.Args} -frames:v 1 \"{outPng}\"")
+        { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true })!;
+        var err = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        Check(File.Exists(outPng), $"{Path.GetFileName(outPng)} ({cmd.Description}) {err.Trim()}");
+    }
+    Console.WriteLine("   pictures: " + dir);
+}
+
+if (tests.Contains("appaudio"))
+{
+    // one program's sound (here: ffplay playing a quiet tone for 4 s) captured through the pipe into FFmpeg
+    var ff = RecordingService.FindFfmpeg()!;
+    var bin = Path.GetDirectoryName(ff)!;
+    var wav = Path.Combine(work, "appaudio.wav");
+    using var player = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(bin, "ffplay.exe"),
+        "-hide_banner -loglevel error -nodisp -autoexit -volume 15 -f lavfi -i sine=frequency=440:duration=5") { UseShellExecute = false, CreateNoWindow = true })!;
+    Thread.Sleep(500);
+    using var cap = new ProcessAudioCapture("ffplay");
+    cap.Start();
+    using var rec = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ff, $"-hide_banner -loglevel error -y {cap.FfmpegInput} -t 4 \"{wav}\"")
+    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true })!;
+    rec.WaitForExit(15000);
+    cap.Dispose();
+    Console.WriteLine("   capture error: " + (cap.Error ?? "none"));
+    var vd = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ff, $"-hide_banner -i \"{wav}\" -af volumedetect -f null -")
+    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true })!;
+    var text = vd.StandardError.ReadToEnd();
+    vd.WaitForExit();
+    var max = System.Text.RegularExpressions.Regex.Match(text, @"max_volume: (-?[\d.]+) dB");
+    Console.WriteLine("   " + string.Join(" ", text.Split('\n').Where(l => l.Contains("_volume")).Select(l => l.Trim()[(l.Trim().IndexOf(']') + 1)..].Trim())));
+    Check(cap.Error == null && max.Success && double.Parse(max.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) > -50, "the program's sound was captured");
+}
+
+if (tests.Contains("frameslive"))
+{
+    // real 3DS Capture windows + 3DS Capture's sound, 3DS frame, 8 seconds
+    var rec = new RecordingService();
+    var dir = Path.Combine(work, "frameslive");
+    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    rec.Status += s => Console.WriteLine("   rec: " + s);
+    rec.Start(new RecordingService.CaptureSpec(RecordingService.Both3DS, RecordingService.AppAudio3DS, Platform.N3DS, "3ds"), dir, 1, 60);
+    Thread.Sleep(8000);
+    rec.Stop();
+    var file = Directory.EnumerateFiles(dir, "Recording_*.mp4").FirstOrDefault();
+    Check(file != null, "3DS recording written: " + file);
+    if (file != null)
+    {
+        var probe = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(Path.GetDirectoryName(RecordingService.FindFfmpeg()!)!, "ffprobe.exe"),
+            $"-v error -show_entries stream=codec_type,width,height,duration -of csv=p=0 \"{file}\"") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true })!;
+        var info = probe.StandardOutput.ReadToEnd().Trim();
+        probe.WaitForExit();
+        Console.WriteLine("   streams: " + info.Replace("\n", " | "));
+        Check(info.Contains("video") && info.Contains("audio"), "recording has the stacked picture and 3DS Capture's sound");
+    }
+}
+
 if (tests.Contains("live"))
 {
     using var live = new LiveFrlg(AppSettings.Current.SwitchIP, AppSettings.Current.SwitchPort);

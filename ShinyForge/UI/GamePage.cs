@@ -21,6 +21,9 @@ public sealed class GamePage : UserControl
     private TextBox _trackLog = null!, _folderBox = null!, _recFolder = null!;
     private Label? _trackSaveLabel;
     private ComboBox _source = null!, _audio = null!, _segments = null!, _trackSource = null!;
+    private ComboBox? _overlay;
+    private CheckBox? _crop;
+    private List<string> _overlayKeys = new();
     private FancyButton _recButton = null!;
     private CheckBox _autoMonitor = null!;
     private FoundSave? _save;
@@ -438,7 +441,7 @@ public sealed class GamePage : UserControl
         if (!AppSettings.Current.ShinyClips || _recorder.IsRecording || _clips.Running) return;
         var source = _source?.SelectedItem as string ?? _gs.VideoSource;
         if (string.IsNullOrWhiteSpace(source) || source.StartsWith("(")) return;
-        _clips.Start(source, _audio?.SelectedItem as string ?? RecordingService.NoAudio, _game.Id,
+        _clips.Start(CaptureSpec(source), _game.Id,
                      Directory.Exists(_gs.RecordingFolder) ? Path.Combine(_gs.RecordingFolder, "Shiny Clips") : ShinyClipService.DefaultFolder);
         if (_clips.Running) Status("Shiny clip buffer running - the last " + AppSettings.Current.ShinyClipSeconds + " s are saved when a shiny appears.");
     }
@@ -468,23 +471,32 @@ public sealed class GamePage : UserControl
         var (video, audio) = RecordingService.ListDevices();
         var sources = new List<string>();
         if (!_game.IsSwitch)
-        {
-            sources.Add(RecordingService.WindowPrefix + "3DS Capture - Top");
-            sources.Add(RecordingService.WindowPrefix + "3DS Capture - Bottom");
-        }
+            // DS / 3DS games (Gen 4-7): both screens stacked; Game Boy games only have the top screen
+            sources.Add(RecordingService.HasTwoScreens(_game.Platform) ? RecordingService.Both3DS : RecordingService.Top3DS);
         sources.AddRange(video.Select(v => RecordingService.DevicePrefix + v));
         if (_game.IsSwitch)
             sources.Add(RecordingService.WindowPrefix + "Streamlabs Desktop");
-        var defaultSource = !string.IsNullOrEmpty(_gs.VideoSource) ? _gs.VideoSource
-            : sources.FirstOrDefault(s => _game.IsSwitch ? s.Contains("Game Capture") : s.Contains("3DS Capture - Top"));
+        var defaultSource = sources.Contains(_gs.VideoSource) ? _gs.VideoSource
+            : sources.FirstOrDefault(s => _game.IsSwitch ? s.Contains("Game Capture") : s.StartsWith(RecordingService.WindowPrefix + "3DS Capture")) ?? sources.FirstOrDefault();
         _source = Combo(420, sources, defaultSource);
 
         var audios = new List<string> { RecordingService.NoAudio };
+        if (!_game.IsSwitch) audios.Add(RecordingService.AppAudio3DS);
         audios.AddRange(audio);
-        var defaultAudio = !string.IsNullOrEmpty(_gs.AudioDevice) ? _gs.AudioDevice
-            : _game.IsSwitch ? audios.FirstOrDefault(a => a.Contains("Game Capture") && a.EndsWith("Audio")) : RecordingService.NoAudio;
+        var defaultAudio = audios.Contains(_gs.AudioDevice) ? _gs.AudioDevice : RecordingService.DefaultAudio(defaultSource ?? "", audios);
         _audio = Combo(420, audios, defaultAudio);
+        // picking another source picks the sound that belongs to it
+        _source.SelectedIndexChanged += (_, _) => _audio.SelectedItem = RecordingService.DefaultAudio(_source.SelectedItem as string ?? "", audios);
         _segments = Combo(120, new[] { "5", "10", "15", "20", "30" }, _gs.SegmentMinutes.ToString());
+
+        // console frame around the recording (Switch games: Switch 1 or Switch 2)
+        var frames = ConsoleFrames.For(_game.Platform).ToList();
+        var overlayNames = new List<string> { "No frame" };
+        overlayNames.AddRange(frames.Select(f => f.Label + " frame" + (ConsoleFrames.Exists(f) ? "" : " (picture missing)")));
+        var current = frames.FindIndex(f => f.Key == _gs.Overlay);
+        _overlay = Combo(420, overlayNames, overlayNames[current + 1]);
+        _overlayKeys = frames.Select(f => f.Key).ToList();
+        _crop = new CheckBox { Text = "Cut the black border around DS / Game Boy pictures", Checked = _gs.CropToGame, AutoSize = true, ForeColor = Theme.Text, Visible = !_game.IsSwitch && _game.Platform != Platform.N3DS };
 
         _recFolder = new TextBox { Width = 330, Text = _gs.RecordingFolder };
         Theme.StyleInput(_recFolder);
@@ -493,6 +505,10 @@ public sealed class GamePage : UserControl
 
         card.Body.Controls.Add(Row(Theme.Label("Video   ", Theme.Body, Theme.Text), _source));
         card.Body.Controls.Add(Row(Theme.Label("Audio   ", Theme.Body, Theme.Text), _audio));
+        card.Body.Controls.Add(Row(Theme.Label("Frame   ", Theme.Body, Theme.Text), _overlay));
+        if (_crop.Visible) card.Body.Controls.Add(Row(_crop));
+        card.Body.Controls.Add(Info(frames.Any(ConsoleFrames.Exists) ? "The game picture is fitted exactly into the console's screen(s)."
+            : $"Console frame pictures go in {ConsoleFrames.Folder} (Settings can point somewhere else).", Theme.Muted));
         card.Body.Controls.Add(Row(Theme.Label("Segment length (minutes)  ", Theme.Body, Theme.Text), _segments));
         card.Body.Controls.Add(Row(Theme.Label("Folder  ", Theme.Body, Theme.Text), _recFolder, browse));
 
@@ -501,6 +517,9 @@ public sealed class GamePage : UserControl
         var open = new FancyButton("Open folder", Theme.GlyphFolder, Theme.PanelHi);
         open.Click += (_, _) => { if (Directory.Exists(_recFolder.Text)) Process.Start("explorer.exe", _recFolder.Text); };
         var buttons = Row(_recButton, open);
+        var streamlabs = new FancyButton("Streamlabs scenes", Theme.GlyphSettings, Theme.PanelHi);
+        streamlabs.Click += (_, _) => { using var f = new StreamlabsSetupForm(video); f.ShowDialog(FindForm()); };
+        buttons.Controls.Add(streamlabs);
         if (!_game.IsSwitch)
         {
             var launch = new FancyButton("Open 3DS Capture", Theme.GlyphUsb, Theme.PanelHi);
@@ -511,6 +530,14 @@ public sealed class GamePage : UserControl
         _recStatus = Info("Not recording.", Theme.Muted);
         card.Body.Controls.Add(_recStatus);
         return card;
+    }
+
+    /// <summary>What the Record card is set to: source, sound, console frame.</summary>
+    private RecordingService.CaptureSpec CaptureSpec(string? source = null)
+    {
+        var overlay = _overlay?.SelectedIndex > 0 ? _overlayKeys[_overlay.SelectedIndex - 1] : _overlay == null ? _gs.Overlay : ConsoleFrames.None;
+        return new RecordingService.CaptureSpec(source ?? _source?.SelectedItem as string ?? _gs.VideoSource,
+            _audio?.SelectedItem as string ?? RecordingService.NoAudio, _game.Platform, overlay, _crop?.Checked ?? _gs.CropToGame);
     }
 
     private void Launch3DSCapture()
@@ -548,10 +575,13 @@ public sealed class GamePage : UserControl
         _gs.SegmentMinutes = int.Parse(_segments.SelectedItem as string ?? "10");
         _gs.VideoSource = source;
         _gs.AudioDevice = _audio.SelectedItem as string ?? "";
+        var spec = CaptureSpec();
+        _gs.Overlay = spec.Overlay;
+        _gs.CropToGame = spec.CropToGame;
         AppSettings.Current.Save();
         try
         {
-            _recorder.Start(source, _gs.AudioDevice, _gs.RecordingFolder, _gs.SegmentMinutes);
+            _recorder.Start(spec, _gs.RecordingFolder, _gs.SegmentMinutes);
             _recButton.Text = "Stop recording";
             _recButton.Invalidate();
         }

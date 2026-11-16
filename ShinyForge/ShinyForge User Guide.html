@@ -366,10 +366,15 @@
   <ul>
     <li><b>Video</b>:
       <ul>
-        <li>3DS: the <i>3DS Capture – Top</i> or <i>Bottom</i> window.</li>
-        <li>Switch: your capture card (e.g. "Game Capture") or the Streamlabs Desktop window.</li>
+        <li>DS and 3DS games (Gen 4–7): <i>3DS Capture – Top + Bottom (stacked)</i> records both screens, top above bottom like a real DS/3DS.</li>
+        <li>Game Boy, Game Boy Color and Game Boy Advance games (Gen 1–3): the <i>3DS Capture – Top</i> window (they only use one screen).</li>
+        <li>Switch games (Gen 8–9, Let's Go and the Switch FireRed/LeafGreen): your capture card (e.g. "Game Capture") or the Streamlabs Desktop window.</li>
       </ul></li>
-    <li><b>Audio</b>: your capture card's audio, or <i>no audio</i>.</li>
+    <li><b>Audio</b> is picked for you: 3DS games record the sound 3DS Capture plays (it arrives over the USB cable), Switch games the capture card's own audio device. You can still choose another device or <i>no audio</i>.</li>
+    <li><b>Frame</b>: puts the recording inside a picture of the console (Game Boy, Game Boy Color, Game Boy Advance, DS, 3DS; Switch games can use the Switch 1 or Switch 2 picture) so it looks like a real console. The game picture is fitted exactly into the console's screen(s). The PNGs live in <code>Desktop\Console Frames</code> (change the folder in Settings); a <code>screen_positions.json</code> there tells ShinyForge where each screen is.</li>
+    <li><b>Cut the black border</b> (DS and Game Boy games): 3DS Capture shows these games with black bars inside the 3DS screen; this keeps only the game picture.</li>
+    <li>3DS Capture's screen windows must not be minimized (a minimized window shows nothing). ShinyForge brings them back by itself when a recording starts.</li>
+    <li><b>Streamlabs scenes</b>: with Streamlabs Desktop open (ShinyForge offers to start it), this button makes one scene per console — Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, 3DS, Switch 1 and Switch 2 — with the game fitted into the console picture, the same way as the recordings. Scenes that already have a console's name are updated instead of copied, your existing capture sources are reused, and the Switch capture devices are chosen in the window. With Dual Output, the vertical canvas is laid out too.</li>
     <li><b>Segment length</b>: 5–30 minutes per file.</li>
     <li><b>Folder</b>: where the files go. A new recording carries on the numbering.</li>
     <li>On 3DS game pages, <b>Open 3DS Capture</b> launches the capture program.</li>
