@@ -49,11 +49,20 @@ public sealed class AppSettings
     public string LastPlatform { get; set; } = "";
     public string SwitchIP { get; set; } = "";   // asked for the first time a Switch feature needs it
     public int SwitchPort { get; set; } = 6000;
+    /// <summary>
+    /// How ShinyForge talks to sys-botbase: "WiFi" (TCP, the Switch can stay docked) or "USB" (cable; the Switch is out of the
+    /// dock, so no capture card picture, and the WiFi-only Python hunter can't run). sys-botbase-cpp listens on one of them
+    /// at a time (its config.cfg) - <see cref="Services.SysBotBaseInstaller.SetMode"/> changes both together.
+    /// </summary>
+    public string SwitchConnection { get; set; } = "WiFi";
+    [JsonIgnore] public bool SwitchUsb => SwitchConnection.Equals("USB", StringComparison.OrdinalIgnoreCase);
     /// <summary>Session-only: remembered while ShinyForge runs, asked again after a restart (never saved to settings.json).</summary>
     [JsonIgnore]
     public string ThreeDSIP { get; set; } = "";
     public string SpreadsheetRoot { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Bot Spreadsheets");
     public string Capture3DSPath { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "3ds_capture.6.1", "3ds_capture.exe");
+    /// <summary>Pokémon Automation's SerialPrograms-Windows.cmd (unzipped by the user; found automatically when empty).</summary>
+    public string PokemonAutomationPath { get; set; } = "";
     public string StreamlabsPath { get; set; } = @"C:\Program Files\Streamlabs OBS\Streamlabs OBS.exe";
     public string FfmpegPath { get; set; } = "";
     public string PKHeXPath { get; set; } = "";

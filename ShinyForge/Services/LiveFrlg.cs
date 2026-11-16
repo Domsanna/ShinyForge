@@ -1,5 +1,3 @@
-using System.Net.Sockets;
-using System.Text;
 using PKHeX.Core;
 
 namespace ShinyForge.Services;
@@ -11,40 +9,13 @@ namespace ShinyForge.Services;
 public sealed class LiveFrlg : IDisposable
 {
     private const uint InitialSeed = 0x1208000, GbaAnchor = 0x02020000;
-    private readonly TcpClient _client;
-    private readonly NetworkStream _stream;
-    private readonly StreamReader _reader;
+    private readonly SysBotSession _bot;
 
-    public LiveFrlg(string host, int port)
-    {
-        _client = new TcpClient();
-        if (!_client.ConnectAsync(host, port).Wait(5000))
-            throw new IOException($"Could not connect to sys-botbase at {host}:{port}");
-        _stream = _client.GetStream();
-        _stream.ReadTimeout = 15000;
-        _reader = new StreamReader(_stream, Encoding.ASCII);
-        Send("configure echoCommands 0");
-    }
+    /// <summary>Read-only connection (WiFi or USB, as set): it never touches the virtual controller, so a running hunt keeps it.</summary>
+    public LiveFrlg(string host, int port) => _bot = new SysBotSession(host, port, controller: false);
 
-    private void Send(string cmd)
-    {
-        var b = Encoding.ASCII.GetBytes(cmd + "\r\n");
-        _stream.Write(b, 0, b.Length);
-    }
-
-    private string Cmd(string cmd)
-    {
-        Send(cmd);
-        var line = _reader.ReadLine()?.Trim() ?? "";
-        if (line.StartsWith("svc") || line.StartsWith("hid") || line.StartsWith("dmnt"))
-        {
-            _reader.ReadLine(); // failed reads are followed by a blank line
-            throw new IOException(line);
-        }
-        return line;
-    }
-
-    private byte[] Peek(uint heapOffset, int size) => Convert.FromHexString(Cmd($"peek 0x{heapOffset:X} {size}"));
+    private byte[] Peek(uint heapOffset, int size) =>
+        _bot.Peek(heapOffset, size) ?? throw new IOException("sys-botbase couldn't read the game's memory - is FireRed / LeafGreen running?");
 
     private static uint ToHeap(uint gba) => InitialSeed + (gba - GbaAnchor);
 
@@ -55,7 +26,7 @@ public sealed class LiveFrlg : IDisposable
         _ => (0x120C280, 0xBD68D220),
     };
 
-    public string TitleId() => Cmd("getTitleID");
+    public string TitleId() => _bot.TitleId() ?? throw new IOException("No game is running on the Switch.");
 
     /// <summary>Reads trainer, party and all 14 PC boxes. Returns null when the save isn't loaded (title screen).</summary>
     public (string Trainer, ushort TID, ushort SID, List<PK3> Party, List<PK3> Boxes)? Read()
@@ -121,6 +92,6 @@ public sealed class LiveFrlg : IDisposable
 
     public void Dispose()
     {
-        try { _client.Dispose(); } catch { }
+        try { _bot.Dispose(); } catch { }
     }
 }

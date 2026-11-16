@@ -23,16 +23,8 @@ public sealed record AppRelease(string Tag, Version Version, string Name, string
 /// </summary>
 public static class AppUpdateService
 {
-    private static readonly HttpClient Http = MakeClient(TimeSpan.FromSeconds(20));
+    private static readonly HttpClient Http = WebClients.Make(TimeSpan.FromSeconds(20));
     public static AppRelease? Latest { get; private set; }
-
-    private static HttpClient MakeClient(TimeSpan timeout)
-    {
-        var h = new HttpClient { Timeout = timeout };
-        h.DefaultRequestHeaders.UserAgent.ParseAdd($"ShinyForge/{AppInfo.Comparable}");
-        h.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-        return h;
-    }
 
     /// <summary>The newest published release (null if none yet or GitHub can't be reached).</summary>
     public static async Task<AppRelease?> CheckAsync()
@@ -113,7 +105,7 @@ public static class AppUpdateService
 
     private static async Task DownloadAsync(string url, string file, long expected, Action<string> progress, CancellationToken token)
     {
-        using var http = MakeClient(TimeSpan.FromHours(2));
+        using var http = WebClients.Make(TimeSpan.FromHours(2));
         using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
         resp.EnsureSuccessStatusCode();
         var total = resp.Content.Headers.ContentLength ?? expected;

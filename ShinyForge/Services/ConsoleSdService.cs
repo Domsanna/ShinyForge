@@ -15,9 +15,10 @@ public sealed class FtpException(int code, string message) : IOException(message
 }
 
 /// <summary>
-/// A small READ-ONLY FTP client (passive mode) for the FTP server on a Switch / 3DS SD card: Checkpoint's built-in server
-/// (mtheall's ftpd, port 50000) or the standalone ftpd app (port 5000). It only lists folders and downloads files - it never
-/// sends a command that changes anything on the console (no STOR / DELE / RNFR / MKD / RMD).
+/// A small FTP client (passive mode) for the FTP server on a Switch / 3DS SD card: Checkpoint's built-in server (mtheall's
+/// ftpd, port 50000) or the standalone ftpd app (port 5000). Save reading only lists and downloads. The write commands
+/// (<see cref="Upload"/>, <see cref="MakeDirs"/>, <see cref="Delete"/>, <see cref="Rename"/>) exist for ONE job - installing /
+/// switching sys-botbase (<see cref="SysBotBaseInstaller"/>) - and nothing else calls them.
 /// </summary>
 public sealed class ConsoleFtp : IDisposable
 {
@@ -158,6 +159,49 @@ public sealed class ConsoleFtp : IDisposable
         }
         Expect(Read(), 226, 250);
         File.Move(part, localFile, true);
+    }
+
+    // ------------------------------------------------------------------ writing (sys-botbase install only)
+    /// <summary>Uploads a local file to <paramref name="path"/> (overwrites) and checks the size the server reports.</summary>
+    public void Upload(string localFile, string path)
+    {
+        using (var data = OpenData())
+        {
+            Expect(Cmd($"STOR {path}"), 125, 150);
+            using var fs = File.OpenRead(localFile);
+            fs.CopyTo(data.GetStream());
+        }
+        Expect(Read(), 226, 250);
+        var size = Size(path);
+        if (size != null && size != new FileInfo(localFile).Length)
+            throw new IOException($"{path} arrived with {size} bytes instead of {new FileInfo(localFile).Length}.");
+    }
+
+    /// <summary>The file's size, or null when the server doesn't say (no SIZE command / no file).</summary>
+    public long? Size(string path)
+    {
+        var (code, text) = Cmd($"SIZE {path}");
+        return code == 213 && long.TryParse(text[4..].Trim(), out var n) ? n : null;
+    }
+
+    /// <summary>Creates every missing folder of <paramref name="path"/> ("/a/b/c").</summary>
+    public void MakeDirs(string path)
+    {
+        var cur = "";
+        foreach (var part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            cur += "/" + part;
+            var (code, text) = Cmd($"MKD {cur}");
+            if (code != 257 && code != 550 && code != 521) throw new FtpException(code, text); // 550/521 = already there
+        }
+    }
+
+    public void Delete(string path) => Expect(Cmd($"DELE {path}"), 250);
+
+    public void Rename(string from, string to)
+    {
+        Expect(Cmd($"RNFR {from}"), 350);
+        Expect(Cmd($"RNTO {to}"), 250);
     }
 
     public void Dispose()

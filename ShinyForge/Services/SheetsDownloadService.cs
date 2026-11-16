@@ -43,9 +43,8 @@ public static class SheetsDownloadService
         if (File.Exists(target)) return target; // never overwrite progress
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
         var tmp = target + ".download";
-        using (var http = new HttpClient { Timeout = TimeSpan.FromHours(1) })
+        using (var http = WebClients.Make(TimeSpan.FromHours(1), githubJson: false))
         {
-            http.DefaultRequestHeaders.UserAgent.ParseAdd($"ShinyForge/{AppInfo.Comparable}");
             using var resp = await http.GetAsync(BaseUrl + e.Asset, HttpCompletionOption.ResponseHeadersRead);
             resp.EnsureSuccessStatusCode();
             await using var src = await resp.Content.ReadAsStreamAsync();

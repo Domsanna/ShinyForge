@@ -1336,6 +1336,140 @@ if (tests.Contains("switchfind"))
     Check(bot.TitleId() == null, "still nothing running");
 }
 
+if (tests.Contains("sysbotproto"))
+{
+    // Offline: a fake sys-botbase on localhost answers like 2.x (error lines + blank line) and 3.x ("0"); the session must
+    // stay in step and never wait for a blank line that doesn't come.
+    var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    listener.Start();
+    var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+    var server = Task.Run(() =>
+    {
+        using var c = listener.AcceptTcpClient();
+        using var st = c.GetStream();
+        using var r = new StreamReader(st);
+        void W(string s) { var b = System.Text.Encoding.ASCII.GetBytes(s); st.Write(b, 0, b.Length); }
+        var peeks = 0;
+        string? line;
+        while ((line = r.ReadLine()) != null)
+        {
+            if (line.StartsWith("peek")) W(++peeks switch
+            {
+                1 => "svcDebugActiveProcess: 264705\n\n",       // 2.x failure
+                2 => "0\n",                                     // 3.x failure
+                _ => "0A0B0C0D\n",
+            });
+            else if (line == "getTitleID") W("pmdmntGetApplicationProcessId: 527\nsvcDebugActiveProcess: 264705\npmdmntGetApplicationProcessId: 527\n\n");
+            else if (line == "getVersion") { } // a sys-botbase too old to know it: no answer at all
+        }
+    });
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    AppSettings.Current.SwitchConnection = "WiFi";
+    using (var bot = new SysBotSession(new WifiLink("127.0.0.1", port), controller: false))
+    {
+        Check(bot.Peek(0x100, 4) == null, "2.x failed read → null");
+        Check(bot.Peek(0x100, 4) == null, "3.x failed read (\"0\") → null");
+        Check(bot.Peek(0x100, 4) is { } ok && ok[0] == 0x0A && ok[3] == 0x0D, "next read is in step (0A0B0C0D)");
+        Check(bot.TitleId() == null, "2.x \"nothing running\" (3 error lines + blank) → null");
+        Check(bot.Version(1500) == null, "getVersion with no answer gives up instead of hanging");
+    }
+    Check(sw.Elapsed.TotalSeconds < 8, $"no 15 s waits ({sw.Elapsed.TotalSeconds:F1} s)");
+    listener.Stop();
+}
+
+if (tests.Contains("sbbrestore"))
+{
+    // REAL HARDWARE, writes the SD card: SelfTest <work> sbbrestore - the FTP app must run; puts the newest backed-up
+    // sys-botbase back (and saves sys-botbase-cpp's log.txt next to it).
+    var s = AppSettings.Current;
+    var backup = SysBotBaseInstaller.LatestBackup();
+    Check(backup != null, $"a backup to restore ({backup})");
+    if (backup != null)
+    {
+        SysBotBaseInstaller.Restore(s.SwitchIP, backup, m => Console.WriteLine("   " + m));
+        using var ftp = ConsoleFtp.Connect(s.SwitchIP, ConsoleSdService.FindPort(s.SwitchIP)!.Value);
+        var size = ftp.Size("/atmosphere/contents/430000000000000B/exefs.nsp");
+        Check(size == new FileInfo(Path.Combine(backup, "exefs.nsp")).Length, $"the old exefs.nsp is back ({size} bytes)");
+        Console.WriteLine($"   log: {(File.Exists(Path.Combine(backup, "sys-botbase-cpp log.txt")) ? Path.Combine(backup, "sys-botbase-cpp log.txt") : "none")}");
+    }
+}
+
+if (tests.Contains("sbbinstall"))
+{
+    // REAL HARDWARE, writes the SD card: SelfTest <work> sbbinstall - installs sys-botbase-cpp (WiFi mode) over the FTP app,
+    // backing up the old files, and copies Atmosphère's crash / fatal reports into <work>\crash for reading.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    Console.WriteLine($"   before: sys-botbase {SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort) ?? "?"}");
+    var backup = SysBotBaseInstaller.Install(s.SwitchIP, s.SwitchPort, "wifi", m => Console.WriteLine("   " + m)).GetAwaiter().GetResult();
+    Check(File.Exists(Path.Combine(backup, "exefs.nsp")), $"old sys-botbase backed up ({backup})");
+    var port = ConsoleSdService.FindPort(s.SwitchIP);
+    if (port != null)
+    {
+        using var ftp = ConsoleFtp.Connect(s.SwitchIP, port.Value);
+        var nsp = ftp.Size("/atmosphere/contents/430000000000000B/exefs.nsp");
+        Check(nsp == new FileInfo(Directory.GetFiles(Path.Combine(AppPaths.ToolsDir, "sys-botbase-cpp"), "exefs.nsp", SearchOption.AllDirectories)[0]).Length,
+            $"new exefs.nsp on the SD card ({nsp} bytes)");
+        foreach (var dir in new[] { "/atmosphere/crash_reports", "/atmosphere/fatal_errors", "/atmosphere/erpt_reports" })
+        {
+            List<FtpEntry> list;
+            try { list = ftp.List(dir); } catch (FtpException) { continue; }
+            foreach (var e in list.Where(e => !e.IsDir).OrderByDescending(e => e.ModifiedUtc ?? DateTime.MinValue).ThenByDescending(e => e.Name).Take(6))
+            {
+                ftp.Download($"{dir}/{e.Name}", Path.Combine(work, "crash", dir.Trim('/').Replace('/', '_'), e.Name));
+                Console.WriteLine($"   {dir}/{e.Name}  {e.Size} bytes  {e.ModifiedUtc}");
+            }
+        }
+    }
+}
+
+if (tests.Contains("switchopen"))
+{
+    // REAL HARDWARE: SelfTest <work> switchopen <game id> - opens the game the way ShinyForge does (FRLG: save loaded).
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    var game = GameCatalog.Get(args.Skip(1).First(a => a != "switchopen" && GameCatalog.All.Any(g => g.Id == a)));
+    var t = SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, game, m => Console.WriteLine("   " + m));
+    Check(SwitchGameLauncher.TitleIds(game).Contains(t), $"{game.Title} open ({t})");
+}
+
+if (tests.Contains("switchswap"))
+{
+    // REAL HARDWARE, closes and starts games: SelfTest <work> switchswap <game A> <game B> - what Record Gameplay does before
+    // recording B while A runs: A is opened, then closed and B started; then B is suspended (HOME) and brought back on screen.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    var pick = args.Skip(1).Where(a => GameCatalog.All.Any(g => g.Id == a)).Select(GameCatalog.Get).ToList();
+    var (a, b) = (pick[0], pick[1]);
+    RgbImage Screen(SysBotSession bot, string name)
+    {
+        var jpg = bot.Screenshot() ?? throw new IOException("no screenshot");
+        File.WriteAllBytes(Path.Combine(work, name + ".jpg"), jpg);
+        return ConsoleFtpLauncher.Decode!(jpg)!;
+    }
+    string? Try(Func<string> f) { try { return f(); } catch (Exception e) { Console.WriteLine("   " + e.Message); return null; } }
+    void Say(string m) => Console.WriteLine("   " + m);
+
+    var ta = Try(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, a, Say));
+    Check(ta != null && SwitchGameLauncher.TitleIds(a).Contains(ta), $"{a.Title} open ({ta})");
+    using (var bot = new SysBotSession(s.SwitchIP, s.SwitchPort))
+        Check(!SwitchGameLauncher.IsHomeMenu(Screen(bot, "swap_a")), $"{a.Title} on screen, not the HOME menu (swap_a.jpg)");
+    Check(Try(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, b, Say)) == null, $"without closeOtherGame, {a.Title} is left alone");
+    var save = tests.Contains("save") ? SwitchGameLauncher.OtherGame.SaveAndClose : SwitchGameLauncher.OtherGame.Close;
+    var tb = Try(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, b, Say, default, save));
+    Check(tb != null && SwitchGameLauncher.TitleIds(b).Contains(tb), $"{a.Title} {(save == SwitchGameLauncher.OtherGame.SaveAndClose ? "saved and " : "")}closed, {b.Title} started ({tb})");
+    using (var bot = new SysBotSession(s.SwitchIP, s.SwitchPort))
+    {
+        Thread.Sleep(3000);
+        Check(!SwitchGameLauncher.IsHomeMenu(Screen(bot, "swap_b")), $"{b.Title} on screen (swap_b.jpg)");
+        bot.Tap("HOME", 2000);
+        Check(SwitchGameLauncher.IsHomeMenu(Screen(bot, "swap_home")), "HOME menu recognised (swap_home.jpg)");
+    }
+    var again = Try(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, b, Say));
+    using (var bot = new SysBotSession(s.SwitchIP, s.SwitchPort))
+        Check(again == tb && !SwitchGameLauncher.IsHomeMenu(Screen(bot, "swap_front")), $"suspended {b.Title} brought back on screen (swap_front.jpg)");
+}
+
 if (tests.Contains("switchgame"))
 {
     // REAL HARDWARE: FTP app → read the LeafGreen backups → close the FTP app → open LeafGreen → save loaded → (hunt: the Python

@@ -139,6 +139,15 @@ public static class HealthMonitor
         catch { return false; }
     }
 
+    /// <summary>Does the Switch's sys-botbase answer - over the set connection (USB cable / WiFi) or the other one?</summary>
+    public static bool SwitchReachable(int timeoutMs = 2500)
+    {
+        // either connection counts: sessions follow whichever one sys-botbase really listens on
+        var s = AppSettings.Current;
+        bool Usb() => WinUsbDevice.IsConnected(0x057E, 0x3000);
+        return s.SwitchUsb ? Usb() || CanReach(s.SwitchIP, s.SwitchPort, timeoutMs) : CanReach(s.SwitchIP, s.SwitchPort, timeoutMs) || Usb();
+    }
+
     /// <summary>Checks that are always on: disk space, program files, settings, the log.</summary>
     public static void RegisterBuiltIns()
     {

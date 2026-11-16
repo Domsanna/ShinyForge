@@ -57,13 +57,7 @@ public static class PokeldnService
     /// <summary>Entries pokeldn's radio needs in prod.keys (pokeldn docs: ldn.KEYS_NEEDED).</summary>
     public static readonly string[] KeysNeeded = { "aes_kek_generation_source", "aes_key_generation_source", "master_key_00", "master_key_12" };
 
-    private static readonly HttpClient Http = MakeClient(TimeSpan.FromSeconds(20));
-    private static HttpClient MakeClient(TimeSpan timeout)
-    {
-        var h = new HttpClient { Timeout = timeout };
-        h.DefaultRequestHeaders.UserAgent.ParseAdd($"ShinyForge/{AppInfo.Comparable}");
-        return h;
-    }
+    private static readonly HttpClient Http = WebClients.Make(TimeSpan.FromSeconds(20), githubJson: false);
 
     // ------------------------------------------------------------------ where things live
     public static string AppDir => Path.Combine(AppPaths.ToolsDir, "pokeldn");
@@ -142,7 +136,7 @@ public static class PokeldnService
 
     private static async Task DownloadVerified(string url, string file, string? expectedSha, Action<string> progress, string label)
     {
-        using var http = MakeClient(TimeSpan.FromMinutes(30));
+        using var http = WebClients.Make(TimeSpan.FromMinutes(30), githubJson: false);
         using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
         resp.EnsureSuccessStatusCode();
         var total = resp.Content.Headers.ContentLength ?? 0;

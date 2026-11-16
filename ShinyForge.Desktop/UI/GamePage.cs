@@ -93,7 +93,7 @@ public sealed class GamePage : UserControl, IDisposable
         if (_gs.AutoMonitor && _trackLive)
         {
             var s = AppSettings.Current;
-            if (!HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 2500))
+            if (!HealthMonitor.SwitchReachable(2500))
                 items.Add(HealthMonitor.Error($"Collection tracker ({_game.Title})", $"Live monitoring can't reach the Switch at {s.SwitchIP} - its IP may have changed."));
         }
         if (_hunt3ds != null && (DateTime.Now - _last3dsActivity).TotalMinutes > 4)
@@ -124,6 +124,95 @@ public sealed class GamePage : UserControl, IDisposable
         return dep.State != DepState.Missing;
     }
 
+    // ================================================================ Switch tools
+    /// <summary>The connection line + sys-botbase (version, install sys-botbase-cpp) + Pokémon Automation. USB is Windows-only.</summary>
+    private void AddSwitchTools(Card card)
+    {
+        var s = AppSettings.Current;
+        card.Body.Children.Add(Info($"Switch: {s.SwitchIP}:{s.SwitchPort} over WiFi (sys-botbase) - IP in Settings."));
+        var sbb = new FancyButton("sys-botbase", Skin.GlyphSettings, Skin.PanelHi);
+        sbb.Click += async (_, _) => await SysBotBaseMenu();
+        var pa = new FancyButton("Pokémon Automation", Skin.GlyphPlay, Skin.PanelHi);
+        pa.Click += async (_, _) => await PokemonAutomationMenu();
+        card.Body.Children.Add(Skin.Wrap(sbb, pa));
+    }
+
+    /// <summary>Shows which sys-botbase the Switch runs and offers to install / update Pokémon Automation's sys-botbase-cpp.</summary>
+    private async Task SysBotBaseMenu()
+    {
+        var s = AppSettings.Current;
+        Status("Asking the Switch which sys-botbase it runs...");
+        var version = await Task.Run(() => SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort));
+        var shots = version != null && await Task.Run(() => SysBotBaseInstaller.ScreenshotWorks(s.SwitchIP, s.SwitchPort));
+        Status("");
+        var backup = SysBotBaseInstaller.LatestBackup();
+        var cpp = SysBotBaseInstaller.IsCpp(version);
+        const string restore = "Restore previous";
+        if (backup != null && (cpp || version == null) && (version == null || !shots))
+        {
+            // sys-botbase-cpp jammed or can't take screenshots (ShinyForge needs them): offer the backed-up one
+            if (await Dialogs.Show(this, (version == null ? $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}." : $"sys-botbase-cpp {version} can't take screenshots on this Switch.") +
+                    " ShinyForge needs screenshots to open games, find the FTP app and save.\n\nRestore the previous sys-botbase? Start the FTP app " +
+                    "yourself first (hold R while starting a game → ftpd), then restart the Switch afterwards.", "sys-botbase", restore, Dialogs.Cancel) != restore) return;
+            try
+            {
+                await Task.Run(() => SysBotBaseInstaller.Restore(s.SwitchIP, backup, m => Dialogs.Ui(() => Status(m))));
+                await Dialogs.Info(this, "The previous sys-botbase is back on the SD card. Restart the Switch to start it.", "sys-botbase");
+            }
+            catch (Exception ex) { Status(ex.Message); await Dialogs.Info(this, ex.Message, "sys-botbase"); }
+            return;
+        }
+        if (version == null)
+        {
+            await Dialogs.Info(this, $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}. Is the Switch on, on WiFi, and running Atmosphère?", "sys-botbase");
+            return;
+        }
+        var install = cpp ? "Reinstall / update" : "Install sys-botbase-cpp";
+        var r = await Dialogs.Show(this,
+            (cpp ? $"The Switch runs sys-botbase-cpp {version} (Pokémon Automation)." : $"The Switch runs sys-botbase {version} (the original).") + "\n\n" +
+            "sys-botbase-cpp (github.com/PokemonAutomation/sys-botbase-cpp, GPL-3.0) is a rewrite with the same commands: lighter on memory, " +
+            "a fix for random crashes, exact button timing and a log file on the SD card. Installing copies it onto the SD card over WiFi with " +
+            "the FTP app (the old files are backed up first); then restart the Switch. No game may be open - save and close it first.",
+            "sys-botbase", install, Dialogs.Cancel);
+        if (r != install) return;
+        if (HuntService.IsPythonHuntRunning()) { await Dialogs.Info(this, "The hunter is running - stop it first.", "sys-botbase"); return; }
+        try
+        {
+            var saved = await SysBotBaseInstaller.Install(s.SwitchIP, s.SwitchPort, "wifi", m => Dialogs.Ui(() => Status(m)));
+            Status("sys-botbase-cpp is on the SD card - restart the Switch.");
+            await Dialogs.Info(this, "sys-botbase-cpp is on the SD card. Restart the Switch (hold POWER → Power Options → Restart) to start it.\n\n" +
+                                     $"The old sys-botbase files are backed up in:\n{saved}\n\nAfter the restart, open sys-botbase again: ShinyForge " +
+                                     "checks that screenshots work (it needs them) and offers to put the old one back if they don't.", "sys-botbase");
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("sys-botbase install failed: " + ex);
+            Status(ex.Message);
+            await Dialogs.Info(this, ex.Message, "sys-botbase");
+        }
+    }
+
+    /// <summary>Starts Pokémon Automation's Computer Control (Windows) or links its download, and opens this game's program list.</summary>
+    private async Task PokemonAutomationMenu()
+    {
+        var found = PokemonAutomation.Find() != null;
+        var start = found ? "Start it + programs" : "Download + setup guide";
+        var r = await Dialogs.Show(this,
+            "Pokémon Automation's Computer Control has tested programs for this game (shiny hunts, eggs, raids, saving...). It runs on an " +
+            "UNMODDED Switch through a microcontroller (e.g. an ESP32-S3 with their firmware - not at the same time as pokeldn) plus a capture " +
+            "card, or on a modded Switch through sys-botbase. It's their program, for personal, non-profit use." +
+            (found ? "" : "\n\nIt isn't on this computer yet: download it from their GitHub and unzip it (not into OneDrive)."),
+            "Pokémon Automation", start, "Only the programs", Dialogs.Cancel);
+        if (r == null || r == Dialogs.Cancel) return;
+        try
+        {
+            if (r == start && found) PokemonAutomation.Launch();
+            if (r == start && !found) { PokemonAutomation.Open(PokemonAutomation.Releases); PokemonAutomation.Open(PokemonAutomation.SetupGuide); }
+            PokemonAutomation.Open(PokemonAutomation.ProgramsUrl(_game));
+        }
+        catch (Exception ex) { await Dialogs.Info(this, ex.Message, "Pokémon Automation"); }
+    }
+
     // ================================================================ shiny hunt
     private Card BuildHuntCard()
     {
@@ -134,6 +223,7 @@ public sealed class GamePage : UserControl, IDisposable
         if (options.Count == 0)
         {
             card.Body.Children.Add(Info(HuntService.UnsupportedReason(_game)));
+            if (_game.IsSwitch) AddSwitchTools(card);
             return card;
         }
         var radios = new List<RadioButton>();
@@ -146,7 +236,7 @@ public sealed class GamePage : UserControl, IDisposable
             d.Margin = new Thickness(28, 0, 0, 4);
             card.Body.Children.Add(d);
         }
-        card.Body.Children.Add(Info($"Switch: {AppSettings.Current.SwitchIP}:{AppSettings.Current.SwitchPort} (sys-botbase) - change in Settings."));
+        if (_game.IsSwitch) AddSwitchTools(card);
         var start = new FancyButton("Start hunting", Skin.GlyphPlay, Skin.Accent);
         var stop = new FancyButton("Stop Python hunter", Skin.GlyphStop, Skin.StopRed);
         start.Click += async (_, _) =>
@@ -392,6 +482,13 @@ public sealed class GamePage : UserControl, IDisposable
         card.Body.Children.Add(Skin.Row(Skin.T("Folder", 13, Skin.Text, wrap: false), _recFolder, browse));
         _recButton = new FancyButton("Start recording", Skin.GlyphRecord, Color.FromRgb(190, 30, 50));
         _recButton.Click += async (_, _) => await ToggleRecording();
+        if (_game.IsSwitch && AppSettings.Current.SwitchUsb)
+        {
+            // USB needs the Switch out of the dock: the capture card gets no picture
+            _recButton.IsEnabled = false;
+            card.Body.Children.Add(Info("Recording is off while sys-botbase uses USB (the Switch is out of the dock, so the capture card has no picture). " +
+                                        "Shiny Hunt card → sys-botbase → Use WiFi.", Skin.Warn));
+        }
         var open = new FancyButton("Open folder", Skin.GlyphFolder, Skin.PanelHi);
         open.Click += (_, _) => { if (Directory.Exists(_recFolder.Text)) OsInfo.OpenFolder(_recFolder.Text!); };
         var buttons = Skin.Wrap(_recButton, open);
@@ -463,6 +560,9 @@ public sealed class GamePage : UserControl, IDisposable
             if (await Dialogs.PickFolder(this, "Choose the folder for the recordings (files are numbered automatically)", _recFolder.Text) is not { } f) return;
             _recFolder.Text = f;
         }
+        _recButton.IsEnabled = false;
+        try { if (!await EnsureGameForRecording()) return; }
+        finally { _recButton.IsEnabled = true; }
         var source = Sel(_source) ?? "";
         if (source.Contains("3DS Capture")) { await Launch3DSCapture(); await Task.Delay(1500); }
         _gs.RecordingFolder = _recFolder.Text!;
@@ -581,7 +681,7 @@ public sealed class GamePage : UserControl, IDisposable
     {
         if (_trackLive)
         {
-            if (!HealthMonitor.CanReach(AppSettings.Current.SwitchIP, AppSettings.Current.SwitchPort, 2500))
+            if (!HealthMonitor.SwitchReachable(2500))
                 throw new InvalidOperationException($"Can't reach the Switch at {AppSettings.Current.SwitchIP} - check its IP (Settings, or start a hunt).");
             progress("Reading party and PC boxes from the Switch...");
             var s = AppSettings.Current;
@@ -669,7 +769,7 @@ public sealed class GamePage : UserControl, IDisposable
             Collection owned;
             if (_trackLive)
             {
-                if (manual ? !await IpPrompt.EnsureSwitch(this) : !HealthMonitor.CanReach(AppSettings.Current.SwitchIP, AppSettings.Current.SwitchPort, 2500))
+                if (manual ? !await IpPrompt.EnsureSwitch(this) : !HealthMonitor.SwitchReachable(2500))
                 {
                     Log($"Can't reach the Switch at {AppSettings.Current.SwitchIP}.");
                     _trackError = $"can't reach the Switch at {AppSettings.Current.SwitchIP}";
@@ -933,7 +1033,7 @@ public sealed class GamePage : UserControl, IDisposable
     private async Task<(int? Port, bool Cancelled)> StartSwitchFtpApp(string ip)
     {
         var botPort = AppSettings.Current.SwitchPort;
-        if (!HealthMonitor.CanReach(ip, botPort, 2500)) return (null, false); // no sys-botbase: the user starts the FTP app
+        if (!HealthMonitor.SwitchReachable(2500)) return (null, false); // no sys-botbase: the user starts the FTP app
         if (HuntService.IsPythonHuntRunning())
         {
             await Dialogs.Info(this, "The FireRed/LeafGreen hunter is running on the Switch. Stop the hunt first - ShinyForge won't press " +
@@ -1021,8 +1121,62 @@ public sealed class GamePage : UserControl, IDisposable
         return r == Dialogs.No || (r == Dialogs.Yes && await OpenGameOnSwitch(Status));
     }
 
+    /// <summary>
+    /// Before recording a Switch game: is this game the one on the Switch's screen? Nothing / the FTP app open → it's opened.
+    /// Running but behind the HOME menu → brought back. Another game open:
+    ///   - a Pokémon game ShinyForge can save → asks "save it first?" (Yes = save + close, No = close), then opens this one,
+    ///   - a Pokémon game it can't save → the user saves it, then ShinyForge closes it,
+    ///   - any other game → the user saves and closes it themselves (ShinyForge never closes games it doesn't know).
+    /// Switch not reachable (no IP, offline) → record anyway. False = don't record.
+    /// </summary>
+    private async Task<bool> EnsureGameForRecording()
+    {
+        var s = AppSettings.Current;
+        if (SwitchGameLauncher.TitleIds(_game).Length == 0 || string.IsNullOrWhiteSpace(s.SwitchIP) || HuntService.IsPythonHuntRunning()) return true;
+        Status("Checking which game is on the Switch...");
+        (string? TitleId, bool Homebrew) running;
+        try { running = await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort)); }
+        catch (Exception ex) { Status("Couldn't reach the Switch - recording without checking the game."); AppPaths.Log("Recording: Switch check failed: " + ex.Message); return true; }
+        var mode = SwitchGameLauncher.OtherGame.Refuse;
+        if (running.TitleId is { } id && !running.Homebrew && !SwitchGameLauncher.TitleIds(_game).Contains(id))
+        {
+            var name = SwitchGameLauncher.GameName(id);
+            var head = $"{name} is open on the Switch, not Pokémon {_game.Title}.\n\n";
+            if (SwitchGameLauncher.GameOf(id) == null)
+            {
+                if (await Dialogs.Show(this, head + "Save your progress in it and close it yourself (HOME, X, Close), then press OK - " +
+                                       $"ShinyForge then starts Pokémon {_game.Title} and records.", "Record Gameplay", Dialogs.Ok, Dialogs.Cancel) != Dialogs.Ok)
+                    return false;
+                string? still;
+                try { still = (await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort))).TitleId; }
+                catch { still = null; } // can't tell - opening the game reports it if it's still open
+                if (still == id)
+                {
+                    await Dialogs.Info(this, $"{name} is still open on the Switch - close it, then start recording again.", "Record Gameplay");
+                    return false;
+                }
+            }
+            else if (SwitchGameLauncher.CanSave(id))
+            {
+                var r = await Dialogs.YesNoCancel(this, head + $"Should ShinyForge save {name} before closing it?\n\n" +
+                    $"Yes = save it, close it, then start Pokémon {_game.Title} and record\n" +
+                    "No = close it WITHOUT saving (unsaved progress is lost)", "Record Gameplay");
+                if (r != Dialogs.Yes && r != Dialogs.No) return false;
+                mode = r == Dialogs.Yes ? SwitchGameLauncher.OtherGame.SaveAndClose : SwitchGameLauncher.OtherGame.Close;
+            }
+            else
+            {
+                if (await Dialogs.Show(this, head + $"ShinyForge can't save {name} itself. Save your progress in it now, then press OK - " +
+                                       $"ShinyForge closes it, starts Pokémon {_game.Title} and records.", "Record Gameplay", Dialogs.Ok, Dialogs.Cancel) != Dialogs.Ok)
+                    return false;
+                mode = SwitchGameLauncher.OtherGame.Close;
+            }
+        }
+        return await OpenGameOnSwitch(Status, mode);
+    }
+
     /// <summary>Opens this game on the Switch (closing the FTP app first) and, for FireRed / LeafGreen, loads the save.</summary>
-    private async Task<bool> OpenGameOnSwitch(Action<string> status)
+    private async Task<bool> OpenGameOnSwitch(Action<string> status, SwitchGameLauncher.OtherGame otherGame = SwitchGameLauncher.OtherGame.Refuse)
     {
         var s = AppSettings.Current;
         if (HuntService.IsPythonHuntRunning())
@@ -1032,7 +1186,7 @@ public sealed class GamePage : UserControl, IDisposable
         }
         try
         {
-            await Task.Run(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, _game, m => Dialogs.Ui(() => status(m))));
+            await Task.Run(() => SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, _game, m => Dialogs.Ui(() => status(m)), default, otherGame));
             status($"Pokémon {_game.Title} is open on the Switch" + (_game.Bot == BotKind.FrlgSwitch ? " with your save loaded." : "."));
             return true;
         }

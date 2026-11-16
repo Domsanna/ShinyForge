@@ -96,21 +96,26 @@ class SysBotMemory:
         self.sock.sendall(b"configure echoCommands 0\r\n")  # (no reply)
 
     def cmd(self, text: str) -> str:
+        """One request, one hex answer. A failed request raises IOError and leaves the connection in sync:
+        sys-botbase 2.x answers several error lines ("pmdmnt...", "svc...") plus a blank line - the connection is
+        reopened instead of guessing how many lines are left; sys-botbase-cpp 3.x answers "0"."""
+        line = None
         for attempt in range(2):
             try:
                 if self.sock is None:
                     self._open()
                 self.sock.sendall((text + "\r\n").encode())
                 line = self.f.readline().decode(errors="replace").strip()
-                if line.startswith(("svc", "hid", "dmnt")):  # error replies end with an extra blank line
-                    self.f.readline()
-                    raise IOError(line)
-                return line
-            except OSError:
+                break
+            except OSError:  # connection lost: reconnect once
                 self.close()
                 if attempt:
                     raise
-        raise IOError("unreachable")
+        if line and line != "0" and len(line) % 2 == 0 and all(c in "0123456789abcdefABCDEF" for c in line):
+            return line
+        if line != "0":
+            self.close()  # 2.x error lines (and a blank line) may still be on the way
+        raise IOError(f"sys-botbase: {text.split()[0]} failed ({line or 'no answer'})")
 
     def peek(self, heap_off: int, size: int) -> bytes:
         data = bytes.fromhex(self.cmd(f"peek 0x{heap_off:X} {size}"))
@@ -136,7 +141,11 @@ class GameMemory:
     def locate(self) -> bool:
         if self.offsets:
             return True
-        title = self.mem.cmd("getTitleID").upper()
+        try:
+            title = self.mem.cmd("getTitleID").upper()
+        except OSError:
+            print("  [stats] no game is running on the Switch - stats disabled")
+            return False
         if title not in OFFSETS:
             print(f"  [stats] unknown game title ID {title} - stats disabled")
             return False

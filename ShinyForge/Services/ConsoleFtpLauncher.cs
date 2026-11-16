@@ -38,7 +38,7 @@ public static class ConsoleFtpLauncher
     /// <summary>The title ID of the game running on the Switch, or null if none is open.</summary>
     public static string? RunningGame(string host, int port)
     {
-        using var bot = new SysBotSession(host, port);
+        using var bot = new SysBotSession(host, port, controller: false);
         return bot.TitleId();
     }
 

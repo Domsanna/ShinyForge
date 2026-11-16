@@ -197,15 +197,9 @@ public static class WebServer
         var s = AppSettings.Current;
         try
         {
-            using var c = new TcpClient();
-            if (!c.ConnectAsync(s.SwitchIP, s.SwitchPort).Wait(2500)) return null;
-            c.ReceiveTimeout = 15000;
-            var st = c.GetStream();
-            var cmd = Encoding.ASCII.GetBytes("configure echoCommands 0\r\npixelPeek\r\n");
-            st.Write(cmd, 0, cmd.Length);
-            using var r = new StreamReader(st, Encoding.ASCII);
-            var hex = r.ReadLine()?.Trim();
-            return string.IsNullOrEmpty(hex) || hex.Length % 2 != 0 ? null : Convert.FromHexString(hex);
+            // read-only: the hunter's virtual controller stays attached
+            using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort, controller: false);
+            return bot.Screenshot();
         }
         catch { return null; }
     }

@@ -182,6 +182,9 @@ public static class HuntService
     public static void Start(Game game, string key)
     {
         var s = AppSettings.Current;
+        if (s.SwitchUsb)
+            throw new InvalidOperationException((key == "python" ? "The Python hunter" : "SysBot.exe") + " talks to the Switch over WiFi, but " +
+                "sys-botbase is set to USB. Switch it back to WiFi (Shiny Hunt card → sys-botbase), restart the Switch and dock it.");
         if (key == "python")
         {
             var botDir = AppPaths.FindPythonBotFolder(s.PythonBotFolder)

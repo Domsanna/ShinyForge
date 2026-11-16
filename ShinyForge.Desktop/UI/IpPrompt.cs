@@ -110,11 +110,17 @@ public sealed class IpPrompt : Window
         return ip;
     }
 
-    /// <summary>Makes sure the Switch answers at the saved IP; asks for the new one until it does or the user cancels.</summary>
+    /// <summary>Makes sure the Switch answers at the saved IP (or by USB when that's set); asks for the new IP until it does or the user cancels.</summary>
     public static async Task<bool> EnsureSwitch(Control? owner)
     {
         var s = AppSettings.Current;
-        while (!await Task.Run(() => HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 2500)))
+        if (s.SwitchUsb && !HealthMonitor.SwitchReachable())
+        {
+            await Dialogs.Info(owner, "sys-botbase is set to USB, but no Switch is connected by USB. USB works on Windows only - " +
+                                      "switch back to WiFi: Shiny Hunt card → sys-botbase → WiFi.", "ShinyForge - Switch");
+            return false;
+        }
+        while (!await Task.Run(() => HealthMonitor.SwitchReachable(2500)))
         {
             if (await AskSwitch(owner, string.IsNullOrWhiteSpace(s.SwitchIP)
                     ? "Enter your Switch's IP address (on the Switch: System Settings → Internet)."

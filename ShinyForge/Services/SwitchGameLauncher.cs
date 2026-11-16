@@ -30,11 +30,35 @@ public static class SwitchGameLauncher
     public static string[] TitleIds(Game game) =>
         game.IsSwitch && CheckpointService.TitleIds.TryGetValue(game.Id, out var ids) ? ids : Array.Empty<string>();
 
+    /// <summary>What <see cref="OpenGame"/> does when another game is open: leave it (error), close it, or save it and close it.</summary>
+    public enum OtherGame { Refuse, Close, SaveAndClose }
+
+    /// <summary>The Pokémon game (ShinyForge's catalog) a Switch title ID belongs to, or null (not a Pokémon game).</summary>
+    public static Game? GameOf(string titleId) => GameCatalog.ForSwitch.FirstOrDefault(g => TitleIds(g).Contains(titleId));
+
+    /// <summary>"Pokémon Sword" for a Switch title ID ShinyForge knows, else "another game (title ID)".</summary>
+    public static string GameName(string titleId) => GameOf(titleId) is { } g ? $"Pokémon {g.Title}" : $"another game ({titleId})";
+
+    /// <summary>
+    /// What runs on the Switch: (title ID or null, true when it's really the FTP app / Homebrew Menu). The Homebrew Menu and the
+    /// apps it starts run under the borrowed game's title ID (that's how the R trick works): an FTP server answering means it's
+    /// really ftpd / Checkpoint.
+    /// </summary>
+    public static (string? TitleId, bool Homebrew) Running(string host, int port)
+    {
+        using var bot = new SysBotSession(host, port, controller: false);
+        var id = bot.TitleId();
+        return (id, id != null && ConsoleSdService.FindPort(host) != null);
+    }
+
     /// <summary>
     /// Closes the FTP app / Homebrew Menu (if open), finds <paramref name="game"/> on the HOME menu or in All Software, starts it
-    /// and - for FireRed / LeafGreen - loads the save. Returns the running title ID.
+    /// and - for FireRed / LeafGreen - loads the save. If the game already runs it's brought back on screen (from the HOME menu).
+    /// Another game running: <paramref name="otherGame"/> says whether it's left alone (an error), closed, or saved and closed.
+    /// Returns the running title ID.
     /// </summary>
-    public static string OpenGame(string host, int port, Game game, Action<string>? progress = null, CancellationToken ct = default)
+    public static string OpenGame(string host, int port, Game game, Action<string>? progress = null, CancellationToken ct = default,
+                                  OtherGame otherGame = OtherGame.Refuse)
     {
         var ids = TitleIds(game);
         if (ids.Length == 0) throw new InvalidOperationException($"Pokémon {game.Title} isn't a Switch game ShinyForge can start.");
@@ -45,12 +69,20 @@ public static class SwitchGameLauncher
         var running = bot.TitleId();
         if (running != null)
         {
-            // The Homebrew Menu and the apps it starts run under the borrowed game's title ID (that's how the R trick works):
-            // an FTP server answering means it's really ftpd / Checkpoint.
             var homebrew = ConsoleSdService.FindPort(host) != null;
-            if (ids.Contains(running) && !homebrew) return Ready(bot, game, running, progress, ct); // the game itself already runs
-            if (!homebrew) throw new IOException($"Another game is open on the Switch ({running}). Save and close it, then try again.");
-            progress?.Invoke("Closing the FTP app / Homebrew Menu on the Switch...");
+            if (ids.Contains(running) && !homebrew) // the game itself already runs
+            {
+                ToFront(bot);
+                return Ready(bot, game, running, progress, ct);
+            }
+            if (!homebrew && otherGame == OtherGame.Refuse)
+                throw new IOException($"{GameName(running)} is open on the Switch. Save and close it, then try again.");
+            if (!homebrew && otherGame == OtherGame.SaveAndClose)
+            {
+                progress?.Invoke($"Saving {GameName(running)}...");
+                SaveGame(bot, running, ct);
+            }
+            progress?.Invoke(homebrew ? "Closing the FTP app / Homebrew Menu on the Switch..." : $"Closing {GameName(running)} on the Switch...");
             Close(bot);
         }
 
@@ -86,17 +118,204 @@ public static class SwitchGameLauncher
         return title;
     }
 
-    /// <summary>Closes the running software: HOME, X on its tile, A on "Close". Checks that nothing runs any more.</summary>
+    /// <summary>
+    /// Closes the running software: on the HOME menu (checked on a screenshot - HOME on the HOME menu would go back INTO the
+    /// software, where X and A are game buttons), X, then A on "Close". Checks that nothing runs any more.
+    /// </summary>
     private static void Close(SysBotSession bot)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            bot.Tap("HOME", 1500);
+            var home = HomeShown(bot);
+            if (home == null) { Thread.Sleep(500); continue; } // no screenshot: pressing HOME blindly could open the game again
+            if (home == false)
+            {
+                bot.Tap("HOME", 1500);
+                if (HomeShown(bot) != true) continue;
+            }
             bot.Tap("X", 1200);
             bot.Tap("A", 3500);
             if (bot.TitleId() == null) return;
         }
-        throw new IOException("The app on the Switch didn't close - close it yourself (HOME, X, Close).");
+        throw new IOException("The software on the Switch didn't close - close it yourself (HOME, X, Close).");
+    }
+
+    // ------------------------------------------------------------------ saving the running game
+    /// <summary>
+    /// Can ShinyForge save this running game itself (before closing it)? Only where the save was checked on the real Switch:
+    /// FireRed / LeafGreen (their GBA menus are read from screenshots). Other Pokémon games: the user saves, ShinyForge closes.
+    /// </summary>
+    public static bool CanSave(string titleId) => GameOf(titleId)?.Bot == BotKind.FrlgSwitch;
+
+    /// <summary>
+    /// Saves the running game in-game (it's brought on screen first). Each step is checked on a screenshot; a step that does
+    /// nothing stops with an error, so a game that couldn't be saved is never closed.
+    /// </summary>
+    private static void SaveGame(SysBotSession bot, string titleId, CancellationToken ct)
+    {
+        if (!CanSave(titleId)) throw new IOException($"ShinyForge can't save {GameName(titleId)} - save it yourself.");
+        if (!ToFront(bot)) throw new IOException($"{GameName(titleId)} didn't come back on screen - it wasn't saved or closed.");
+        SaveFrlg(bot, titleId, ct);
+        AppPaths.Log($"Switch: {GameName(titleId)} saved");
+    }
+
+    /// <summary>
+    /// FireRed / LeafGreen: START (+) → SAVE → YES ("Would you like to save the game?") → YES ("There is already a saved file.
+    /// Is it okay to overwrite it?") → "SAVING..." → "... saved the game." → back on the map. Every step is read from a
+    /// screenshot (the GBA picture is drawn at fixed places): the START menu's rows sit 65 px apart from y 68 with the ▶ at
+    /// x 880-906; SAVE is always third from the bottom (…, SAVE, OPTION, EXIT); the YES/NO box and the text box are white.
+    /// Presses get dropped, so nothing is pressed blindly.
+    /// </summary>
+    private static void SaveFrlg(SysBotSession bot, string titleId, CancellationToken ct)
+    {
+        var fail = $"{GameName(titleId)} couldn't be saved - it was left open. Save it yourself (START → SAVE).";
+        var overworld = FrlgOverworld(titleId);
+        if (bot.Peek(overworld, 4) is not { } ow || BitConverter.ToUInt32(ow) == 0) throw new IOException(fail + " (The save isn't loaded.)");
+
+        // the START menu, open with nothing else on screen (a text box: B closes it once). The plain map is remembered: the
+        // text box / YES-NO box are recognised as "much whiter than the map was there", so a bright map isn't taken for them.
+        RgbImage? img = null;
+        double textMap = 0, askMap = 0;
+        var pressedB = false;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            img = Shot(bot) ?? throw new IOException(fail);
+            if (StartMenuRows(img) >= 3) break;
+            double t = White(img, TextBox), q = White(img, AskBox);
+            if ((t > 0.6 || q > 0.6) && !pressedB) { bot.Tap("B", 900); pressedB = true; continue; }
+            (textMap, askMap) = (t, q);
+            bot.Tap("PLUS", 1200);
+        }
+        var rows = StartMenuRows(img!);
+        if (rows < 3) throw new IOException(fail + " (The START menu didn't open - is a battle or a talk going on?)");
+        if (textMap > 0.7 || askMap > 0.7)
+        {
+            bot.Tap("B", 800);
+            throw new IOException(fail + " (The map is too bright here to follow the save on screen - step somewhere darker.)");
+        }
+
+        // ▶ onto SAVE, one press at a time
+        var save = rows - 3;
+        for (var step = 0; ; step++)
+        {
+            var at = MenuArrow(img!, rows);
+            if (at == save) break;
+            if (at < 0 || step > 12) { bot.Tap("B", 800); throw new IOException(fail); }
+            bot.Tap(at < save ? "DDOWN" : "DUP", 450);
+            img = Shot(bot) ?? throw new IOException(fail);
+        }
+        bot.Tap("A", 1200);
+
+        // answer YES to each question until the game is back on the map
+        var yes = 0;
+        var until = DateTime.Now.AddSeconds(30);
+        while (DateTime.Now < until)
+        {
+            ct.ThrowIfCancellationRequested();
+            img = Shot(bot) ?? throw new IOException(fail);
+            var question = White(img, AskBox) > Math.Max(0.6, askMap + 0.25);
+            var text = White(img, TextBox) > Math.Max(0.6, textMap + 0.25);
+            if (question && yes < 3) { bot.Tap("A", 1500); yes++; continue; } // YES is preselected
+            if (!question && !text && StartMenuRows(img) < 3)
+            {
+                if (yes == 0) throw new IOException(fail);
+                return; // "... saved the game." closed by itself: saved
+            }
+            if (!question && !text && yes == 0) { bot.Tap("A", 1200); continue; } // still on SAVE: the A was dropped
+            Thread.Sleep(600);
+        }
+        throw new IOException(fail);
+    }
+
+    /// <summary>The FRLG overworld flag (heap offset): set once the save is loaded. Japanese versions differ.</summary>
+    private static uint FrlgOverworld(string title) => title is "01006FA0233F8000" or "0100F1E0233FA000" ? 0x1222B54u : 0x1222BDCu;
+
+    /// <summary>Where FRLG draws its text box and its YES / NO box (x0, x1, y0, y1 on the 1280×720 screenshot).</summary>
+    private static readonly (int X0, int X1, int Y0, int Y1) TextBox = (220, 1080, 540, 650), AskBox = (850, 1050, 305, 465);
+
+    private static double White(RgbImage img, (int X0, int X1, int Y0, int Y1) box) => White(img, box.X0, box.X1, box.Y0, box.Y1);
+
+    /// <summary>Share of near-white pixels in a box (every 6th pixel).</summary>
+    private static double White(RgbImage img, int x0, int x1, int y0, int y1)
+    {
+        int white = 0, n = 0;
+        for (var y = y0; y <= y1; y += 6)
+        for (var x = x0; x <= x1; x += 6, n++)
+        {
+            var i = (y * img.Width + x) * 3;
+            if (img.Pixels[i] > 225 && img.Pixels[i + 1] > 225 && img.Pixels[i + 2] > 225) white++;
+        }
+        return n == 0 ? 0 : (double)white / n;
+    }
+
+    private static int RowY(int row) => 68 + 65 * row;
+
+    private static int DarkIn(RgbImage img, int x0, int x1, int y0, int y1)
+    {
+        var dark = 0;
+        for (var y = y0; y <= y1; y += 2)
+        for (var x = x0; x <= x1; x += 2)
+        {
+            var i = (y * img.Width + x) * 3;
+            if (img.Pixels[i] < 120 && img.Pixels[i + 1] < 120 && img.Pixels[i + 2] < 120) dark++;
+        }
+        return dark;
+    }
+
+    /// <summary>FRLG START menu open: how many rows it has (0 = not open). Its box is white at the top right.</summary>
+    internal static int StartMenuRows(RgbImage img)
+    {
+        if (img.Width < 1280 || img.Height < 720 || White(img, 900, 1100, 40, 50) < 0.5) return 0;
+        var rows = 0;
+        while (rows < 8 && RowY(rows) + 16 < 520 && DarkIn(img, 910, 1150, RowY(rows) - 10, RowY(rows) + 10) > 6) rows++;
+        return rows;
+    }
+
+    /// <summary>Which START-menu row the ▶ is on, or -1.</summary>
+    internal static int MenuArrow(RgbImage img, int rows)
+    {
+        int best = -1, most = 4;
+        for (var r = 0; r < rows; r++)
+        {
+            var d = DarkIn(img, 880, 906, RowY(r) - 12, RowY(r) + 12);
+            if (d > most) { most = d; best = r; }
+        }
+        return best;
+    }
+
+    /// <summary>The running game is suspended behind the HOME menu → HOME brings it back on screen. True = the game is on screen.</summary>
+    private static bool ToFront(SysBotSession bot)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var home = HomeShown(bot);
+            if (home == false) return true;
+            if (home == true) bot.Tap("HOME", 2000);
+            else Thread.Sleep(500); // no screenshot: don't press blindly
+        }
+        return false;
+    }
+
+    /// <summary>Is the HOME menu on screen? Null = no screenshot (don't guess).</summary>
+    private static bool? HomeShown(SysBotSession bot) => Shot(bot) is { } img ? IsHomeMenu(img) : null;
+
+    /// <summary>
+    /// The HOME menu is on screen: its thin divider line above the button hints (y ≈ 647) runs across the whole screen in one
+    /// colour, with plain background just above and below it. Games don't draw that.
+    /// </summary>
+    internal static bool IsHomeMenu(RgbImage img)
+    {
+        if (img.Width < 1280 || img.Height < 720) return false;
+        int Px(int x, int y, int c) => img.Pixels[(y * img.Width + x) * 3 + c];
+        bool Same(int x1, int y1, int x2, int y2, int tol) => Enumerable.Range(0, 3).All(c => Math.Abs(Px(x1, y1, c) - Px(x2, y2, c)) <= tol);
+        for (var y = 640; y <= 655; y++)
+        {
+            var line = true;
+            for (var x = 40; x <= 1240 && line; x += 8)
+                line = Same(x, y, 640, y, 20) && Same(x, y - 6, 640, y - 6, 12) && Same(x, y + 6, 640, y + 6, 12) && !Same(x, y, x, y - 6, 60);
+            if (line && Same(640, y - 6, 640, y + 6, 12) && Same(640, y - 6, 20, 120, 12)) return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ the HOME menu
@@ -160,15 +379,17 @@ public static class SwitchGameLauncher
             if (IsIcon(img, box, icons)) return true;
             var before = ConsoleFtpLauncher.Fingerprint(img, Inner(box));
             Box? next = null;
-            for (var tries = 0; tries < 2 && next == null; tries++)
+            // WiFi drops presses now and then (two in a row seen on the real Switch): up to 4 tries before giving up
+            for (var tries = 0; tries < 4 && next == null; tries++)
             {
-                bot.Tap("DRIGHT", 450);
+                bot.Tap("DRIGHT", 550);
                 var now = Shot(bot) ?? throw new IOException("Couldn't take a screenshot of the Switch.");
                 var b = SelectedBox(now);
                 if (b == null) { img = now; return false; }           // "All Software" (a circle, no tile frame) is selected
                 if (ConsoleFtpLauncher.Difference(ConsoleFtpLauncher.Fingerprint(now, Inner(b.Value)), before) > 3) { img = now; next = b; }
             }
-            if (next == null) return false; // the cursor doesn't move any more
+            // 4 presses and the cursor never moved: the Switch isn't taking the controller - say so instead of "not installed"
+            if (next == null) throw new IOException("The Switch doesn't react to ShinyForge's button presses on the HOME menu. Check the WiFi and try again.");
             box = next.Value;
         }
         return false;
@@ -340,7 +561,7 @@ public static class SwitchGameLauncher
     /// </summary>
     private static void LoadFrlgSave(SysBotSession bot, string title, Action<string>? progress, CancellationToken ct)
     {
-        var overworld = title is "01006FA0233F8000" or "0100F1E0233FA000" ? 0x1222B54u : 0x1222BDCu;
+        var overworld = FrlgOverworld(title);
         bool Loaded() => bot.Peek(overworld, 4) is { } b && BitConverter.ToUInt32(b) != 0;
         if (Loaded()) return; // already in the game
         progress?.Invoke("Loading your save (pressing A through the title screen)...");

@@ -378,6 +378,13 @@
     <li><b>Segment length</b>: 5–30 minutes per file.</li>
     <li><b>Folder</b>: where the files go. A new recording carries on the numbering.</li>
     <li>On 3DS game pages, <b>Open 3DS Capture</b> launches the capture program.</li>
+    <li><b>Switch games: the right game first.</b> Before a Switch recording starts, ShinyForge checks which game runs on the Switch (over WiFi, if you set the Switch's IP). If nothing or the FTP app is open, it starts your game. If your game is waiting behind the HOME menu, it brings it back. If another game is open:
+      <ul>
+        <li><b>FireRed / LeafGreen</b>: ShinyForge asks whether to save it first. <i>Yes</i> saves it in the game (START → SAVE), closes it and starts your game. <i>No</i> closes it without saving.</li>
+        <li><b>Other Pokémon games</b>: save it yourself, press OK, and ShinyForge closes it and starts your game.</li>
+        <li><b>Any other game</b>: save and close it yourself (HOME, X, Close), then press OK. ShinyForge never closes a game it doesn't know.</li>
+      </ul>
+      If the Switch can't be reached, the recording starts without the check.</li>
   </ul>
   <h3>Shiny clips <span class="badge on">on by default</span></h3>
   <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>. The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
@@ -608,6 +615,17 @@
     <li>Enter the address in ShinyForge under <b>Settings → Switch IP address</b> (port <code>6000</code>). If you start a hunt without it, ShinyForge asks for it.</li>
     <li>Keep the Switch and PC on the same network. Turn off the Switch's sleep mode while hunting.</li>
   </ol>
+  <h3>Optional: sys-botbase-cpp</h3>
+  <div class="callout warn"><strong>Check screenshots after installing</strong>On some consoles sys-botbase-cpp 3.33 can't take screenshots over WiFi, and after one try it stops answering until the Switch restarts. ShinyForge needs screenshots to open games, find the FTP app and save. After the restart, open <b>sys-botbase</b> again: ShinyForge tests a screenshot and, if it fails, offers <b>Restore previous sys-botbase</b>. Start the FTP app yourself first (hold R while starting a game → ftpd), then restart the Switch. The original sys-botbase stays the safe choice.</div>
+  <p>Pokémon Automation's <b>sys-botbase-cpp</b> (<a href="https://github.com/PokemonAutomation/sys-botbase-cpp">github.com/PokemonAutomation/sys-botbase-cpp</a>, GPL-3.0) is a rewrite of sys-botbase with the same commands. It uses less memory, fixes a bug that could randomly crash the Switch, times button presses exactly, writes a log file to <code>atmosphere/contents/430000000000000B/log.txt</code>, and can talk over a USB cable. On any Switch game page, <b>Shiny Hunt card → sys-botbase</b> shows which version your Switch runs. Its <b>Install sys-botbase-cpp</b> button downloads the latest release from GitHub, starts the FTP app, backs up your current sys-botbase into <code>Data\Backups</code> and copies the new one onto the SD card. Close your game first, then restart the Switch when it's done.</p>
+  <h3>WiFi or USB</h3>
+  <ul>
+    <li><b>WiFi</b> (default): the Switch stays docked, so recording, shiny clips and the Python hunter all work.</li>
+    <li><b>USB</b> (Windows, sys-botbase-cpp): <b>sys-botbase → Use USB</b>, restart the Switch, take it out of the dock and plug it into the PC with a USB-C cable. The first time, install the WinUSB driver for "Nintendo Switch" (057E 3000) with <a href="https://zadig.akeo.ie">Zadig</a>. USB doesn't depend on WiFi, but there's no capture card picture without the dock, so recording is off, and the Python hunter and SysBot.exe need WiFi. sys-botbase listens on one of the two at a time. If only the other one answers (before the restart, say), ShinyForge switches to it by itself.</li>
+    <li>If the Switch keeps dropping off the network (Switch error <b>2124-4508</b>), that's its WiFi connection: move it closer to the router or use a wired LAN adapter in the dock.</li>
+  </ul>
+  <h3>Unmodified Switch: Pokémon Automation</h3>
+  <p><a href="https://pokemonautomation.github.io/">Pokémon Automation</a>'s <b>Computer Control</b> has tested programs for every Switch Pokémon game (shiny hunts, eggs, raids, auto-saving). It runs on an <b>unmodified</b> Switch through a microcontroller acting as a controller (ESP32-S3, Raspberry Pi Pico W and others, flashed with their firmware) plus your capture card, or on a modded Switch through sys-botbase. ShinyForge doesn't include any of it. Download it from <a href="https://github.com/PokemonAutomation/ComputerControl/releases/latest">their GitHub</a> and unzip it into Downloads, Desktop or Documents (not OneDrive). The <b>Pokémon Automation</b> button on each Switch game page then starts it and opens that game's program list. An ESP32-S3 can't run pokeldn and Pokémon Automation's firmware at the same time. Their programs are for personal, non-profit use. Ask their Discord admins about anything else.</p>
   <h3>Nintendo 3DS (Luma3DS / Rosalina)</h3>
   <ol class="steps">
     <li>Your 3DS needs <b>Luma3DS</b> custom firmware, on the same WiFi as your PC.</li>
@@ -721,6 +739,10 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
   <div class="table-wrap"><table class="credits">
     <tr><th>Project</th><th>By</th><th>Used for</th></tr>
     <tr><td>sys-botbase</td><td>olliz0r and contributors</td><td>Talking to the Switch over WiFi: buttons, memory and screenshots</td></tr>
+    <tr><td>sys-botbase-cpp</td><td>Pokémon Automation (C++ rewrite of sys-botbase / usb-botbase; thanks to olliz0r, berichan, jakibaki, FishGuy, Mysticial). GPL-3.0</td><td>Optional sys-botbase replacement: installed (and restored) by ShinyForge, WiFi or USB</td></tr>
+    <tr><td>usb-botbase protocol</td><td>Koi-3088, as spoken by SysBot.NET</td><td>ShinyForge's USB connection to the Switch</td></tr>
+    <tr><td>Pokémon Automation Computer Control</td><td>The Pokémon Automation team (Mysticial and contributors). Personal, non-profit use</td><td>Linked and started from ShinyForge for unmodified Switches (not bundled)</td></tr>
+    <tr><td>Zadig</td><td>Pete Batard (Akeo). GPL-3.0</td><td>Installs the WinUSB driver for the USB connection (you run it yourself)</td></tr>
     <tr><td>Atmosphère</td><td>SciresM and the Atmosphère-NX contributors. GPL-2.0</td><td>Switch custom firmware that runs sys-botbase</td></tr>
     <tr><td>SysBot.NET</td><td>Kurt (kwsch) and contributors. AGPL-3.0</td><td>The bot framework behind SysBot.exe</td></tr>
     <tr><td>Sys-EncounterBot.NET</td><td>Manu098vm and contributors (a SysBot.NET fork)</td><td>Encounter bots for Let's Go, Sword/Shield, BD/SP, plus the FRLG routine</td></tr>

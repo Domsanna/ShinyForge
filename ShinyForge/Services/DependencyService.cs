@@ -28,8 +28,10 @@ public sealed class Dependency
     public bool CanAutoInstall => WingetId != null || Name is "PKHeX" or "SysBot.exe" or "pokeldn" or "esptool";
     /// <summary>Only needed once the user set up that feature (the ESP32-S3 trades): not reported as missing before.</summary>
     public bool OnlyAfterSetup { get; init; }
+    /// <summary>Nice to have, never needed by ShinyForge itself: not reported as missing (e.g. Pokémon Automation).</summary>
+    public bool Optional { get; init; }
     /// <summary>Should a missing copy be reported / installed by "Install all"?</summary>
-    public bool Wanted => !OnlyAfterSetup || AppSettings.Current.PokeldnSetupDone;
+    public bool Wanted => !Optional && (!OnlyAfterSetup || AppSettings.Current.PokeldnSetupDone);
     /// <summary>Can only be installed by hand (paid software or no public download).</summary>
     public bool ManualOnly => !CanAutoInstall;
 }
@@ -37,8 +39,7 @@ public sealed class Dependency
 /// <summary>Checks the outside programs ShinyForge relies on, installs/updates them (winget or download), and checks for updates.</summary>
 public static class DependencyService
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
-    static DependencyService() => Http.DefaultRequestHeaders.UserAgent.ParseAdd("ShinyForge/1.0");
+    private static readonly HttpClient Http = WebClients.Make(TimeSpan.FromSeconds(20), githubJson: false);
 
     /// <summary>The outside programs for this OS.</summary>
     public static readonly List<Dependency> All = OsInfo.IsWindows ? WindowsTools() : UnixTools();
@@ -74,6 +75,8 @@ public static class DependencyService
                 Locate = () => Type.GetTypeFromProgID("Excel.Application") != null ? "Excel" : null },
         new() { Name = "Python 3", Purpose = "Runs the ShinyForge Python hunting bot (Switch FireRed/LeafGreen)", WingetId = "Python.Python.3.13", For3DS = false, ExeNames = new[] { "python.exe" },
                 ManualUrl = "https://www.python.org/downloads/", Locate = FindPython },
+        new() { Name = "Pokémon Automation", Purpose = "Pokémon Automation's Computer Control: tested programs for every Switch Pokémon game, on an unmodded Switch (microcontroller + capture card) or through sys-botbase. Personal, non-profit use", For3DS = false,
+                ExeNames = new[] { "SerialPrograms-Windows.cmd" }, Optional = true, ManualUrl = PokemonAutomation.Releases, Locate = PokemonAutomation.Find },
         new() { Name = "SysBot.exe", Purpose = "Sys-EncounterBot with the Switch bots (FRLG, Let's Go, SwSh, BDSP)", For3DS = false, ExeNames = new[] { "SysBot.exe" },
                 ManualUrl = "https://github.com/Manu098vm/Sys-EncounterBot.NET/releases/latest",
                 Locate = () => File.Exists(AppSettings.Current.SysBotPath) ? AppSettings.Current.SysBotPath : null },
@@ -238,9 +241,8 @@ public static class DependencyService
 
         progress($"Downloading Sys-EncounterBot.NET {tag}...");
         var zipPath = Path.Combine(Path.GetTempPath(), $"Sys-EncounterBot-{tag}.zip");
-        using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
+        using (var http = WebClients.Make(TimeSpan.FromMinutes(5), githubJson: false))
         {
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("ShinyForge/1.0");
             await File.WriteAllBytesAsync(zipPath, await http.GetByteArrayAsync(url));
         }
 

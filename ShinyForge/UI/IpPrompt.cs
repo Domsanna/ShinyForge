@@ -121,14 +121,25 @@ public sealed class IpPrompt : Form
         return f.Ip;
     }
 
+    /// <summary>What to do when sys-botbase is set to USB but no Switch is plugged in.</summary>
+    internal const string UsbMissing =
+        "sys-botbase is set to USB, but no Switch is connected by USB.\n\nPlug the Switch (out of the dock) into this PC with a USB-C " +
+        "cable. The first time, install the WinUSB driver for \"Nintendo Switch\" with Zadig (zadig.akeo.ie). To use WiFi again: Shiny " +
+        "Hunt card → sys-botbase → WiFi.";
+
     /// <summary>
-    /// Makes sure the Switch answers (sys-botbase) at the saved IP; if not, asks for the new one until it does or the user
-    /// cancels. True when the Switch can be reached.
+    /// Makes sure the Switch answers (sys-botbase) at the saved IP - or by USB when that's set; if not, asks for the new IP
+    /// until it does or the user cancels. True when the Switch can be reached.
     /// </summary>
     public static bool EnsureSwitch(IWin32Window? owner)
     {
         var s = AppSettings.Current;
-        while (!HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 2500))
+        if (s.SwitchUsb && !HealthMonitor.SwitchReachable())
+        {
+            MessageBox.Show(owner, UsbMissing, "ShinyForge - Switch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+        while (!HealthMonitor.SwitchReachable(2500))
         {
             if (AskSwitch(owner, string.IsNullOrWhiteSpace(s.SwitchIP)
                     ? "Enter your Switch's IP address (on the Switch: System Settings → Internet)."
