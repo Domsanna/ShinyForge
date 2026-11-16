@@ -1,4 +1,4 @@
-using PKHeX.Core;
+﻿using PKHeX.Core;
 
 namespace ShinyForge.Services.ThreeDS;
 
@@ -20,6 +20,7 @@ public static class VirtualConsoleGb
         "news", "ndm", "friends", "boss", "act", "http", "ssl", "ps", "nwm", "mic", "ir", "mvd", "qtm", "dlp", "err", "menu", "rosalina",
         "pdn", "gpio", "spi", "codec", "mp", "nfc", "camera", "socket", "srv", "dmnt", "swkbd", "erreula", "mint", "extrapad", "memolib",
         "mset", "dlpclnt", "pnote", "rnote", "miiplugin", "bootnand", "processmanager", "",
+        "ro", "ldr", "cdc", "plgldr", // "ro" starts on demand AFTER the game, so it's newer than the game's process
     };
 
     /// <summary>Candidate processes for the VC game: not a system module, newest (highest pid) first.</summary>
@@ -53,7 +54,11 @@ public static class VirtualConsoleGb
         return null;
     }
 
-    /// <summary>Does <paramref name="d"/> hold the Game Boy's 0xC000 at index <paramref name="b"/>? (the party list must check out)</summary>
+    /// <summary>
+    /// Does <paramref name="d"/> hold the Game Boy's 0xC000 at index <paramref name="b"/>? Every party Pokémon must check out
+    /// (species list, 0xFF end, each party struct's species and level 1-100) and the trainer name must be real text
+    /// (a first real test on hardware matched random bytes with only the first Pokémon checked).
+    /// </summary>
     internal static bool IsWram(byte[] d, int b, GbMap m)
     {
         var pc = b + (m.PartyCount - GbMap.WramStart);
@@ -66,10 +71,27 @@ public static class VirtualConsoleGb
             if (m.Gen == 1 ? SpeciesConverter.GetNational1(s) == 0 : s > 251 && s != 0xFD) return false; // 0xFD = an egg (Gen 2)
         }
         if (d[pc + 1 + n] != 0xFF) return false;
-        var mon = b + (m.PartyMons - GbMap.WramStart);
-        if (d[pc + 1] != 0xFD && d[mon] != d[pc + 1]) return false;
-        var level = d[mon + (m.Gen == 1 ? 0x21 : 0x1F)];
-        return level is >= 1 and <= 100;
+        int size = m.Gen == 1 ? 0x2C : 0x30, levelAt = m.Gen == 1 ? 0x21 : 0x1F;
+        for (var i = 0; i < n; i++)
+        {
+            var mon = b + (m.PartyMons - GbMap.WramStart) + i * size;
+            var listed = d[pc + 1 + i];
+            if (listed != 0xFD && d[mon] != listed) return false; // an egg's struct holds the species inside, not 0xFD
+            if (d[mon + levelAt] is < 1 or > 100) return false;
+        }
+        return IsName(d, b + (m.PlayerName - GbMap.WramStart));
+    }
+
+    /// <summary>English Game Boy text of 1-7 characters ended by 0x50 (letters, digits, space and the punctuation at 0x7F-0xFF).</summary>
+    internal static bool IsName(byte[] d, int at)
+    {
+        for (var i = 0; i < 8; i++)
+        {
+            var c = d[at + i];
+            if (c == 0x50) return i > 0;
+            if (c < 0x7F) return false;
+        }
+        return false;
     }
 
     /// <summary>The wild Pokémon of the current wild battle (null outside battles and in trainer battles).</summary>

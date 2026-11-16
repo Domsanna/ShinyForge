@@ -2,6 +2,15 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 12)
+
+### New
+- **3DS Virtual Console: ShinyForge opens the game.** If the Game Boy game isn't running (or is still on its title screen), **Test connection** and **Start hunting** press A on the HOME Menu to start the selected game or go back to a suspended one. Then they go through the title screen and CONTINUE and search again. Luma's debugger can't start Virtual Console games itself, because they use APT, so buttons are used.
+
+### Fixed
+- **3DS Virtual Console: wrong memory found on a real 3DS.** The first test on hardware took the system module `ro` for the game and then matched random bytes ("Trainer ????9999999"). `ro` is now skipped. The Game Boy memory must now pass more checks: every party Pokémon (species and level), not just the first, plus a real trainer name.
+- The 3DS's processes and where the Game Boy memory was found (and how long the search took) are written to `shinyforge.log`, to find the Virtual Console game's real process name.
+
 ## 1.0 (build 11)
 
 ### New

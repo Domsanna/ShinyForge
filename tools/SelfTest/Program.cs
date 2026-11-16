@@ -1,4 +1,4 @@
-using PKHeX.Core;
+﻿using PKHeX.Core;
 using ShinyForge.Core;
 using ShinyForge.Services;
 using ShinyForge.UI;
@@ -311,11 +311,26 @@ if (tests.Contains("3dsvc"))
     const uint regionStart = 0x08000000, wramAt = 0x08123457; // not aligned on purpose
     var region = new byte[0x200000];
     var decoy = new byte[0x40000];
-    void Put(uint gbAddr, params byte[] b) => b.CopyTo(region, (int)(wramAt - regionStart) + gbAddr - 0xC000);
-    Put(map.PartyCount, 2, 155, 158, 0xFF);                    // Cyndaquil, Totodile
-    Put(map.PartyMons, 155); Put((ushort)(map.PartyMons + 0x1F), 14); // first party Pokémon: species + level 14
-    Put(map.PlayerId, 0x30, 0x39);                              // ID 12345
-    Put(map.PlayerName, 0x83, 0x8E, 0x8C, 0x50);                // "DOM"
+    void PutAt(uint wram, uint gbAddr, params byte[] b) => b.CopyTo(region, (int)(wram - regionStart) + gbAddr - 0xC000);
+    void Put(uint gbAddr, params byte[] b) => PutAt(wramAt, gbAddr, b);
+    void Party(uint wram)
+    {
+        PutAt(wram, map.PartyCount, 2, 155, 158, 0xFF);                                          // Cyndaquil, Totodile
+        PutAt(wram, map.PartyMons, 155); PutAt(wram, (ushort)(map.PartyMons + 0x1F), 14);       // species + level 14
+        PutAt(wram, (ushort)(map.PartyMons + 0x30), 158); PutAt(wram, (ushort)(map.PartyMons + 0x30 + 0x1F), 9);
+    }
+    // a decoy found on real hardware: a party that checks out but no trainer name behind it (must be skipped)
+    Party(0x08010001);
+    PutAt(0x08010001, map.PlayerName, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08);
+    // the game starts CLOSED: its RAM appears when the bot presses A on the HOME Menu (then the bot goes through the title screen)
+    var vcOpen = false; var vcSettled = false;
+    void OpenGame()
+    {
+        Party(wramAt);
+        Put(map.PlayerId, 0x30, 0x39);                              // ID 12345
+        Put(map.PlayerName, 0x83, 0x8E, 0x8C, 0x50);                // "DOM"
+        vcOpen = true;
+    }
     decoy[0x100] = 3; decoy[0x101] = 1; decoy[0x102] = 0xFF;    // a broken party-like pattern (count 3, but 0xFF too early)
     // encounters: Suicune (DVs 0x5A 0x3C), Raikou, Entei with DVs Atk 10 Def 10 / Spe 10 Spc 10 = shiny
     var wild = new (byte Species, byte Level, byte Dv0, byte Dv1)[] { (245, 40, 0x5A, 0x3C), (243, 40, 0x7B, 0x21), (244, 40, 0xAA, 0xAA) };
@@ -336,8 +351,9 @@ if (tests.Contains("3dsvc"))
             lastHidVc = hid;
             lock (region)
             {
+                if (!vcOpen) { if ((pressed & 1) != 0) OpenGame(); continue; }                                    // HOME Menu: A opens the game
                 if ((~hid & 0x00F) == 0x00F && (pressed & 0x00F) != 0) { Put(map.BattleFlag, 0); resetsVc++; aVc = 0; } // A+B+Start+Select
-                else if ((pressed & 1) != 0 && region[(int)(wramAt - regionStart) + map.BattleFlag - 0xC000] == 0 && ++aVc >= 3 && nextVc < wild.Length)
+                else if ((pressed & 1) != 0 && vcSettled && region[(int)(wramAt - regionStart) + map.BattleFlag - 0xC000] == 0 && ++aVc >= 3 && nextVc < wild.Length)
                 {
                     var w = wild[nextVc++];
                     Put(map.Enemy, w.Species);
@@ -354,6 +370,7 @@ if (tests.Contains("3dsvc"))
     _ = Task.Run(() =>
     {
         using var client = listenerVc.AcceptTcpClient();
+        client.NoDelay = true; // otherwise delayed ACKs make the full-memory search take minutes
         var s = client.GetStream();
         void Send(string payload)
         {
@@ -380,7 +397,7 @@ if (tests.Contains("3dsvc"))
                      "<item><column name=\"pid\">0x20</column><column name=\"command\">menu</column></item>" +
                      "<item><column name=\"pid\">0x2c</column><column name=\"command\">QBRA</column></item></osdata>");
             else if (cmd.StartsWith("qRcmd,")) Send(Convert.ToHexString(System.Text.Encoding.ASCII.GetBytes(regionText)).ToLowerInvariant());
-            else if (cmd.StartsWith("vAttach")) Send("T05");
+            else if (cmd.StartsWith("vAttach")) { lock (region) if (vcOpen && !vcSettled) { vcSettled = true; aVc = 0; } Send("T05"); } // title-screen A presses don't count
             else if (cmd.StartsWith("vCont")) { }
             else if (cmd.StartsWith("D")) Send("OK");
             else if (cmd.StartsWith("m"))
@@ -428,14 +445,17 @@ if (tests.Contains("3dsvc"))
     if (File.Exists(logVc)) File.Delete(logVc);
     var botVc = new ShinyForge.Services.ThreeDS.Bot3DS(new ShinyForge.Services.ThreeDS.Bot3DSOptions
     {
-        Host = "127.0.0.1", Mode = ShinyForge.Services.ThreeDS.Hunt3DSMode.StaticSoftReset, ResetWaitMs = 500, LogFile = logVc,
+        Host = "127.0.0.1", Mode = ShinyForge.Services.ThreeDS.Hunt3DSMode.StaticSoftReset, ResetWaitMs = 500, OpenGameWaitMs = 500, LogFile = logVc,
     });
     var shinyVc = false;
     botVc.Log += m => Console.WriteLine("   3DS: " + m.Replace("\n", "\n        "));
     botVc.Encounter += (pk, stop) => shinyVc |= stop && pk.IsShiny;
     var gameVc = botVc.Connect("gbc_crystal");
     Check(gameVc.ShinyForgeId == "gbc_crystal" && botVc.Trainer is { Name: "DOM", TID: 12345 },
-        $"Virtual Console: {gameVc.Name} found by its Game Boy RAM; trainer {botVc.Trainer.Name} {botVc.Trainer.TID}");
+        $"Virtual Console: {gameVc.Name} opened from the HOME Menu, found by its Game Boy RAM (decoy without a name skipped); trainer {botVc.Trainer.Name} {botVc.Trainer.TID}");
+    Check(ShinyForge.Services.ThreeDS.VirtualConsoleGb.Candidates(new[] { new ShinyForge.Services.ThreeDS.GdbProcess(43, "trl", ""),
+            new ShinyForge.Services.ThreeDS.GdbProcess(45, "ro", "") }).Select(p => p.Name).SequenceEqual(new[] { "trl" }),
+        "the on-demand system module 'ro' (newer than the game) is never taken for the game");
     var runVc = Task.Run(() => botVc.Run(new CancellationTokenSource(TimeSpan.FromMinutes(2)).Token));
     runVc.Wait(TimeSpan.FromMinutes(2.5));
     botVc.Close();

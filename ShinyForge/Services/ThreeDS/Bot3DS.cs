@@ -13,6 +13,7 @@ public sealed class Bot3DSOptions
     public bool WalkHorizontal { get; set; } = true;
     public int WalkMs { get; set; } = 450;
     public int ResetWaitMs { get; set; } = 9000;     // after L+R+Start+Select before mashing A through the title screen
+    public int OpenGameWaitMs { get; set; } = 10_000; // Virtual Console: HOME Menu A → the game's title screen
     public int EncounterTimeoutMs { get; set; } = 90_000;
     public string LogFile { get; set; } = Path.Combine(AppPaths.DataDir, "3ds_encounters.csv");
     /// <summary>Extra stop rules (natures / IVs / species, from Hunt options). Returns why to stop, or null.</summary>
@@ -64,26 +65,60 @@ public sealed class Bot3DS
         return Game;
     }
 
-    /// <summary>Virtual Console: try the newest non-system processes until one holds the Game Boy RAM (the search runs once).</summary>
+    /// <summary>
+    /// Virtual Console: try the newest non-system processes until one holds the Game Boy RAM (the search runs once). If none does,
+    /// the game isn't open (or is still on its title screen): open it from the HOME Menu, go through the title screen and CONTINUE,
+    /// and search again.
+    /// </summary>
     private void ConnectVirtualConsole(List<GdbProcess> procs)
+    {
+        var list = string.Join(", ", procs.Select(p => $"{p.Name}({p.Pid})"));
+        AppPaths.Log("3DS bot: processes: " + list);
+        if (TryFindVirtualConsole(procs)) return;
+
+        OpenGameFromHome();
+        if (TryFindVirtualConsole(_gdb!.ListProcesses())) return;
+        throw new InvalidOperationException($"Couldn't find {Game!.Name}'s memory on the 3DS, even after trying to open it. " +
+                                            $"On the HOME Menu put the cursor on {Game.Name} (or start it yourself), CONTINUE into your save " +
+                                            "(with at least one Pokémon in your party), then connect again.");
+    }
+
+    private bool TryFindVirtualConsole(List<GdbProcess> procs)
     {
         foreach (var proc in VirtualConsoleGb.Candidates(procs).Take(3))
         {
             _gdb!.Attach(proc.Pid);
             Say($"Looking for {Game!.Name} in process {proc.Name} (pid {proc.Pid})...");
-            if (_wram is { } known && Probe(known)) { Say($"Game Boy RAM at 0x{known:X8} (remembered)."); ReadTrainer(); return; }
+            if (_wram is { } known && Probe(known)) { Say($"Game Boy RAM at 0x{known:X8} (remembered)."); ReadTrainer(); return true; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var found = VirtualConsoleGb.FindWram(_gdb, Game.Gb!, Say);
             if (found != null)
             {
                 _wram = found;
-                Say($"Detected {Game.Name}: Game Boy RAM at 0x{found:X8} in process {proc.Name}.");
+                Say($"Detected {Game.Name}: Game Boy RAM at 0x{found:X8} in process {proc.Name} (found in {sw.Elapsed.TotalSeconds:0} s).");
+                AppPaths.Log($"3DS bot: VC process '{proc.Name}' pid {proc.Pid}, WRAM 0x{found:X8}, search {sw.Elapsed.TotalSeconds:0.0} s");
                 ReadTrainer();
-                return;
+                return true;
             }
             _gdb.Detach();
         }
-        throw new InvalidOperationException($"Couldn't find {Game!.Name}'s memory on the 3DS. Start the game, CONTINUE into your save " +
-                                            "(with at least one Pokémon in your party), then connect again.");
+        return false;
+    }
+
+    /// <summary>
+    /// Opens the game when it isn't running: on the HOME Menu, A starts the selected title (the cursor stays on the game played
+    /// last) or resumes a suspended one. Luma's debugger can launch titles too (vRun), but not ones that use APT like VC games,
+    /// so the buttons are used. Then A through the title screen and CONTINUE, and B to close the "previous save" box.
+    /// </summary>
+    private void OpenGameFromHome()
+    {
+        Say($"{Game!.Name} doesn't seem to be open - opening it from the HOME Menu (A on the selected icon)...");
+        _input!.Press(N3DSButton.A, 150, 0);
+        Thread.Sleep(_o.OpenGameWaitMs); // HOME Menu → game boots → Game Boy logo
+        Say("Going through the title screen and CONTINUE...");
+        for (int i = 0; i < 10; i++) _input.Press(N3DSButton.A, 120, 900);
+        for (int i = 0; i < 3; i++) _input.Press(N3DSButton.B, 120, 500);
+        Thread.Sleep(1500);
     }
 
     /// <summary>Is the remembered Game Boy RAM still there (the party list checks out)?</summary>
