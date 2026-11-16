@@ -5,12 +5,18 @@ namespace ShinyForge.Services;
 
 public enum HealthState { Ok, Warning, Error }
 
-public sealed record HealthItem(string Feature, HealthState State, string Message, DateTime When);
+/// <summary>One problem. <see cref="Details"/> holds extra text for error reports (e.g. the stack trace of a crash).</summary>
+public sealed record HealthItem(string Feature, HealthState State, string Message, DateTime When, string? Details = null)
+{
+    /// <summary>Stops or endangers hunting / playing / saves (see <see cref="ErrorDoctor.AffectsGameplay"/>); other problems are only logged.</summary>
+    public bool AffectsGameplay => ErrorDoctor.AffectsGameplay(this);
+}
 
 /// <summary>
 /// Program-wide safety net. Every minute it runs a check for every feature that's in use (hunting bots, recording,
 /// collection monitoring, connections to the Switch/3DS, disk space, program files) and collects problems that features
-/// report themselves (bot warnings, unexpected errors). New problems raise <see cref="Problem"/> so the UI can warn the user;
+/// report themselves (bot warnings, unexpected errors). New problems that affect hunting/playing raise <see cref="Problem"/> so the
+/// UI can warn the user; minor ones are only written to issues.log (<see cref="ErrorDoctor"/> diagnoses both and can report them);
 /// checks that can fix things (restart a crashed recording, restart a stuck hunt) do so and report what they did.
 /// </summary>
 public static class HealthMonitor
@@ -28,8 +34,16 @@ public static class HealthMonitor
     public static DateTime LastRun { get; private set; }
     public static TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(60);
 
-    public static IReadOnlyList<HealthItem> Items { get { lock (Current) return Current.Values.OrderByDescending(i => i.State).ThenBy(i => i.Feature).ToList(); } }
-    public static HealthState Overall { get { lock (Current) return Current.Values.Select(v => v.State).DefaultIfEmpty(HealthState.Ok).Max(); } }
+    /// <summary>Current problems that affect hunting / playing (the ones the user is told about).</summary>
+    public static IReadOnlyList<HealthItem> Items => Select(true);
+    /// <summary>Current minor problems (overlay, clips, recordings, tracker, backups...): logged to issues.log, not announced.</summary>
+    public static IReadOnlyList<HealthItem> MinorItems => Select(false);
+    public static HealthState Overall => Items.Select(v => v.State).DefaultIfEmpty(HealthState.Ok).Max();
+
+    private static List<HealthItem> Select(bool gameplay)
+    {
+        lock (Current) return Current.Values.Where(i => i.AffectsGameplay == gameplay).OrderByDescending(i => i.State).ThenBy(i => i.Feature).ToList();
+    }
 
     /// <summary>Adds (or replaces) a periodic check. Return no items when everything is fine.</summary>
     public static void Register(string key, Func<IEnumerable<HealthItem>> check) { lock (Checks) Checks[key] = check; }
@@ -47,9 +61,9 @@ public static class HealthMonitor
     public static void Stop() { _timer?.Dispose(); _timer = null; }
 
     /// <summary>Something a feature noticed itself (a bot warning, an unexpected error...).</summary>
-    public static void Report(string feature, HealthState state, string message)
+    public static void Report(string feature, HealthState state, string message, string? details = null)
     {
-        var item = new HealthItem(feature, state, message, DateTime.Now);
+        var item = new HealthItem(feature, state, message, DateTime.Now, details);
         AppPaths.Log($"[health] {state} {feature}: {message}");
         lock (Current) Current["report|" + feature + "|" + message] = item;
         Raise(item, force: true);
@@ -102,8 +116,10 @@ public static class HealthMonitor
             if (!force && LastAlert.TryGetValue(key, out var t) && (DateTime.Now - t).TotalMinutes < 10) return;
             LastAlert[key] = DateTime.Now;
         }
-        if (item.State != HealthState.Ok) AppPaths.Log($"[health] {item.State} {item.Feature}: {item.Message}");
-        Problem?.Invoke(item);
+        if (item.State == HealthState.Ok) return;
+        AppPaths.Log($"[health] {item.State} {item.Feature}: {item.Message}");
+        if (item.AffectsGameplay) Problem?.Invoke(item);
+        else ErrorDoctor.LogQuietly(item);   // minor: no pop-up, no sound - kept in issues.log so it can still be reported
     }
 
     // ------------------------------------------------------------------ helpers for checks

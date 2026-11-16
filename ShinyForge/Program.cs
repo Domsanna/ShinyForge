@@ -17,7 +17,7 @@ internal static class Program
         {
             e.SetObserved();
             AppPaths.Log("Background error: " + e.Exception);
-            Services.HealthMonitor.Report("Program", Services.HealthState.Warning, "A background task failed: " + e.Exception.GetBaseException().Message);
+            Services.HealthMonitor.Report("Program", Services.HealthState.Warning, "A background task failed: " + e.Exception.GetBaseException().Message, e.Exception.ToString());
         };
         AppPaths.Log($"ShinyForge started (portable={AppPaths.IsPortable})");
         AppPaths.EnsureBackupToolsDir();
@@ -42,7 +42,7 @@ internal static class Program
     private static void Report(Exception? e)
     {
         AppPaths.Log("Unhandled: " + e);
-        Services.HealthMonitor.Report("Program", Services.HealthState.Error, "Unexpected error: " + (e?.Message ?? "unknown"));
+        Services.HealthMonitor.Report("Program", Services.HealthState.Error, "Unexpected error: " + (e?.Message ?? "unknown"), e?.ToString());
         MessageBox.Show(e?.Message ?? "Unknown error", "ShinyForge - unexpected error", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }

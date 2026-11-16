@@ -16,6 +16,7 @@ public sealed class Table : Border
     private Border? _selected;
     public object? SelectedTag { get; private set; }
     public event Action<object?>? DoubleClicked;
+    public event Action<object?>? SelectionChanged;
 
     public Table(params (string Header, double Width)[] columns)
     {
@@ -50,6 +51,7 @@ public sealed class Table : Border
             _selected = b;
             b.Background = Skin.B(Skin.Accent);
             SelectedTag = tag;
+            SelectionChanged?.Invoke(tag);
             if (e.ClickCount == 2) DoubleClicked?.Invoke(tag);
         };
         _rows.Children.Add(b);
@@ -57,50 +59,140 @@ public sealed class Table : Border
     }
 }
 
-/// <summary>The result of the program-wide safety checks, with "Check now" and "Clear".</summary>
+/// <summary>
+/// The program-wide safety checks. Selecting a problem shows ShinyForge's diagnosis with step-by-step solutions and,
+/// when it has one, a fix it can try itself; after that the problem can be reported to GitHub.
+/// Minor problems (they don't affect hunting/playing) are hidden unless "Show minor issues" is ticked.
+/// </summary>
 public sealed class HealthWindow : Window
 {
-    private readonly Table _list = new(("", 30), ("Time", 70), ("Feature", 200), ("Details", 640));
+    private readonly Table _list = new(("", 30), ("Time", 70), ("Feature", 220), ("Details", 640));
     private readonly TextBlock _summary = Skin.T("", 13, Skin.Text, wrap: false);
+    private readonly CheckBox _minor = new() { Foreground = Skin.B(Skin.Muted), VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _cause = Skin.T("", 13.5, Skin.Text, FontWeight.SemiBold);
+    private readonly TextBlock _steps = Skin.Small("");
+    private readonly TextBlock _result = Skin.Small("");
+    private readonly FancyButton _fix = new("Try the fix", Skin.GlyphTools, Skin.Accent);
+    private readonly FancyButton _report = new("Report to GitHub", Skin.GlyphInfo, Skin.PanelHi);
+    /// <summary>Fix results per problem (feature|message), so the report says what was already tried.</summary>
+    private readonly Dictionary<string, string> _fixResults = new();
+    private HealthItem? _item;
+    private Diagnosis? _diag;
 
     public HealthWindow()
     {
         Title = "ShinyForge - system check";
         Icon = App.Icon;
-        Width = 980; Height = 520;
+        Width = 1000; Height = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = Skin.B(Skin.Panel);
         var top = new StackPanel
         {
             Margin = new Thickness(16, 12), Spacing = 6,
-            Children = { Skin.H2("System check"), Skin.Small("Every minute ShinyForge checks everything that's running: hunting bots (same Pokémon repeating, stalls, crashes), recordings, collection monitoring, the Switch / 3DS connections, disk space and its own files. Problems it can fix are fixed automatically and listed here.") },
+            Children = { Skin.H2("System check"), Skin.Small("Every minute ShinyForge checks everything that's running: hunting bots (same Pokémon repeating, stalls, crashes), recordings, collection monitoring, the Switch / 3DS connections, disk space and its own files. Select a problem to see what's wrong, how to solve it, and a fix ShinyForge can try itself.") },
         };
         var check = new FancyButton("Check now", Skin.GlyphSync, Skin.Accent);
         check.Click += async (_, _) => { check.IsEnabled = false; await Task.Run(HealthMonitor.RunNow); Fill(); check.IsEnabled = true; };
         var clear = new FancyButton("Clear reported problems", Skin.GlyphCheck, Skin.PanelHi);
         clear.Click += (_, _) => { HealthMonitor.Clear(); Fill(); };
         var log = new FancyButton("Open log", Skin.GlyphFolder, Skin.PanelHi);
-        log.Click += (_, _) => { try { OsInfo.Open(AppPaths.LogFile); } catch { } };
+        log.Click += (_, _) => { try { OsInfo.Open(_minor.IsChecked == true && File.Exists(ErrorDoctor.IssuesLog) ? ErrorDoctor.IssuesLog : AppPaths.LogFile); } catch { } };
+        _minor.IsCheckedChanged += (_, _) => Fill();
         _summary.VerticalAlignment = VerticalAlignment.Center;
-        var bottom = new Border { Padding = new Thickness(10, 8), Child = Skin.Row(check, clear, log, _summary) };
+        var bottom = new Border { Padding = new Thickness(10, 8), Child = Skin.Row(check, clear, log, _minor, _summary) };
+
+        _fix.Click += async (_, _) => await RunFix();
+        _report.Click += async (_, _) => await Report();
+        _result.VerticalAlignment = VerticalAlignment.Center;
+        _result.MaxWidth = 560;
+        var detail = new StackPanel
+        {
+            Margin = new Thickness(16, 10, 16, 4), Spacing = 6,
+            Children = { _cause, _steps, Skin.Row(_fix, _report, _result) },
+        };
+        _list.SelectionChanged += tag => ShowDiagnosis(tag as HealthItem);
+
         DockPanel.SetDock(top, Dock.Top);
         DockPanel.SetDock(bottom, Dock.Bottom);
+        DockPanel.SetDock(detail, Dock.Bottom);
         _list.Margin = new Thickness(10, 0);
-        Content = new DockPanel { Children = { top, bottom, _list } };
+        Content = new DockPanel { Children = { top, bottom, detail, _list } };
         Fill();
     }
+
+    private static string Key(HealthItem i) => i.Feature + "|" + i.Message;
 
     private void Fill()
     {
         _list.Clear();
-        var items = HealthMonitor.Items;
-        foreach (var i in items)
-            _list.Add(i, i.State switch { HealthState.Error => Skin.Bad, HealthState.Warning => Skin.Warn, _ => Skin.Good },
-                i.State switch { HealthState.Error => "✖", HealthState.Warning => "!", _ => "✓" }, i.When.ToString("HH:mm"), i.Feature, i.Message);
-        _summary.Text = items.Count == 0
-            ? $"Everything is working normally{(HealthMonitor.LastRun == default ? "." : $" (last check {HealthMonitor.LastRun:HH:mm:ss}).")}"
-            : $"{items.Count(i => i.State == HealthState.Error)} error(s), {items.Count(i => i.State == HealthState.Warning)} warning(s).";
-        _summary.Foreground = Skin.B(items.Count == 0 ? Skin.Good : Skin.Warn);
+        var gameplay = HealthMonitor.Items;
+        var minor = HealthMonitor.MinorItems;
+        _minor.Content = $"Show minor issues ({minor.Count})";
+        foreach (var i in _minor.IsChecked == true ? gameplay.Concat(minor) : gameplay)
+            _list.Add(i, !i.AffectsGameplay ? Skin.Muted : i.State switch { HealthState.Error => Skin.Bad, HealthState.Warning => Skin.Warn, _ => Skin.Good },
+                i.State switch { HealthState.Error => "✖", HealthState.Warning => "!", _ => "✓" }, i.When.ToString("HH:mm"),
+                i.AffectsGameplay ? i.Feature : i.Feature + " (minor)", i.Message);
+        _summary.Text = gameplay.Count == 0
+            ? $"Everything that affects hunting is working{(HealthMonitor.LastRun == default ? "." : $" (last check {HealthMonitor.LastRun:HH:mm:ss}).")}"
+            : $"{gameplay.Count(i => i.State == HealthState.Error)} error(s), {gameplay.Count(i => i.State == HealthState.Warning)} warning(s).";
+        _summary.Foreground = Skin.B(gameplay.Count == 0 ? Skin.Good : Skin.Warn);
+        ShowDiagnosis(_list.SelectedTag as HealthItem);   // the first row is selected after a refill
+    }
+
+    private void ShowDiagnosis(HealthItem? item)
+    {
+        _item = item;
+        _diag = item == null ? null : ErrorDoctor.Diagnose(item);
+        if (item == null || _diag == null)
+        {
+            _cause.Text = "No problems.";
+            _steps.Text = "When something goes wrong it appears in the list above with ShinyForge's diagnosis and a way to fix it.";
+            _fix.IsVisible = _report.IsVisible = false;
+            _result.Text = "";
+            return;
+        }
+        _cause.Text = (item.AffectsGameplay ? "" : "Minor (doesn't affect hunting) - ") + _diag.Cause;
+        _steps.Text = "How to solve it:\n" + string.Join("\n", _diag.Steps.Select((s, n) => $"  {n + 1}. {s}"));
+        _fix.IsVisible = _diag.Fix != null;
+        if (_diag.FixLabel != null) _fix.Text = _diag.FixLabel;
+        _report.IsVisible = true;
+        _fixResults.TryGetValue(Key(item), out var done);
+        _result.Text = done ?? (_diag.Fix != null ? "Try the fix first - if the problem stays, report it." : "");
+        _result.Foreground = Skin.B(done != null ? Skin.Good : Skin.Muted);
+    }
+
+    private async Task RunFix()
+    {
+        if (_item is not { } item || _diag is not { Fix: { } fix } d) return;
+        _fix.IsEnabled = false;
+        _result.Foreground = Skin.B(Skin.Muted);
+        _result.Text = "Working on it...";
+        string msg;
+        try { msg = await fix(); }
+        catch (Exception e) { msg = "The fix failed: " + e.Message; }
+        AppPaths.Log($"[health] fix '{d.FixLabel}' for {item.Feature}: {msg}");
+        _fixResults[Key(item)] = msg;
+        _fix.IsEnabled = true;
+        await Task.Run(HealthMonitor.RunNow);
+        Fill();
+        if (_item == null || Key(_item) != Key(item)) { _result.Text = msg; _result.Foreground = Skin.B(Skin.Good); }
+    }
+
+    private async Task Report()
+    {
+        if (_item is not { } item || _diag is not { } d) return;
+        _fixResults.TryGetValue(Key(item), out var fixResult);
+        if (d.Fix != null && fixResult == null &&
+            await Dialogs.YesNo(this, $"ShinyForge can try to fix this itself (\"{d.FixLabel}\"). Try that before reporting it?", "Report to GitHub"))
+        {
+            await RunFix();
+            return;
+        }
+        if (await Dialogs.Show(this, ErrorDoctor.ReportPrompt(item, d, fixResult), "Report to GitHub", "Open GitHub", Dialogs.Cancel) != "Open GitHub") return;
+        DependencyService.OpenUrl(ErrorDoctor.ReportUrl(item, d, fixResult));
+        AppPaths.Log($"[health] opened a GitHub report for {item.Feature}");
+        _result.Foreground = Skin.B(Skin.Good);
+        _result.Text = "Opened the report in your browser - press \"Create\" there to send it. Thank you!";
     }
 }
 

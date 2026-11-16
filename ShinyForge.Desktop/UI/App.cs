@@ -29,9 +29,13 @@ public sealed class App : Application
         {
             e.SetObserved();
             AppPaths.Log("Background error: " + e.Exception);
-            HealthMonitor.Report("Program", HealthState.Warning, "A background task failed: " + e.Exception.GetBaseException().Message);
+            HealthMonitor.Report("Program", HealthState.Warning, "A background task failed: " + e.Exception.GetBaseException().Message, e.Exception.ToString());
         };
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => AppPaths.Log("Unhandled: " + e.ExceptionObject);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            AppPaths.Log("Unhandled: " + e.ExceptionObject);
+            HealthMonitor.Report("Program", HealthState.Error, "Unexpected error: " + ((e.ExceptionObject as Exception)?.Message ?? "unknown"), e.ExceptionObject?.ToString());
+        };
         AppPaths.Log($"ShinyForge {AppInfo.Display} started on {OsInfo.Name} (portable={AppPaths.IsPortable})");
         AppPaths.EnsureBackupToolsDir();
         HealthMonitor.RegisterBuiltIns();

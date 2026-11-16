@@ -558,6 +558,9 @@
     <div class="card"><b>Same-Pokémon guard</b><p>If the hunter sees exactly the same Pokémon twice in a row, the reset didn't register. It warns you, holds the reset buttons longer and checks that the game really restarted. If it happens 3 times in a row, ShinyForge restarts the hunter automatically (up to 3 times), then stops and tells you.</p></div>
     <div class="card"><b>Console address changed?</b><p>Before a hunt starts, and whenever a running hunt loses contact for several minutes, ShinyForge checks that the Switch or 3DS still answers. If it doesn't, it asks for the new IP address and carries on.</p></div>
     <div class="card"><b>Keep the PC awake</b><p>While a hunt or recording runs, Windows won't go to sleep (the screen can still turn off). If the PC sleeps anyway, for example when a laptop lid is closed, you'll be told.</p></div>
+    <div class="card"><b>Diagnose &amp; fix</b><p>Select a problem in the system check to see what ShinyForge thinks went wrong and step-by-step solutions. When it can fix the problem itself (restart a hunt, test the Switch / 3DS connection, repair the data folder, move the overlay to a free port, trim its logs), click the fix button.</p></div>
+    <div class="card"><b>Minor problems stay quiet</b><p>Problems that don't affect hunting or playing (stream overlay, shiny clips, recordings, collection tracker, backups, small background hiccups) don't pop up or make a sound. They're written to <code>issues.log</code> in the data folder. Tick <b>Show minor issues</b> to see them.</p></div>
+    <div class="card"><b>Report to GitHub</b><p>If the fix didn't help, <b>Report to GitHub</b> opens a filled-in bug report for ShinyForge in your browser. It contains the problem, the diagnosis, the fix result, your version and the end of the log. Your user name, PC name, folders and IP / e-mail addresses are removed first. Nothing is sent until you press <b>Create</b> on GitHub (a free account is needed).</p></div>
     <div class="card"><b>Automatic backups</b><p>Before ShinyForge updates a spreadsheet or exports a save, it backs up the file (only if it changed). It keeps 20 save backups and 3 spreadsheet backups by default. Restore any of them from <b>Settings → Backups…</b>, which first backs up the current file too.</p></div>
     <div class="card"><b>Nothing risky by default</b><p>RNG manipulation and auto-catch are off until you turn them on. Saves are only read, and the bot never saves your game.</p></div>
   </div>
@@ -652,6 +655,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Backups</td><td><code>Data folder\Backups\Saves</code> and <code>…\Spreadsheets</code></td></tr>
     <tr><td>Shiny clips</td><td>The game's recording folder, or <code>Data folder\Shiny Clips</code></td></tr>
     <tr><td>Overlay text files</td><td><code>Data folder\Overlay</code></td></tr>
+    <tr><td>Minor problems</td><td><code>Data folder\issues.log</code> (<b>System check → Show minor issues → Open log</b>)</td></tr>
     <tr><td>Downloaded tools</td><td><code>Data folder\Tools</code> (pokeldn, esptool and the ESP32-S3 firmware too)</td></tr>
     <tr><td>Checkpoint copies &amp; their exports</td><td><code>Documents\ShinyForge\Saves</code> (installed) or <code>Saves</code> (portable)</td></tr>
     <tr><td>pokeldn's own settings</td><td><code>%AppData%\pokeldn</code></td></tr>

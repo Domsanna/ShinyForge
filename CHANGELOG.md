@@ -2,6 +2,16 @@
 
 All notable changes to ShinyForge. The build number counts the changes ShinyForge has gone through (git commits), so each version is `1.0.<build>`.
 
+## 1.0 (build 13)
+
+### New
+- **Self-diagnosis in the system check.** Select a problem to see what went wrong and step-by-step solutions. Where it can, ShinyForge also fixes it itself: restart the hunt, test the Switch / 3DS connection, repair the data folder, move the overlay to a free port, trim its logs, or check for an update.
+- **Report to GitHub.** If a problem stays after the fix, **Report to GitHub** opens a filled-in bug report for ShinyForge in your browser. It has the problem, the diagnosis, the fix result, your version and OS, and the end of the log. Your user name, PC name, folders and IP / e-mail addresses are removed. Nothing is sent until you press **Create** on GitHub.
+
+### Changed
+- **Minor problems no longer interrupt you.** Problems that don't affect hunting or playing (overlay / remote, shiny clips, recordings, collection tracker, backups, background hiccups) don't show a banner, play a sound or alert your phone. They go to `issues.log` and appear under **Show minor issues**, where they can still be reported.
+- Crash reports now keep the error details (stack trace) for the GitHub report. On macOS / Linux, unexpected errors now also show up in the system check.
+
 ## 1.0 (build 12)
 
 ### New

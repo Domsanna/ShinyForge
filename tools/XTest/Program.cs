@@ -176,6 +176,71 @@ if (savesSrc.Length > 0 && Directory.Exists(savesSrc))
     else Check(false, "a Switch / 3DS save to test the FTP reading with");
 }
 
+// ---- self-diagnosis, minor (non-gameplay) problems, GitHub error reports
+{
+    HealthItem H(string f, HealthState st, string m, string? det = null) => new(f, st, m, DateTime.Now, det);
+    Check(H("Python hunter", HealthState.Warning, "x").AffectsGameplay && H("3DS hunt (X)", HealthState.Warning, "x").AffectsGameplay
+          && H("Program", HealthState.Error, "x").AffectsGameplay && H("Keep awake", HealthState.Error, "x").AffectsGameplay,
+        "hunting / crashes / sleep problems count as gameplay problems");
+    Check(!H("Overlay / remote", HealthState.Error, "x").AffectsGameplay && !H("Shiny clips (X)", HealthState.Warning, "x").AffectsGameplay
+          && !H("Recording (X)", HealthState.Error, "x").AffectsGameplay && !H("Program", HealthState.Warning, "x").AffectsGameplay
+          && !H("Backups", HealthState.Warning, "x").AffectsGameplay && !H("Disk space", HealthState.Warning, "x").AffectsGameplay,
+        "overlay / clips / recordings / backups / background hiccups are minor");
+
+    HealthItem? announced = null;
+    Action<HealthItem> grab = i => announced ??= i;
+    HealthMonitor.Problem += grab;
+    var issuesBefore = File.Exists(ErrorDoctor.IssuesLog) ? new FileInfo(ErrorDoctor.IssuesLog).Length : 0;
+    HealthMonitor.Report("Overlay / remote", HealthState.Error, "doctor-test: port 8765 in use");
+    Check(announced == null, "a minor problem is not announced (no banner / sound / phone alert)");
+    Check(HealthMonitor.MinorItems.Any(i => i.Message.Contains("doctor-test")) && !HealthMonitor.Items.Any(i => i.Message.Contains("doctor-test")),
+        "a minor problem is listed only under minor issues");
+    Check(File.Exists(ErrorDoctor.IssuesLog) && new FileInfo(ErrorDoctor.IssuesLog).Length > issuesBefore
+          && ErrorDoctor.QuietLogLines(5).Any(l => l.Contains("doctor-test")), "a minor problem is written to issues.log");
+    HealthMonitor.Report("Python hunter", HealthState.Warning, "doctor-test: Bot: the game did not reset");
+    Check(announced?.Message.Contains("doctor-test") == true, "a gameplay problem is announced");
+    HealthMonitor.Problem -= grab;
+    HealthMonitor.Clear("Overlay / remote");
+    HealthMonitor.Clear("Python hunter");
+
+    // every known problem gets a cause and steps; the ones ShinyForge can fix offer a fix
+    var known = new[]
+    {
+        H("Disk space", HealthState.Error, "Only 0.5 GB free on C:\\"), H("Program files", HealthState.Error, "Pokédex data is missing"),
+        H("Settings / data folder", HealthState.Error, "Can't write"), H("Keep awake", HealthState.Error, "The PC went to sleep"),
+        H("Python hunter", HealthState.Error, "Can't reach the Switch at 1.2.3.4"), H("Python hunter", HealthState.Warning, "The Python hunter has stopped."),
+        H("Python hunter", HealthState.Error, "The same Deoxys (PID 1) was logged 3 times"), H("Python hunter", HealthState.Warning, "No new encounter for 9 minutes"),
+        H("3DS hunt (X)", HealthState.Error, "Lost the connection to the 3DS"), H("Recording (X)", HealthState.Error, "ffmpeg exited"),
+        H("Collection tracker (X)", HealthState.Warning, "Last sync failed"), H("Shiny clips (X)", HealthState.Warning, "clip"),
+        H("Overlay / remote", HealthState.Error, "port"), H("Backups", HealthState.Warning, "backup"), H("Program", HealthState.Error, "Unexpected error: boom"),
+    };
+    Check(known.All(k => ErrorDoctor.Diagnose(k) is { Cause.Length: > 10, Steps.Count: > 0 }), $"all {known.Length} known problems are diagnosed with steps");
+    var withFix = new[] { 0, 1, 2, 4, 5, 6, 7, 8, 12, 14 };
+    Check(withFix.All(n => ErrorDoctor.Diagnose(known[n]).Fix != null) && ErrorDoctor.Diagnose(known[3]).Fix == null,
+        "fixable problems offer an automatic fix");
+    var repaired = await ErrorDoctor.Diagnose(known[2]).Fix!();
+    Check(repaired.Contains("can be written"), "data-folder repair fix runs: " + repaired);
+
+    // the GitHub report: no personal details, fits in a link
+    var home = OsInfo.Home;
+    var secret = $"Crash in {Path.Combine(home, "Documents", "save.sav")} by {Environment.UserName} on {Environment.MachineName} " +
+                 "from 192.168.0.16, mail someone@example.com, mac 01:23:45:67:89:ab";
+    var clean = ErrorDoctor.Sanitize(secret);
+    Check(!clean.Contains(home, StringComparison.OrdinalIgnoreCase) && !clean.Contains(Environment.UserName, StringComparison.OrdinalIgnoreCase)
+          && !clean.Contains(Environment.MachineName, StringComparison.OrdinalIgnoreCase) && !clean.Contains("192.168.0.16")
+          && !clean.Contains("someone@example.com") && !clean.Contains("01:23:45") && clean.Contains("<ip>") && clean.Contains("~"),
+        "report text is sanitized: " + clean);
+    var crash = H("Program", HealthState.Error, "Unexpected error: " + secret, string.Concat(Enumerable.Repeat("   at ShinyForge.Something.Method() in " + home + "\\x.cs:line 1\n", 400)));
+    var url = ErrorDoctor.ReportUrl(crash, ErrorDoctor.Diagnose(crash), "You already have the latest version.", "I pressed Start hunt");
+    var decoded = Uri.UnescapeDataString(url);
+    Check(url.StartsWith($"https://github.com/{AppInfo.Repo}/issues/new?title=") && url.Length <= 8000, $"report link fits GitHub's limit ({url.Length} chars)");
+    Check(decoded.Contains(ErrorDoctor.ReportTitlePrefix) && decoded.Contains("ShinyForge's diagnosis") && decoded.Contains(AppInfo.Display)
+          && decoded.Contains("I pressed Start hunt") && decoded.Contains("latest version"), "report has the title tag, diagnosis, version, user note and fix result");
+    Check(!decoded.Contains(home, StringComparison.OrdinalIgnoreCase) && !decoded.Contains(Environment.UserName, StringComparison.OrdinalIgnoreCase)
+          && !decoded.Contains("192.168.0.16"), "report link has no personal details");
+    Check(ErrorDoctor.ReportPrompt(crash, ErrorDoctor.Diagnose(crash), null).Contains("Nothing is sent until you press"), "the user confirms before anything opens");
+}
+
 // ---- keep awake + sound (must never crash)
 try { Sounds.Play(); Check(true, "alert sound call is safe"); } catch (Exception e) { Check(false, "sound: " + e.Message); }
 
