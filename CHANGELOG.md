@@ -2,6 +2,20 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.1.1
+
+### New
+- **Update checks for every tool**, not just ShinyForge. At start-up and in **Tools & Updates** ShinyForge now also checks:
+  - **SysBot.exe**: a copy ShinyForge downloaded updates with one click. A copy you built from source (with your own routines, such as FRLG) is only reported, because the download wouldn't have them.
+  - **esptool** (for the ESP32-S3): one-click update.
+  - **Pokémon Automation**: its version comes from the unzipped folder. The update opens their download page; unzip the new version next to the old one and ShinyForge uses the newest.
+  - **sys-botbase on the Switch**, when the Switch answers and no hunt is running: the original against olliz0r's latest release, sys-botbase-cpp against Pokémon Automation's.
+  - **FFmpeg and Python on macOS / Linux**: Homebrew updates them with one click; on Linux the apt command is shown (it needs your password).
+- The new checks run at the same time, so start-up isn't slower.
+
+### Changed
+- With several Pokémon Automation versions unzipped, ShinyForge starts the newest.
+
 ## 1.1.0
 
 ### New
