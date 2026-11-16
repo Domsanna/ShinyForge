@@ -1315,6 +1315,15 @@ if (tests.Contains("switchfind"))
     using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort);
     Check(bot.TitleId() == null, "nothing is running on the Switch (nothing will be started)");
     bot.Tap("HOME", 1500);
+    // the starting point is the first game wherever the cursor was: on a user icon (top), the round buttons (bottom), All Software
+    foreach (var (name, button, times) in new[] { ("a user icon", "DUP", 2), ("the bottom buttons", "DDOWN", 2), ("the end of the row", "DRIGHT", 15) })
+    {
+        for (var i = 0; i < times; i++) bot.Tap(button, 250);
+        SwitchGameLauncher.Box? b = null;
+        try { b = SwitchGameLauncher.StartAtFirstGame(bot).Box; } catch (IOException e) { Console.WriteLine("   " + e.Message); }
+        if (bot.Screenshot() is { } at) File.WriteAllBytes(Path.Combine(work, $"start_from_{button}.jpg"), at);
+        Check(b is { X: < 160, W: > 220 }, $"from {name}: cursor on the first game, nothing left of it ({b}, start_from_{button}.jpg)");
+    }
     var (img, box) = SwitchGameLauncher.StartAtFirstGame(bot);
     Check(box.X < 160, $"cursor on the first game of the HOME menu ({box})");
     var icons = SwitchGameLauncher.IconPrints(SwitchGameLauncher.TitleIds(game));

@@ -100,23 +100,52 @@ public static class SwitchGameLauncher
     }
 
     // ------------------------------------------------------------------ the HOME menu
-    /// <summary>On the HOME menu: up, up = the user icons along the top (from any row); down once = the game row; then the first tile.</summary>
-    internal static void FirstTile(SysBotSession bot)
+    /// <summary>
+    /// On the HOME menu: down, down = the round buttons along the bottom (from any row); up once = the game row. Never goes up
+    /// to the user icons at the top - the start is the first game, not a user profile.
+    /// </summary>
+    private static void ToGameRow(SysBotSession bot)
     {
-        bot.Tap("DUP", 250); bot.Tap("DUP", 250); bot.Tap("DDOWN", 300);
-        for (var i = 0; i < 12; i++) bot.Tap("DLEFT", 200);
+        bot.Tap("DDOWN", 300); bot.Tap("DDOWN", 300); bot.Tap("DUP", 400);
     }
 
-    /// <summary>Cursor on the first game, checked on a screenshot (the frame on the left-most tile) - the starting point.</summary>
+    /// <summary>
+    /// Cursor on the first game, checked on a screenshot - the starting point. LEFT is pressed ONE at a time with a screenshot
+    /// after each: the row wraps both ways (LEFT on the first game jumps to "All Software" at the end), so blind presses
+    /// overshoot, and quick presses get dropped while the row scrolls. The first game = a selected tile with nothing but
+    /// background left of it (a tile at the left edge alone isn't enough: the row scrolls, so every tile ends up there).
+    /// "All Software" selected (no tile frame) → RIGHT wraps to the first game.
+    /// </summary>
     internal static (RgbImage Img, Box Box) StartAtFirstGame(SysBotSession bot)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        ToGameRow(bot);
+        var noTile = 0;
+        for (var step = 0; step < 40; step++)
         {
-            FirstTile(bot);
-            Thread.Sleep(400);
-            if (Shot(bot) is { } img && SelectedBox(img) is { } box && box.X < 160 && box.W > 220) return (img, box);
+            Thread.Sleep(250);
+            var img = Shot(bot) ?? throw new IOException("Couldn't take a screenshot of the Switch.");
+            if (SelectedBox(img) is { W: > 220 } box)
+            {
+                noTile = 0;
+                if (box.X < 160 && NothingLeftOf(img, box)) return (img, box);
+                bot.Tap("DLEFT", 450);
+            }
+            else if (++noTile == 1) bot.Tap("DRIGHT", 450); // "All Software" → wraps to the first game
+            else { ToGameRow(bot); noTile = 0; }            // not on the game row at all (a press was missed)
         }
         throw new IOException("Couldn't put the cursor on the first game of the HOME menu.");
+    }
+
+    /// <summary>True when the strip left of the selected tile is plain background (no tile there): the first game.</summary>
+    internal static bool NothingLeftOf(RgbImage img, Box box)
+    {
+        int Px(int x, int y, int c) => img.Pixels[(y * img.Width + x) * 3 + c];
+        const int bx = 20, by = 120; // background above the row, left of the name tooltip
+        int other = 0, total = 0;
+        for (var y = box.Y + 20; y < box.Y + box.H - 20; y += 4)
+            for (var x = 8; x < box.X - 6; x += 4, total++)
+                if (Enumerable.Range(0, 3).Any(c => Math.Abs(Px(x, y, c) - Px(bx, by, c)) > 30)) other++;
+        return total > 0 && other < total / 20;
     }
 
     /// <summary>
