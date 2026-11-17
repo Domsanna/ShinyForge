@@ -256,7 +256,6 @@ public sealed class MainWindow : Window
         {
             var updates = await DependencyService.CheckUpdates();
             var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
-            ToolsWindow.LastUpdates = updates;
             if (updates.Count == 0 && missing.Count == 0) { SetStatus("Everything is up to date."); return; }
             var parts = new List<string>();
             if (updates.Count > 0) parts.Add($"{updates.Count} update(s) available ({string.Join(", ", updates.Select(u => u.Item))})");

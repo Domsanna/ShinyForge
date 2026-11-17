@@ -6,7 +6,6 @@ namespace ShinyForge.UI;
 /// <summary>Lists every outside program ShinyForge uses (installed / missing / update available) with install and update buttons.</summary>
 public sealed class ToolsForm : Form
 {
-    public static List<DependencyService.UpdateInfo> LastUpdates { get; set; } = new();
     private readonly FlowLayoutPanel _list;
     private readonly Label _status = Theme.Label("", Theme.Body, Theme.Muted);
 
@@ -30,9 +29,10 @@ public sealed class ToolsForm : Form
         recheck.Click += async (_, _) =>
         {
             _status.Text = "Checking...";
-            LastUpdates = await DependencyService.CheckUpdates();
+            var found = await DependencyService.CheckUpdates();
+            await DependencyService.ReadVersions();
             Populate(isSwitch);
-            _status.Text = LastUpdates.Count == 0 ? "No updates found." : $"{LastUpdates.Count} update(s) available.";
+            _status.Text = found.Count == 0 ? "No updates found." : $"{found.Count} update(s) available.";
         };
         var installAll = new FancyButton("Install all missing", Theme.GlyphDownload, Theme.Accent) { Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
         installAll.Location = new Point(recheck.Right + 12, 592);
@@ -85,8 +85,9 @@ public sealed class ToolsForm : Form
 
         foreach (var d in DependencyService.All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)))
         {
-            if (d.State != DepState.UpdateAvailable) DependencyService.Refresh(d);
-            var row = new Panel { Size = new Size(770, 70), BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, 8) };
+            DependencyService.Refresh(d); // keeps "update available" for tools the last check found a newer version of
+            var update = DependencyService.UpdateFor(d);
+            var row = new Panel { Size = new Size(770, 70), BackColor = update != null ? Color.FromArgb(50, 40, 12) : Theme.Panel, Margin = new Padding(0, 0, 0, 8) };
             var (glyph, color, state) = d.State switch
             {
                 DepState.Ok => (Theme.GlyphCheck, Theme.Good, d.FromBackup ? "Using Backup Tools folder" : "Installed"),
@@ -97,7 +98,8 @@ public sealed class ToolsForm : Form
             icon.Location = new Point(14, 22);
             var name = Theme.Label($"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}", Theme.H2, Theme.Text);
             name.Location = new Point(48, 8);
-            var purpose = Theme.Label(d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), Theme.Small, Theme.Muted);
+            var purpose = Theme.Label(update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""),
+                Theme.Small, update != null ? Theme.Warn : Theme.Muted);
             purpose.Location = new Point(50, 34);
             purpose.MaximumSize = new Size(560, 34);
             row.Controls.AddRange(new Control[] { icon, name, purpose });
@@ -108,31 +110,41 @@ public sealed class ToolsForm : Form
                 install.Click += (_, _) => { AskInstall(this, dep); Populate(isSwitch); };
                 row.Controls.Add(install);
             }
+            else if (update?.Apply != null)
+                row.Controls.Add(UpdateButton(update, isSwitch, new Point(640, 16)));
             _list.Controls.Add(row);
         }
 
-        foreach (var u in LastUpdates)
+        // updates that aren't a tool on this PC (sys-botbase on the Switch, the PKHeX library, artwork...)
+        foreach (var u in DependencyService.Updates.Where(u => DependencyService.All.All(d => d.Name != u.Item)))
         {
             var row = new Panel { Size = new Size(770, 56), BackColor = Color.FromArgb(50, 40, 12), Margin = new Padding(0, 0, 0, 8) };
             var label = Theme.Label($"{u.Item}: {u.Message}", Theme.Body, Theme.Text);
             label.Location = new Point(14, 18);
             label.MaximumSize = new Size(600, 40);
             row.Controls.Add(label);
-            if (u.Apply != null)
-            {
-                var apply = new FancyButton("Update", Theme.GlyphDownload, Theme.Accent) { Location = new Point(640, 10), Height = 36 };
-                var upd = u;
-                apply.Click += async (_, _) =>
-                {
-                    apply.Enabled = false;
-                    _status.Text = $"Updating {upd.Item}...";
-                    try { _status.Text = await upd.Apply(s => BeginInvoke(() => _status.Text = s)); }
-                    catch (Exception ex) { _status.Text = ex.Message; }
-                };
-                row.Controls.Add(apply);
-            }
+            if (u.Apply != null) row.Controls.Add(UpdateButton(u, isSwitch, new Point(640, 10)));
             _list.Controls.Add(row);
         }
+    }
+
+    /// <summary>"Update" for one item: runs it, then redraws the list with the tool's new version (or the error).</summary>
+    private FancyButton UpdateButton(DependencyService.UpdateInfo u, bool? isSwitch, Point at)
+    {
+        var apply = new FancyButton("Update", Theme.GlyphDownload, Theme.Accent) { Location = at, Height = 36 };
+        apply.Click += async (_, _) =>
+        {
+            apply.Enabled = false;
+            _status.Text = $"Updating {u.Item}...";
+            try
+            {
+                var msg = await DependencyService.ApplyUpdate(u, s => BeginInvoke(() => _status.Text = s));
+                Populate(isSwitch);
+                _status.Text = msg;
+            }
+            catch (Exception ex) { _status.Text = ex.Message; apply.Enabled = true; }
+        };
+        return apply;
     }
 
     public static void OpenBackupFolder()

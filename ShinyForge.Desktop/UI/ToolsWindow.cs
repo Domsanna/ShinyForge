@@ -10,7 +10,6 @@ namespace ShinyForge.UI;
 /// <summary>Every outside program ShinyForge uses on this OS (installed / missing / update available), with install and update buttons.</summary>
 public sealed class ToolsWindow : Window
 {
-    public static List<DependencyService.UpdateInfo> LastUpdates { get; set; } = new();
     private readonly StackPanel _list = new() { Spacing = 8, Margin = new Thickness(20, 10, 20, 10) };
     private readonly TextBlock _status = Skin.T("", 13, Skin.Muted, wrap: false);
     private readonly bool? _isSwitch;
@@ -27,9 +26,10 @@ public sealed class ToolsWindow : Window
         recheck.Click += async (_, _) =>
         {
             _status.Text = "Checking...";
-            LastUpdates = await DependencyService.CheckUpdates();
+            var found = await DependencyService.CheckUpdates();
+            await DependencyService.ReadVersions();
             Populate();
-            _status.Text = LastUpdates.Count == 0 ? "No updates found." : $"{LastUpdates.Count} update(s) available.";
+            _status.Text = found.Count == 0 ? "No updates found." : $"{found.Count} update(s) available.";
         };
         var installAll = new FancyButton("Install all missing", Skin.GlyphDownload, Skin.Accent);
         installAll.Click += async (_, _) => { await InstallAll(this, _isSwitch); Populate(); };
@@ -74,7 +74,8 @@ public sealed class ToolsWindow : Window
             "Anything not installed on this computer is looked for here (sub-folders too).\n" + AppPaths.BackupToolsDir, open));
         foreach (var d in DependencyService.All.Where(d => _isSwitch is null || (_isSwitch.Value ? d.ForSwitch : d.For3DS)))
         {
-            if (d.State != DepState.UpdateAvailable) DependencyService.Refresh(d);
+            DependencyService.Refresh(d); // keeps "update available" for tools the last check found a newer version of
+            var update = DependencyService.UpdateFor(d);
             var (glyph, color, state) = d.State switch
             {
                 DepState.Ok => (Skin.GlyphCheck, Skin.Good, d.FromBackup ? "Using Backup Tools folder" : "Installed"),
@@ -88,25 +89,33 @@ public sealed class ToolsWindow : Window
                 var dep = d;
                 install.Click += async (_, _) => { await AskInstall(this, dep); Populate(); };
             }
-            _list.Children.Add(RowPanel(Skin.Panel, glyph, color, $"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}", d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), install));
+            else if (update?.Apply != null) install = UpdateButton(update);
+            _list.Children.Add(RowPanel(update != null ? Color.FromRgb(50, 40, 12) : Skin.Panel, glyph, color,
+                $"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}",
+                update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), install));
         }
-        foreach (var u in LastUpdates)
+        // updates that aren't a tool on this computer (sys-botbase on the Switch, the PKHeX library, artwork...)
+        foreach (var u in DependencyService.Updates.Where(u => DependencyService.All.All(d => d.Name != u.Item)))
+            _list.Children.Add(RowPanel(Color.FromRgb(50, 40, 12), Skin.GlyphDownload, Skin.Warn, u.Item, u.Message, u.Apply != null ? UpdateButton(u) : null));
+    }
+
+    /// <summary>"Update" for one item: runs it, then redraws the list with the tool's new version (or the error).</summary>
+    private FancyButton UpdateButton(DependencyService.UpdateInfo u)
+    {
+        var apply = new FancyButton("Update", Skin.GlyphDownload, Skin.Accent) { Height = 34 };
+        apply.Click += async (_, _) =>
         {
-            FancyButton? apply = null;
-            if (u.Apply != null)
+            apply.IsEnabled = false;
+            _status.Text = $"Updating {u.Item}...";
+            try
             {
-                apply = new FancyButton("Update", Skin.GlyphDownload, Skin.Accent) { Height = 34 };
-                var upd = u;
-                apply.Click += async (_, _) =>
-                {
-                    apply.IsEnabled = false;
-                    _status.Text = $"Updating {upd.Item}...";
-                    try { _status.Text = await upd.Apply(s => Dialogs.Ui(() => _status.Text = s)); }
-                    catch (Exception ex) { _status.Text = ex.Message; }
-                };
+                var msg = await DependencyService.ApplyUpdate(u, s => Dialogs.Ui(() => _status.Text = s));
+                Populate();
+                _status.Text = msg;
             }
-            _list.Children.Add(RowPanel(Color.FromRgb(50, 40, 12), Skin.GlyphDownload, Skin.Warn, u.Item, u.Message, apply));
-        }
+            catch (Exception ex) { _status.Text = ex.Message; apply.IsEnabled = true; }
+        };
+        return apply;
     }
 
     public static void OpenBackupFolder()

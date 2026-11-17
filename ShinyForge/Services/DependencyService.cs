@@ -142,7 +142,7 @@ public static class DependencyService
         try { path = d.Locate(); } catch (Exception e) { AppPaths.Log($"Locate {d.Name}: {e.Message}"); }
         path ??= AppPaths.FindInBackupTools(d.ExeNames);
         d.Path = path;
-        d.State = path is null ? DepState.Missing : DepState.Ok;
+        d.State = path is null ? DepState.Missing : Updates.Any(u => u.Item == d.Name) ? DepState.UpdateAvailable : DepState.Ok;
         d.Detail = path is null ? "Not found" : d.FromBackup ? $"{path}   (from the Backup Tools folder)" : path;
     }
 
@@ -342,9 +342,37 @@ public static class DependencyService
     // ------------------------------------------------------------------ update checks (run every start)
     public sealed record UpdateInfo(string Item, string Message, Func<Action<string>, Task<string>>? Apply);
 
+    /// <summary>
+    /// What the last <see cref="CheckUpdates"/> found. A tool listed here shows "Update available" in its own row in Tools &amp;
+    /// Updates (with the Update button there), also after it's re-checked; <see cref="ApplyUpdate"/> removes it once done.
+    /// </summary>
+    public static List<UpdateInfo> Updates { get; private set; } = new();
+
+    /// <summary>The newer version found for this tool, or null.</summary>
+    public static UpdateInfo? UpdateFor(Dependency d) => Updates.FirstOrDefault(u => u.Item == d.Name);
+
+    /// <summary>
+    /// Runs an update, then checks the tool again: the update leaves the list once the tool is really there (its version
+    /// is re-read). Returns the message for the user.
+    /// </summary>
+    public static async Task<string> ApplyUpdate(UpdateInfo u, Action<string> progress)
+    {
+        if (u.Apply == null) return u.Message;
+        var msg = await u.Apply(progress);
+        Updates = Updates.Where(x => x != u).ToList();
+        if (All.FirstOrDefault(d => d.Name == u.Item) is { } dep)
+        {
+            Refresh(dep);
+            try { dep.Version = await ReadVersion(dep); } catch { }
+        }
+        if (u.Item == "SysBot.exe") ForgetSysBotCheck();
+        return msg;
+    }
+
     public static async Task<List<UpdateInfo>> CheckUpdates()
     {
         var list = new List<UpdateInfo>();
+        Updates = new();
         foreach (var d in All) Refresh(d);
 
         // winget-managed tools (Windows).
@@ -430,6 +458,9 @@ public static class DependencyService
                 }
                 return "Artwork restored.";
             }));
+        // every tool with a newer version shows it in its own row (not only the winget ones)
+        Updates = list;
+        foreach (var d in All.Where(d => d.Path != null && list.Any(u => u.Item == d.Name))) d.State = DepState.UpdateAvailable;
         return list;
     }
 

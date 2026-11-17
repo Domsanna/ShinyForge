@@ -283,7 +283,6 @@ public sealed class MainForm : Form
         {
             var updates = await DependencyService.CheckUpdates();
             var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
-            ToolsForm.LastUpdates = updates;
             if (updates.Count == 0 && missing.Count == 0)
             {
                 SetStatus("Everything is up to date.");

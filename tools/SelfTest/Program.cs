@@ -1387,6 +1387,28 @@ if (tests.Contains("switchfind"))
     Check(bot.TitleId() == null, "still nothing running");
 }
 
+if (tests.Contains("toolupdate"))
+{
+    // REAL download: every tool with a newer release is marked in its own row, stays marked after a re-check, and the
+    // update really installs it: SelfTest <work> toolupdate <tool name>
+    var name = args.Skip(1).FirstOrDefault(a => a != "toolupdate") ?? "pokeldn";
+    var found = await DependencyService.CheckUpdates();
+    foreach (var u in found) Console.WriteLine($"   update: {u.Item}: {u.Message}");
+    var dep = DependencyService.All.First(d => d.Name == name);
+    var upd = DependencyService.UpdateFor(dep);
+    Check(upd != null && dep.State == DepState.UpdateAvailable, $"{name}: shown as 'Update available' ({upd?.Message})");
+    DependencyService.Refresh(dep);
+    Check(dep.State == DepState.UpdateAvailable, $"{name}: still 'Update available' after the window re-checks it");
+    if (upd != null)
+    {
+        var msg = await DependencyService.ApplyUpdate(upd, m => Console.WriteLine("   " + m));
+        Console.WriteLine("   " + msg);
+        Check(dep.State == DepState.Ok && DependencyService.UpdateFor(dep) == null, $"{name}: up to date after updating (now {dep.Version})");
+        var again = await DependencyService.CheckUpdates();
+        Check(again.All(u => u.Item != name), $"{name}: a fresh check finds nothing newer");
+    }
+}
+
 if (tests.Contains("stoptargets"))
 {
     // Offline: which Pokémon each hunt game offers, and the impossible picks refused with the user's message.
