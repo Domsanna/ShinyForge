@@ -32,7 +32,7 @@ public sealed class Dependency
     public bool OnlyAfterSetup { get; init; }
     /// <summary>Nice to have, never needed by ShinyForge itself: not reported as missing (e.g. Pokémon Automation).</summary>
     public bool Optional { get; init; }
-    /// <summary>Should a missing copy be reported / installed by "Install all"?</summary>
+    /// <summary>Should a missing copy be reported at startup / installed by the main window's "Install all"?</summary>
     public bool Wanted => !Optional && (!OnlyAfterSetup || AppSettings.Current.PokeldnSetupDone);
     /// <summary>Can only be installed by hand (paid software or no public download).</summary>
     public bool ManualOnly => !CanAutoInstall;
@@ -268,12 +268,19 @@ public static class DependencyService
     /// <summary>
     /// Installs every missing program that can be installed automatically (PKHeX last, because it waits for the browser download),
     /// then opens the download pages of the ones that can't. Returns a summary for the user.
+    /// <paramref name="everything"/> = every tool shown as "Not installed" in Tools &amp; Updates, also the optional ones
+    /// (Pokémon Automation) and the ones for a feature not set up yet (pokeldn, esptool); otherwise only <see cref="Dependency.Wanted"/>.
     /// </summary>
-    public static async Task<string> InstallAllMissing(bool? isSwitch, Action<string> progress)
+    public static List<Dependency> MissingTools(bool? isSwitch, bool everything)
     {
         var relevant = All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)).ToList();
         foreach (var d in relevant) Refresh(d);
-        var missing = relevant.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+        return relevant.Where(d => d.State == DepState.Missing && (everything || d.Wanted)).ToList();
+    }
+
+    public static async Task<string> InstallAllMissing(bool? isSwitch, bool everything, Action<string> progress)
+    {
+        var missing = MissingTools(isSwitch, everything);
         if (missing.Count == 0)
             return "Everything is already installed.";
 

@@ -55,6 +55,7 @@ public static class Theme
     public static Label Label(string text, Font? font = null, Color? color = null, bool autoSize = true) => new()
     {
         Text = text, Font = font ?? Body, ForeColor = color ?? Text, AutoSize = autoSize, BackColor = Color.Transparent,
+        UseMnemonic = false, // show "&" as itself ("Tools & Updates"), not as a shortcut underline
     };
 
     public static void StyleInput(Control c)

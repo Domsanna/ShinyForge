@@ -348,7 +348,7 @@ public sealed class MainForm : Form
         };
         var installAll = new FancyButton("Install all", Theme.GlyphDownload, Theme.PanelHi) { Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right };
         installAll.Location = new Point(review.Left - installAll.Width - 10, 6);
-        installAll.Click += (_, _) => ToolsForm.InstallAll(this, _isSwitch);
+        installAll.Click += (_, _) => ToolsForm.InstallAll(this, _isSwitch, everything: false);
         installAll.Visible = !health && DependencyService.All.Any(d => d.State == DepState.Missing && d.Wanted);
         var close = Theme.Label("✕", Theme.H2, Theme.Muted);
         close.Cursor = Cursors.Hand;

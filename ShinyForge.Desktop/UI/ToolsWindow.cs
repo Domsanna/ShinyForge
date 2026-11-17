@@ -32,7 +32,7 @@ public sealed class ToolsWindow : Window
             _status.Text = found.Count == 0 ? "No updates found." : $"{found.Count} update(s) available.";
         };
         var installAll = new FancyButton("Install all missing", Skin.GlyphDownload, Skin.Accent);
-        installAll.Click += async (_, _) => { await InstallAll(this, _isSwitch); Populate(); };
+        installAll.Click += async (_, _) => { await InstallAll(this, _isSwitch, everything: true); Populate(); };
         _status.VerticalAlignment = VerticalAlignment.Center;
         var bottom = new Border { Background = Skin.B(Skin.Panel), Padding = new Thickness(16, 10), Child = Skin.Row(recheck, installAll, _status) };
         DockPanel.SetDock(bottom, Dock.Bottom);
@@ -142,11 +142,10 @@ public sealed class ToolsWindow : Window
     }
 
     /// <summary>Confirms, then installs every missing program for the current console (or all).</summary>
-    public static async Task InstallAll(Control? owner, bool? isSwitch)
+    /// <param name="everything">true = every tool the Tools window shows as "Not installed"; false = only the ones ShinyForge needs now.</param>
+    public static async Task InstallAll(Control? owner, bool? isSwitch, bool everything)
     {
-        var relevant = DependencyService.All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)).ToList();
-        foreach (var d in relevant) DependencyService.Refresh(d);
-        var missing = relevant.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+        var missing = DependencyService.MissingTools(isSwitch, everything);
         if (missing.Count == 0) { await Dialogs.Info(owner, "Everything is already installed."); return; }
         var auto = missing.Where(d => d.CanAutoInstall || (!OsInfo.IsWindows && d.Name is "FFmpeg" or "Python 3")).Select(d => "  • " + d.Name).ToList();
         var manual = missing.Where(d => !(d.CanAutoInstall || (!OsInfo.IsWindows && d.Name is "FFmpeg" or "Python 3"))).Select(d => "  • " + d.Name).ToList();

@@ -36,7 +36,7 @@ public sealed class ToolsForm : Form
         };
         var installAll = new FancyButton("Install all missing", Theme.GlyphDownload, Theme.Accent) { Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
         installAll.Location = new Point(recheck.Right + 12, 592);
-        installAll.Click += (_, _) => { InstallAll(this, isSwitch); Populate(isSwitch); };
+        installAll.Click += (_, _) => { InstallAll(this, isSwitch, everything: true); Populate(isSwitch); };
         _status.Location = new Point(installAll.Right + 16, 600);
         _status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         Controls.AddRange(new Control[] { title, _list, recheck, installAll, _status });
@@ -165,11 +165,10 @@ public sealed class ToolsForm : Form
     }
 
     /// <summary>Confirms, then installs every missing program for the current platform (or all, if none is chosen).</summary>
-    public static void InstallAll(IWin32Window? owner, bool? isSwitch)
+    /// <param name="everything">true = every tool the Tools window shows as "Not installed"; false = only the ones ShinyForge needs now.</param>
+    public static void InstallAll(IWin32Window? owner, bool? isSwitch, bool everything)
     {
-        var relevant = DependencyService.All.Where(d => isSwitch is null || (isSwitch.Value ? d.ForSwitch : d.For3DS)).ToList();
-        foreach (var d in relevant) DependencyService.Refresh(d);
-        var missing = relevant.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+        var missing = DependencyService.MissingTools(isSwitch, everything);
         if (missing.Count == 0)
         {
             MessageBox.Show(owner, "Everything is already installed.", "ShinyForge");
@@ -183,7 +182,7 @@ public sealed class ToolsForm : Form
                    "Windows may ask for permission for some installers - click Yes.";
         if (MessageBox.Show(owner, text, "ShinyForge - install everything", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
-        RunInstall(owner, "Installing missing programs...", p => DependencyService.InstallAllMissing(isSwitch, p));
+        RunInstall(owner, "Installing missing programs...", p => DependencyService.InstallAllMissing(isSwitch, everything, p));
     }
 
     /// <summary>Asks whether to install a missing program automatically or manually, then does it.</summary>

@@ -2199,5 +2199,34 @@ if (tests.Contains("livingdex"))
     f.Close();
 }
 
+if (tests.Contains("installall"))
+{
+    // "Install all missing" in Tools & Updates installs every tool the window shows as "Not installed" - also pokeldn before
+    // the wireless-trades setup - while the startup banner still only offers what ShinyForge needs now.
+    var s = AppSettings.Current;
+    var setup = s.PokeldnSetupDone;
+    s.PokeldnSetupDone = false; // in memory only
+    var shown = DependencyService.MissingTools(true, everything: true).Select(d => d.Name).ToList();
+    var needed = DependencyService.MissingTools(true, everything: false).Select(d => d.Name).ToList();
+    Console.WriteLine($"   not installed (window): {string.Join(", ", shown)}   needed now: {string.Join(", ", needed)}");
+    var rows = DependencyService.All.Where(d => d.ForSwitch && d.State == DepState.Missing).Select(d => d.Name).ToList();
+    Check(shown.SequenceEqual(rows), "Install all covers every \"Not installed\" row");
+    Check(!needed.Contains("pokeldn"), "startup banner doesn't push pokeldn before its setup");
+    if (shown.Contains("pokeldn"))
+    {
+        var msg = await DependencyService.InstallAllMissing(true, everything: true, p => Console.WriteLine("   " + p));
+        Console.WriteLine("   " + msg.Replace(Environment.NewLine, Environment.NewLine + "   "));
+        var pk = DependencyService.All.First(d => d.Name == "pokeldn");
+        DependencyService.Refresh(pk);
+        Check(pk.State != DepState.Missing, $"pokeldn installed ({pk.Path})");
+    }
+    s.PokeldnSetupDone = setup;
+    InitUi();
+    using var form = new ToolsForm(true);
+    static IEnumerable<Control> Walk(Control c) => c.Controls.Cast<Control>().SelectMany(x => Walk(x).Prepend(x));
+    var title = Walk(form).OfType<Label>().FirstOrDefault(l => l.Text == "Tools & Updates");
+    Check(title is { UseMnemonic: false }, "title shows \"Tools & Updates\" (the & isn't eaten)");
+}
+
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
 return failures;
