@@ -2,6 +2,25 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.7
+
+Fixes from a live test of the Switch features on a real Switch (FireRed / LeafGreen).
+
+### Fixed
+- **sys-botbase-cpp can no longer trap you.** On consoles like the tested one, sys-botbase-cpp runs out of memory when it's asked for a screenshot over WiFi and then stops answering until a restart. ShinyForge now never asks it for that screenshot over WiFi, recognises a frozen sys-botbase (it used to call it "old (original)" and grey out Restore), keeps **Restore previous sys-botbase** available, and explains how to start the FTP app by hand for it. Installing sys-botbase-cpp over WiFi asks first with that warning (default No), and Enter in the sys-botbase window no longer installs it (Close / Restore is the default button).
+- **Restore puts the original sys-botbase back, not cpp.** Reinstalling sys-botbase-cpp used to "back up" cpp itself, and Restore then used that copy. Backups that are a sys-botbase-cpp build are skipped.
+- **Starting a hunt while another game is open** names the game (not its title ID) and offers to close it - for FireRed / LeafGreen also to save it first. The same for the FTP app (Checkpoint saves, sys-botbase install): no more "press HOME, X, Close yourself".
+- **SysBot.exe hunter:** the game is opened first, like for the Python hunter (SysBot stopped at once when the game wasn't running).
+- **No save in the game for this Switch user** (FireRed / LeafGreen): ShinyForge used to press A into NEW GAME and report the save as loaded, and the hunter then walked around blind. Now it stops with "no save for this Switch user", and the hunter never starts without a loaded save.
+- **The hunter could be started only once:** after it stopped on its own, its console window (left open to show why) made ShinyForge say "already running".
+- **Hunt options apply to a running hunt** from its next encounter (stop targets, rules, auto-catch, notifications) - no Stop + Start needed.
+- **Stop Python hunter** marks the hunt as stopped (the status file kept saying "hunting") and says so in the status bar. When the hunter stops on its own, the message says why.
+- **Statistics** explain why they show fewer encounters than the log: repeats of the same RNG frame (the same Pokémon right after itself) aren't counted.
+- **Clips of a stop target that isn't shiny** are named `Found_<Pokémon>_...` instead of `Shiny_...`.
+- **Pokédex / Sync now (live from the Switch)** never read another game that happens to be running, and a game without a loaded save is an error instead of "0 Pokémon". The Pokédex then shows the save file instead of an empty dex.
+- **Only one ShinyForge** (per data folder): starting it again brings the open window to the front instead of a second copy.
+- **Pokémon Automation:** if Windows marks it as downloaded from the internet (it then asks "The publisher could not be verified" at every start), ShinyForge offers to unblock it; cancelling Windows' question no longer shows an error.
+
 ## 1.2.6
 
 ### Added
