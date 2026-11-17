@@ -2,6 +2,17 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.0
+
+### New
+- **Stop targets for every game with a bot.** Each game has its own list: pick any Pokémon you can get in that game (type its name or number), its **form**, **gender** and **shiny** (shiny only, not shiny, and star / square in Sword/Shield). The list comes from PKHeX's game data, without event gifts. Impossible picks are refused with a warning: a male Chansey, a female Magnemite, a shiny Zacian in Sword (shiny-locked), a form the game doesn't have. The bots still stop on every shiny on top of the targets.
+  - FireRed / LeafGreen (Python hunter) and 3DS games check every target (**Hunt options** / **Stop rules**).
+  - SysBot.exe games (Let's Go, Sword/Shield, BD/SP) get a **Stop targets** button. SysBot uses the first target; gender needs the *TargetGender* condition in a self-built Sys-EncounterBot.
+  - The old "species, comma separated" box is moved into the targets automatically.
+- **Auto-catch: choose the ball by name** (Master, Ultra, Great, Poké, Net, Nest, Repeat, Timer, Luxury, Premier, Dive, Safari). The hunter reads your Poké Balls pocket to find it, then picks it in the battle bag one step at a time, checking every step on a screenshot. If a step fails it throws nothing and leaves the battle to you. It warns at the start of the hunt if the ball isn't in your bag. Tested in a real Deoxys battle (Great Ball, and Timer Ball further down the list).
+- **Tool versions in Tools & Updates**: every tool shows the version you have next to its name.
+- **SysBot must be up to date**: before a hunt or a tool starts, an outdated SysBot.exe asks to be updated first (Yes = update, No = continue this time, Cancel = stop). A copy built from source opens the download page to rebuild.
+
 ## 1.1.1
 
 ### New
