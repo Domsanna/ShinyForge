@@ -1376,6 +1376,68 @@ if (tests.Contains("switchfind"))
     Check(bot.TitleId() == null, "still nothing running");
 }
 
+if (tests.Contains("stoptargets"))
+{
+    // Offline: which Pokémon each hunt game offers, and the impossible picks refused with the user's message.
+    foreach (var id in new[] { "sw_frlg_lg", "sw_sword", "sw_bd", "sw_lgp", "3ds_x", "3ds_usun", "3ds_or", "gb_red", "gbc_crystal" })
+    {
+        if (GameCatalog.All.FirstOrDefault(g => g.Id == id) is not { } g) { Console.WriteLine($"   ({id} not in the catalog)"); continue; }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var list = StopTargets.Available(g);
+        Console.WriteLine($"   {g.Title,-22} {list.Count,4} Pokémon, {list.Count(o => !o.ShinyPossible),3} shiny-locked  ({sw.Elapsed.TotalSeconds:F1} s)  " +
+                          string.Join(", ", list.Where(o => !o.ShinyPossible).Select(o => o.Name)));
+    }
+    var lg = GameCatalog.Get("sw_frlg_lg");
+    var sword = GameCatalog.Get("sw_sword");
+    string? P(Game g, ushort sp, string gender = "any", string shiny = "any", int form = -1) =>
+        StopTargets.Problem(g, new StopTarget { Species = sp, Gender = gender, Shiny = shiny, Form = form });
+    Check(P(lg, 113, "female") == null && P(lg, 113, "male") is { } male && male.Contains("does not exist"), "LeafGreen: female Chansey ok, male Chansey refused with the warning");
+    Check(P(lg, 81, "female") != null && P(lg, 81) == null, "genderless Magnemite: 'female' refused, 'any' ok");
+    Check(P(lg, 386, shiny: "shiny") == null, "LeafGreen: shiny Deoxys possible");
+    Check(P(lg, 25, shiny: "square") != null, "LeafGreen has no square shinies");
+    Check(StopTargets.Available(lg).First(o => o.Species == 201).Forms.Count(f => f.Length > 0) == 28, "LeafGreen: Unown has 28 forms");
+    Check(P(sword, 888, shiny: "shiny") != null && P(sword, 888) == null, "Sword: Zacian is shiny-locked");
+    Check(P(sword, 52, form: 2) == null && P(sword, 52, form: 3) != null, "Sword: Galarian Meowth ok, a Meowth form that doesn't exist refused");
+    Check(P(lg, 52, form: 2) != null && P(lg, 52) == null, "LeafGreen: no Galarian Meowth (Gen 3), Meowth itself ok");
+    Check(P(lg, 133) == null && P(lg, 810) != null, "LeafGreen: Eevee yes, Grookey (Gen 8) no");
+    // what the bots get (in memory only - settings aren't saved): SysBot's stop conditions and the Python hunter's targets
+    var keepSword = AppSettings.Current.For("sw_sword").StopTargets;
+    var keepLg = AppSettings.Current.For("sw_frlg_lg").StopTargets;
+    try
+    {
+        AppSettings.Current.For("sw_sword").StopTargets = new() { new StopTarget { Species = 133, Gender = "female", Shiny = "square" } };
+        var cfg = Path.Combine(work, "sysbot-config.json");
+        File.WriteAllText(cfg, "{\"StopConditions\": {\"TargetNatures\": \"Jolly\"}, \"Bots\": []}");
+        HuntService.PrepareSysBotConfig(cfg, "192.0.2.1", 6000, 1, sword);
+        var stop = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(cfg))!["StopConditions"]!;
+        Check((int)stop["StopOnSpecies"]! == 133 && (int)stop["TargetGender"]! == 2 && (int)stop["ShinyTarget"]! == 4 && stop["StopOnForm"] == null
+              && (string)stop["TargetNatures"]! == "Jolly", $"SysBot gets the first target (square-shiny female Eevee), other settings kept: {stop.ToJsonString()}");
+        AppSettings.Current.For("sw_sword").StopTargets = new();
+        HuntService.PrepareSysBotConfig(cfg, "192.0.2.1", 6000, 1, sword);
+        stop = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(cfg))!["StopConditions"]!;
+        Check((int)stop["StopOnSpecies"]! == 0 && (int)stop["ShinyTarget"]! == 2, "no targets: SysBot stops on any shiny");
+
+        AppSettings.Current.For("sw_frlg_lg").StopTargets = new() { new StopTarget { Species = 386, Shiny = "shiny" }, new StopTarget { Species = 201, Form = 3 } };
+        var bot = Path.Combine(work, "pybot"); Directory.CreateDirectory(bot);
+        HuntService.WriteBotOverrides(bot, lg);
+        var py = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(bot, "shinyforge.json")))!["stop_rules"]!["targets"]!.AsArray();
+        Check(py.Count == 2 && (int)py[0]!["species_index"]! == 410 && (string)py[0]!["shiny"]! == "shiny" && (int)py[1]!["species_index"]! == 201 && (int)py[1]!["form"]! == 3,
+            $"Python hunter gets the targets with Gen 3 internal numbers (Deoxys = 410): {py.ToJsonString()}");
+    }
+    finally { AppSettings.Current.For("sw_sword").StopTargets = keepSword; AppSettings.Current.For("sw_frlg_lg").StopTargets = keepLg; }
+
+    if (tests.Contains("debug"))
+        foreach (var (g, sp, form) in new[] { (sword, (ushort)888, (byte)0), (sword, (ushort)52, (byte)1), (sword, (ushort)52, (byte)2), (lg, (ushort)201, (byte)5) })
+        {
+            var pk = PKHeX.Core.EntityBlank.GetBlank(DexData.Context(g), PKHeX.Core.LanguageID.English);
+            pk.Species = sp; pk.Form = form;
+            var encs = PKHeX.Core.EncounterMovesetGenerator.GenerateEncounters(pk, ReadOnlyMemory<ushort>.Empty, g.Versions).Take(12).ToList();
+            Console.WriteLine($"   {g.Title} #{sp} form {form}: {encs.Count} encounters: " + string.Join("; ", encs.Select(e => $"{e.GetType().Name} shiny={e.Shiny} form={e.Form}")));
+            var o = StopTargets.Available(g).FirstOrDefault(x => x.Species == sp);
+            Console.WriteLine($"      option: forms=[{string.Join(", ", o?.Forms ?? Array.Empty<string>())}] shinyPossible={o?.ShinyPossible}");
+        }
+}
+
 if (tests.Contains("sysbotproto"))
 {
     // Offline: a fake sys-botbase on localhost answers like 2.x (error lines + blank line) and 3.x ("0"); the session must
@@ -1871,7 +1933,8 @@ if (tests.Contains("featuresui"))
         f.Close();
         Console.WriteLine("   rendered " + name);
     }
-    Snap(new HuntOptionsForm(true), "hunt_options");
+    Snap(new HuntOptionsForm(GameCatalog.Get("sw_frlg_lg"), true), "hunt_options");
+    Snap(new HuntOptionsForm(GameCatalog.Get("sw_sword"), false, targetsOnly: true), "stop_targets_sword");
     Snap(new HuntStatsForm("Python"), "hunt_stats", 2000);
     Snap(new SettingsForm(), "settings");
     Snap(new BackupsForm(), "backups");

@@ -16,7 +16,9 @@ public sealed class HuntOptionsForm : Form
     private readonly HuntOptions _o = AppSettings.Current.Hunt;
     private readonly bool _rngAvailable;
 
-    public HuntOptionsForm(bool rngAvailable)
+    /// <param name="game">The game whose stop targets are edited.</param>
+    /// <param name="targetsOnly">SysBot.exe games: only the stop targets (SysBot has its own other settings).</param>
+    public HuntOptionsForm(Game game, bool rngAvailable, bool targetsOnly = false)
     {
         _rngAvailable = rngAvailable;
         Text = "ShinyForge - hunt options";
@@ -59,13 +61,103 @@ public sealed class HuntOptionsForm : Form
             return d;
         }
 
+        // ---------------------------------------------------------------- stop targets (this game)
+        var gs = AppSettings.Current.For(game.Id);
+        var available = StopTargets.Available(game);
+        var targets = gs.StopTargets.Select(t => new StopTarget { Species = t.Species, Form = t.Form, Gender = t.Gender, Shiny = t.Shiny }).ToList();
+        if (targets.Count == 0 && _o.StopSpecies.Trim().Length > 0) // the old "species, comma separated" box → targets
+            foreach (var n in _o.StopSpecies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (available.FirstOrDefault(o => o.Name.Equals(n, StringComparison.OrdinalIgnoreCase)) is { } hit)
+                    targets.Add(new StopTarget { Species = hit.Species });
+        body.Controls.Add(H($"Stop targets - Pokémon {game.Title}"));
+        body.Controls.Add(P("Stop when one of these shows up: any Pokémon you can get in this game, with its form, gender and whether it must " +
+                            "be shiny. The bot still stops on EVERY shiny on top of these." +
+                            (targetsOnly ? " SysBot.exe holds one target, so it uses the first one in the list." : "")));
+        var targetList = new ListBox { Width = 740, Height = 110, BackColor = Theme.PanelHi, ForeColor = Theme.Text, BorderStyle = BorderStyle.None };
+        void ShowTargets() { targetList.Items.Clear(); foreach (var t in targets) targetList.Items.Add(StopTargets.Describe(game, t)); }
+        ShowTargets();
+        body.Controls.Add(targetList);
+        ComboBox Combo(int w, bool editable = false)
+        {
+            var c = new ComboBox { Width = w };
+            Theme.StyleInput(c);
+            if (editable) c.DropDownStyle = ComboBoxStyle.DropDown; // typing a name: after the theme (it sets a pick-only list)
+            return c;
+        }
+        var pick = Combo(230, editable: true);
+        pick.Items.AddRange(available.Select(o => (object)$"#{o.Species:000} {o.Name}").ToArray());
+        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA) // Windows' autocomplete only works there (ShinyForge's UI is STA)
+        {
+            pick.AutoCompleteSource = AutoCompleteSource.ListItems; // the source first: the mode needs it
+            pick.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+        }
+        var formBox = Combo(170);
+        var genderBox = Combo(110);
+        genderBox.Items.AddRange(new object[] { "Any gender", "Male", "Female" });
+        genderBox.SelectedIndex = 0;
+        var shinyChoices = new List<(string Key, string Text)> { ("any", "Shiny or not"), ("shiny", "Shiny only") };
+        if (StopTargets.HasSquareShinies(game)) { shinyChoices.Add(("star", "Star shiny only")); shinyChoices.Add(("square", "Square shiny only")); }
+        shinyChoices.Add(("not", "Not shiny"));
+        var shinyBox = Combo(140);
+        shinyBox.Items.AddRange(shinyChoices.Select(c => (object)c.Text).ToArray());
+        shinyBox.SelectedIndex = 0;
+        // the species typed / picked: "#025 Pikachu", "Pikachu" or "25" - also species the game doesn't have (they get the warning)
+        ushort? SpeciesOf(string text)
+        {
+            text = text.Trim();
+            if (text.StartsWith('#')) text = text[1..];
+            var digits = new string(text.TakeWhile(char.IsDigit).ToArray());
+            if (digits.Length > 0 && ushort.TryParse(digits, out var n)) return n;
+            var all = PKHeX.Core.GameInfo.Strings.specieslist;
+            var i = Array.FindIndex(all, s => s.Equals(text, StringComparison.OrdinalIgnoreCase));
+            return i > 0 ? (ushort)i : null;
+        }
+        var formKeys = new List<int>();
+        void FillForms()
+        {
+            formBox.Items.Clear(); formKeys.Clear();
+            formBox.Items.Add("Any form"); formKeys.Add(-1);
+            if (SpeciesOf(pick.Text) is { } sp && available.FirstOrDefault(o => o.Species == sp) is { Forms.Length: > 1 } o)
+                for (var f = 0; f < o.Forms.Length; f++)
+                    if (o.Forms[f].Length > 0) { formBox.Items.Add(o.Forms[f]); formKeys.Add(f); }
+            formBox.SelectedIndex = 0;
+        }
+        pick.SelectedIndexChanged += (_, _) => FillForms();
+        pick.Leave += (_, _) => FillForms();
+        FillForms();
+        var add = new FancyButton("Add", Theme.GlyphCheck, Theme.Accent) { Height = 34 };
+        var remove = new FancyButton("Remove", "", Theme.PanelHi) { Height = 34 };
+        add.Click += (_, _) =>
+        {
+            if (SpeciesOf(pick.Text) is not { } sp)
+            {
+                MessageBox.Show(this, $"There's no Pokémon called \"{pick.Text.Trim()}\". {StopTargets.NotExisting}", "Stop targets", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            var t = new StopTarget
+            {
+                Species = sp, Form = formBox.SelectedIndex >= 0 && formBox.SelectedIndex < formKeys.Count ? formKeys[formBox.SelectedIndex] : -1,
+                Gender = genderBox.SelectedIndex switch { 1 => "male", 2 => "female", _ => "any" },
+                Shiny = shinyChoices[Math.Max(0, shinyBox.SelectedIndex)].Key,
+            };
+            if (StopTargets.Problem(game, t) is { } problem)
+            {
+                MessageBox.Show(this, problem, "Stop targets", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (targets.Any(x => x.Species == t.Species && x.Form == t.Form && x.Gender == t.Gender && x.Shiny == t.Shiny)) return;
+            targets.Add(t);
+            ShowTargets();
+        };
+        remove.Click += (_, _) => { if (targetList.SelectedIndex >= 0) { targets.RemoveAt(targetList.SelectedIndex); ShowTargets(); } };
+        body.Controls.Add(Row(L("Pokémon:"), pick, L("Form:"), formBox));
+        body.Controls.Add(Row(L("Gender:"), genderBox, L("Shiny:"), shinyBox, add, remove));
+
         // ---------------------------------------------------------------- stop rules
+        var rulesStart = body.Controls.Count;
         body.Controls.Add(H("Stop on more than shinies"));
         body.Controls.Add(P("The bot always stops on a shiny. It can ALSO stop when an encounter matches these rules " +
                             "(e.g. a Jolly nature, 31 Speed, IV total ≥ 150). Leave everything empty to stop on shinies only."));
-        var species = new TextBox { Width = 500, Text = _o.StopSpecies };
-        Theme.StyleInput(species);
-        body.Controls.Add(Row(L("Species (comma separated):"), species));
         body.Controls.Add(L("Natures:"));
         var stopNatures = NatureList(_o.StopNatures);
         body.Controls.Add(stopNatures);
@@ -127,9 +219,14 @@ public sealed class HuntOptionsForm : Form
         };
         SyncRng();
 
+        // SysBot.exe games: only the stop targets (the rest is the Python hunter's / 3DS bot's)
+        if (targetsOnly)
+            for (var i = rulesStart; i < body.Controls.Count; i++) body.Controls[i].Visible = false;
+
         save.Click += (_, _) =>
         {
-            _o.StopSpecies = species.Text.Trim();
+            gs.StopTargets = targets;
+            _o.StopSpecies = ""; // replaced by the per-game stop targets
             _o.StopNatures = stopNatures.CheckedItems.Cast<string>().ToList();
             _o.MinIvTotal = (int)minTotal.Value;
             _o.MinIvs = stopIvs.ToDictionary(k => k.Key, v => (int)v.Value.Value);
@@ -145,7 +242,7 @@ public sealed class HuntOptionsForm : Form
             }
             AppSettings.Current.Save();
             var bot = AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder);
-            if (bot != null) try { HuntService.WriteBotOverrides(bot); } catch (Exception ex) { MessageBox.Show(this, ex.Message); }
+            if (bot != null && game.Bot == BotKind.FrlgSwitch) try { HuntService.WriteBotOverrides(bot, game); } catch (Exception ex) { MessageBox.Show(this, ex.Message); }
             if (HuntService.IsPythonHuntRunning())
                 MessageBox.Show(this, "Saved. The running Python hunter uses the new options after it's restarted (Stop, then Start hunting).", "Hunt options");
             DialogResult = DialogResult.OK;

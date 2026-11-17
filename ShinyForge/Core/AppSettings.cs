@@ -18,15 +18,27 @@ public sealed class GameSettings
     public string SpreadsheetPath { get; set; } = "";  // auto-detected if empty
     public bool AutoMonitor { get; set; }
     public string HuntBot { get; set; } = "";
+    /// <summary>Stop when one of these shows up (besides any shiny) - see Services.StopTargets.</summary>
+    public List<StopTarget> StopTargets { get; set; } = new();
     /// <summary>The Checkpoint backup folder (on the SD card) last copied for this game; set = the next scan is a rescan.</summary>
     public string CheckpointBackup { get; set; } = "";
+}
+
+/// <summary>One stop target: a species, a form (-1 = any), a gender (any / male / female) and shiny (any / shiny / star / square / not).</summary>
+public sealed class StopTarget
+{
+    public ushort Species { get; set; }
+    public int Form { get; set; } = -1;
+    public string Gender { get; set; } = "any";
+    public string Shiny { get; set; } = "any";
 }
 
 /// <summary>Hunt options chosen in the "Hunt options" window (used by the Python hunter and the 3DS bot).</summary>
 public sealed class HuntOptions
 {
     // stop rules (besides shinies)
-    public string StopSpecies { get; set; } = "";              // comma separated
+    /// <summary>Old "species, comma separated" box - moved into each game's StopTargets when its Hunt options are saved.</summary>
+    public string StopSpecies { get; set; } = "";
     public List<string> StopNatures { get; set; } = new();
     public int MinIvTotal { get; set; }                        // 0 = off
     public Dictionary<string, int> MinIvs { get; set; } = new(); // HP Atk Def SpA SpD Spe -> 0..31
@@ -40,7 +52,8 @@ public sealed class HuntOptions
     public List<string> RngNatures { get; set; } = new();
     public Dictionary<string, int> RngMinIvs { get; set; } = new();
 
-    public bool HasStopRules => StopSpecies.Trim().Length > 0 || StopNatures.Count > 0 || MinIvTotal > 0 || MinIvs.Values.Any(v => v > 0);
+    /// <summary>Nature / IV rules set (the stop targets are per game: GameSettings.StopTargets).</summary>
+    public bool HasStopRules => StopNatures.Count > 0 || MinIvTotal > 0 || MinIvs.Values.Any(v => v > 0);
 }
 
 public sealed class AppSettings

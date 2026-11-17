@@ -59,17 +59,19 @@ public static class HuntService
     /// shinyforge.json in the bot folder: the hunt options, notification settings and (only if the user turned it on) the
     /// RNG mode. The bot merges it over config.yaml when it starts.
     /// </summary>
-    public static void WriteBotOverrides(string botDir)
+    public static void WriteBotOverrides(string botDir, Game? game = null)
     {
         var s = AppSettings.Current;
         var h = s.Hunt;
+        // the Python hunter plays FireRed / LeafGreen: this game's stop targets (the one being hunted / edited, else the last one)
+        game ??= _lastPython?.Game ?? GameCatalog.Get(s.Games.ContainsKey("sw_frlg_fr") && !s.Games.ContainsKey("sw_frlg_lg") ? "sw_frlg_fr" : "sw_frlg_lg");
         var o = new JsonObject
         {
             // "rng" only when the user chose it in Hunt options; otherwise null = keep config.yaml's mode (auto).
             ["mode"] = h.RngEnabled ? "rng" : null,
             ["stop_rules"] = new JsonObject
             {
-                ["species"] = new JsonArray(h.StopSpecies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => (JsonNode)x).ToArray()),
+                ["targets"] = PythonTargets(game),
                 ["natures"] = new JsonArray(h.StopNatures.Select(x => (JsonNode)x).ToArray()),
                 ["min_iv_total"] = h.MinIvTotal,
                 ["min_ivs"] = new JsonObject(h.MinIvs.Where(kv => kv.Value > 0).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
@@ -89,6 +91,41 @@ public static class HuntService
             },
         };
         File.WriteAllText(Path.Combine(botDir, "shinyforge.json"), o.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    /// <summary>
+    /// The game's stop targets for the Python hunter (Gen 3): species as the game's INTERNAL index (what it reads from RAM),
+    /// the gender ratio (it works the gender out from the PID), form (Unown's letter, also from the PID), shiny.
+    /// </summary>
+    private static JsonArray PythonTargets(Game game)
+    {
+        var personal = PKHeX.Core.GameData.GetPersonal(game.Versions[0]);
+        return new JsonArray(AppSettings.Current.For(game.Id).StopTargets.Select(t => (JsonNode)new JsonObject
+        {
+            ["name"] = StopTargets.Describe(game, t),
+            ["species_index"] = PKHeX.Core.SpeciesConverter.GetInternal3(t.Species),
+            ["gender_ratio"] = personal[t.Species].Gender,
+            ["form"] = t.Form,
+            ["gender"] = t.Gender,
+            ["shiny"] = t.Shiny,
+        }).ToArray());
+    }
+
+    /// <summary>
+    /// SysBot.exe's stop conditions from the game's first stop target (SysBot holds one): species, form, gender (the
+    /// TargetGender condition added to the user's Sys-EncounterBot) and shiny type. No target = stop on any shiny.
+    /// Enums are written as numbers (SysBot reads both).
+    /// </summary>
+    private static void WriteSysBotStopConditions(JsonObject root, Game game)
+    {
+        var stop = root["StopConditions"] as JsonObject ?? new JsonObject();
+        var t = AppSettings.Current.For(game.Id).StopTargets.FirstOrDefault();
+        stop["StopOnSpecies"] = t?.Species ?? 0;                                   // Species.None
+        stop["StopOnForm"] = t is { Form: >= 0 } ? t.Form : null;
+        stop["TargetGender"] = t?.Gender switch { "male" => 1, "female" => 2, _ => 0 };
+        // TargetShinyType: DisableOption 0, NonShiny 1, AnyShiny 2, StarOnly 3, SquareOnly 4
+        stop["ShinyTarget"] = t == null ? 2 : t.Shiny switch { "shiny" => 2, "star" => 3, "square" => 4, "not" => 1, _ => 0 };
+        root["StopConditions"] = stop;
     }
 
     // ------------------------------------------------------------------ pause / remote / status
@@ -190,7 +227,7 @@ public static class HuntService
             var botDir = AppPaths.FindPythonBotFolder(s.PythonBotFolder)
                 ?? throw new FileNotFoundException($"The ShinyForge Python bot wasn't found in {s.PythonBotFolder} or the Backup Tools folder ({AppPaths.BackupToolsDir}). Set its folder in Settings.");
             SyncBotConfig(botDir, s.SwitchIP, s.SwitchPort);
-            WriteBotOverrides(botDir);
+            WriteBotOverrides(botDir, game);
             try { File.Delete(Path.Combine(botDir, "pause.flag")); } catch { }
             _lastPython = (game, key, botDir);
             StartStatusWatch(botDir);
@@ -237,12 +274,12 @@ public static class HuntService
         var sysbot = DependencyService.PathOf("SysBot.exe")
             ?? throw new FileNotFoundException($"SysBot.exe wasn't found on this PC or in the Backup Tools folder ({AppPaths.BackupToolsDir}). Set its path in Settings.", s.SysBotPath);
         var routine = game.Bot switch { BotKind.SysBotLGPE => LGPE, BotKind.SysBotSWSH => SWSH, BotKind.SysBotBDSP => BDSP, _ => FRLG };
-        PrepareSysBotConfig(Path.Combine(Path.GetDirectoryName(sysbot)!, "config.json"), s.SwitchIP, s.SwitchPort, routine);
+        PrepareSysBotConfig(Path.Combine(Path.GetDirectoryName(sysbot)!, "config.json"), s.SwitchIP, s.SwitchPort, routine, game);
         Process.Start(new ProcessStartInfo(sysbot) { WorkingDirectory = Path.GetDirectoryName(sysbot)!, UseShellExecute = true });
     }
 
-    /// <summary>Points SysBot's first bot at the Switch and pre-selects the routine (keeps every other setting).</summary>
-    private static void PrepareSysBotConfig(string path, string ip, int port, int routine)
+    /// <summary>Points SysBot's first bot at the Switch, pre-selects the routine and sets the stop conditions (keeps every other setting).</summary>
+    internal static void PrepareSysBotConfig(string path, string ip, int port, int routine, Game game)
     {
         JsonObject root;
         try { root = File.Exists(path) ? JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject() : new JsonObject(); }
@@ -261,6 +298,7 @@ public static class HuntService
         conn["Protocol"] ??= 0;
         bot["Connection"] = conn;
         bot["InitialRoutine"] = routine;
+        WriteSysBotStopConditions(root, game);
         File.WriteAllText(path, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
     }
 

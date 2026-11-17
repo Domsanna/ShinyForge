@@ -36,7 +36,7 @@ public static class Screenshots
             await Window(new DexWindow(GameCatalog.Get("sw_shield"), _ => null), Path.Combine(dir, "4_dex_shield.png"), log, 4000);
             await Window(new SettingsWindow(), Path.Combine(dir, "5_settings.png"), log);
             await Window(new ToolsWindow(true), Path.Combine(dir, "5_tools.png"), log);
-            await Window(new HuntOptionsWindow(true), Path.Combine(dir, "5_hunt_options.png"), log);
+            await Window(new HuntOptionsWindow(GameCatalog.Get("sw_frlg_lg"), true), Path.Combine(dir, "5_hunt_options.png"), log);
             await Window(new HuntStatsWindow(), Path.Combine(dir, "5_hunt_stats.png"), log, 2000);
             await Window(new HealthWindow(), Path.Combine(dir, "5_health.png"), log);
             await Window(new BackupsWindow(), Path.Combine(dir, "5_backups.png"), log);

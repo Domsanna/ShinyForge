@@ -66,10 +66,46 @@ def wait_while_paused(on_pause=None):
 
 
 # ---------------------------------------------------------------------------- stop rules
+def gen3_gender(pid: int, ratio: int) -> int:
+    """0 = male, 1 = female, 2 = genderless (Gen 3: the PID's low byte against the species' gender ratio)."""
+    if ratio == 255:
+        return 2
+    if ratio == 254:
+        return 1
+    if ratio == 0:
+        return 0
+    return 1 if (pid & 0xFF) < ratio else 0
+
+
+def gen3_unown_form(pid: int) -> int:
+    """Unown's letter (0 = A ... 25 = Z, 26 = !, 27 = ?) from its PID."""
+    return (((pid >> 24) & 3) << 6 | ((pid >> 16) & 3) << 4 | ((pid >> 8) & 3) << 2 | (pid & 3)) % 28
+
+
+UNOWN_INDEX = 201  # internal index = National Dex number below 252
+
+
+def target_matches(p, t: dict) -> bool:
+    """A stop target from ShinyForge: {"species_index", "gender_ratio", "form" (-1 any), "gender", "shiny", "name"}."""
+    if p.species != int(t.get("species_index", -1)):
+        return False
+    form = int(t.get("form", -1))
+    if form >= 0 and p.species == UNOWN_INDEX and gen3_unown_form(p.pid) != form:
+        return False
+    gender = (t.get("gender") or "any").lower()
+    actual = gen3_gender(p.pid, int(t.get("gender_ratio", 127)))
+    if gender == "male" and actual != 0 or gender == "female" and actual != 1:
+        return False
+    shiny = (t.get("shiny") or "any").lower()
+    if shiny in ("shiny", "star", "square") and not p.is_shiny or shiny == "not" and p.is_shiny:
+        return False
+    return True
+
+
 def check_rules(p, rules: dict | None) -> str | None:
     """Returns why the bot should stop for Pokemon `p` (besides being shiny), or None.
 
-    rules = {"species": ["Snorlax"], "natures": ["Adamant", "Jolly"], "min_iv_total": 150,
+    rules = {"targets": [{...stop target from ShinyForge...}], "natures": ["Adamant", "Jolly"], "min_iv_total": 150,
              "min_ivs": {"Spe": 31, "Atk": 25}, "require_all": false}
     require_all = true: every given condition must match; false: any one is enough."""
     if not rules:
@@ -77,6 +113,9 @@ def check_rules(p, rules: dict | None) -> str | None:
     checks = []
     if rules.get("species"):
         checks.append(("species " + p.species_name, p.species_name.lower() in [s.lower() for s in rules["species"]]))
+    if rules.get("targets"):
+        hit = next((t for t in rules["targets"] if target_matches(p, t)), None)
+        checks.append((hit["name"] if hit else "a stop target", hit is not None))
     if rules.get("natures"):
         checks.append(("nature " + p.nature, p.nature.lower() in [n.lower() for n in rules["natures"]]))
     if rules.get("min_iv_total"):

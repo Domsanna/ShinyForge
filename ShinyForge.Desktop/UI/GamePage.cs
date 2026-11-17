@@ -261,7 +261,7 @@ public sealed class GamePage : UserControl, IDisposable
                 RefreshHuntStatus();
             };
             var opts = new FancyButton("Hunt options", Skin.GlyphSettings, Skin.PanelHi);
-            opts.Click += async (_, _) => { await new HuntOptionsWindow(rngAvailable: true).ShowDialog(Dialogs.Owner(this)!); RefreshHuntStatus(); };
+            opts.Click += async (_, _) => { await new HuntOptionsWindow(_game, rngAvailable: true).ShowDialog(Dialogs.Owner(this)!); RefreshHuntStatus(); };
             var stats = new FancyButton("Statistics", Skin.GlyphInfo, Skin.PanelHi);
             stats.Click += (_, _) => new HuntStatsWindow("Python").Show(Dialogs.Owner(this)!);
             card.Body.Children.Add(Skin.Wrap(pause, opts, stats));
@@ -322,7 +322,7 @@ public sealed class GamePage : UserControl, IDisposable
                 Host = ip,
                 Mode = mode.SelectedIndex switch { 1 => Hunt3DSMode.StaticSoftReset, 2 => Hunt3DSMode.WildWalking, _ => Hunt3DSMode.Auto },
                 WalkHorizontal = axis.SelectedIndex == 0,
-                StopRule = StopRuleFor3DS(),
+                StopRule = StopRuleFor3DS(_game),
             };
             _bot3ds = new Bot3DS(options);
             _bot3ds.Log += s => { _last3dsActivity = DateTime.Now; Say(s); };
@@ -383,7 +383,7 @@ public sealed class GamePage : UserControl, IDisposable
         stop.Click += (_, _) => { _hunt3ds?.Cancel(); Say("Stopping..."); };
         card.Body.Children.Add(Skin.Wrap(start, stop, test));
         var rules = new FancyButton("Stop rules", Skin.GlyphSettings, Skin.PanelHi);
-        rules.Click += async (_, _) => await new HuntOptionsWindow(rngAvailable: false).ShowDialog(Dialogs.Owner(this)!);
+        rules.Click += async (_, _) => await new HuntOptionsWindow(_game, rngAvailable: false).ShowDialog(Dialogs.Owner(this)!);
         var stats = new FancyButton("Statistics", Skin.GlyphInfo, Skin.PanelHi);
         stats.Click += (_, _) => new HuntStatsWindow(_game.Title).Show(Dialogs.Owner(this)!);
         card.Body.Children.Add(Skin.Wrap(rules, stats));
@@ -392,16 +392,19 @@ public sealed class GamePage : UserControl, IDisposable
     }
 
     /// <summary>The stop rules from Hunt options, as a check for the 3DS bot (null = shinies only).</summary>
-    private static Func<PKM, string?>? StopRuleFor3DS()
+    private static Func<PKM, string?>? StopRuleFor3DS(Game game)
     {
         var o = AppSettings.Current.Hunt;
-        if (!o.HasStopRules) return null;
-        var species = o.StopSpecies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var targets = AppSettings.Current.For(game.Id).StopTargets.ToList();
+        if (!o.HasStopRules && targets.Count == 0) return null;
         return pk =>
         {
             var checks = new List<(string Name, bool Ok)>();
-            var name = SpeciesName.GetSpeciesName(pk.Species, 2);
-            if (species.Count > 0) checks.Add(("species " + name, species.Contains(name, StringComparer.OrdinalIgnoreCase)));
+            if (targets.Count > 0)
+            {
+                var hit = targets.FirstOrDefault(t => StopTargets.Matches(t, pk));
+                checks.Add((hit != null ? StopTargets.Describe(game, hit) : "a stop target", hit != null));
+            }
             var nature = ((Nature)pk.Nature).ToString();
             if (o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
             var ivs = new Dictionary<string, int> { ["HP"] = pk.IV_HP, ["Atk"] = pk.IV_ATK, ["Def"] = pk.IV_DEF, ["SpA"] = pk.IV_SPA, ["SpD"] = pk.IV_SPD, ["Spe"] = pk.IV_SPE };
@@ -423,6 +426,7 @@ public sealed class GamePage : UserControl, IDisposable
             var extras = new List<string>();
             if (o.RngEnabled) extras.Add("RNG manipulation ON");
             if (o.AutoCatch != "off") extras.Add("auto-catch " + (o.AutoCatch == "all" ? "everything" : "non-legendary"));
+            if (_gs.StopTargets.Count > 0) extras.Add($"{_gs.StopTargets.Count} stop target(s)");
             if (o.HasStopRules) extras.Add("extra stop rules");
             if (_clips.Running) extras.Add("shiny clip buffer");
             Dialogs.Ui(() => _huntStatus.Text = (running ? (HuntService.IsPaused ? "⏸ Python hunter is PAUSED" : "● Python hunter is running") : "") +
