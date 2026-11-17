@@ -346,8 +346,33 @@ public static class DependencyService
 
     private static string LastLine(string s) => s.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Trim() ?? "";
 
-    // ------------------------------------------------------------------ update checks (run every start)
+    // ------------------------------------------------------------------ update checks (at start, then every hour while open)
     public sealed record UpdateInfo(string Item, string Message, Func<Action<string>, Task<string>>? Apply);
+
+    /// <summary>
+    /// How often a running ShinyForge looks again. Checking only at start missed releases made while it stayed open
+    /// (pokeldn published three versions in one night and the open window still said everything was current).
+    /// </summary>
+    public static readonly TimeSpan RecheckEvery = TimeSpan.FromHours(1);
+    /// <summary>When the last <see cref="CheckUpdates"/> finished (MinValue = never).</summary>
+    public static DateTime LastChecked { get; private set; } = DateTime.MinValue;
+    /// <summary>The last answer is older than <paramref name="age"/> (or there is none): time to ask GitHub / winget again.</summary>
+    public static bool CheckIsOlderThan(TimeSpan age) => DateTime.Now - LastChecked > age;
+    /// <summary>Tools the last check couldn't ask (offline, GitHub busy...): "No updates found" isn't said for them.</summary>
+    public static List<string> CheckFailures { get; private set; } = new();
+    private static List<string> _failing = new();
+    private static void CheckFailed(string what, Exception e)
+    {
+        AppPaths.Log($"{what} update check failed: {e.Message}");
+        lock (_failing) _failing.Add(what);
+    }
+    /// <summary>The outcome in words for Tools &amp; Updates: updates found, nothing found, or which tools couldn't be checked.</summary>
+    public static string CheckSummary(int found) =>
+        (found == 0 ? "No updates found" : $"{found} update(s) available") +
+        (CheckFailures.Count == 0 ? "." : $" - couldn't check {string.Join(", ", CheckFailures)} (offline or GitHub busy); try again later.");
+
+    /// <summary>One check at a time: the hourly check, Tools &amp; Updates and the start-up check share the same list.</summary>
+    private static readonly SemaphoreSlim CheckGate = new(1, 1);
 
     /// <summary>
     /// What the last <see cref="CheckUpdates"/> found. A tool listed here shows "Update available" in its own row in Tools &amp;
@@ -378,6 +403,20 @@ public static class DependencyService
 
     public static async Task<List<UpdateInfo>> CheckUpdates()
     {
+        await CheckGate.WaitAsync();
+        try
+        {
+            _failing = new();
+            var list = await CheckUpdatesNow();
+            CheckFailures = _failing.Distinct().ToList();
+            LastChecked = DateTime.Now;
+            return list;
+        }
+        finally { CheckGate.Release(); }
+    }
+
+    private static async Task<List<UpdateInfo>> CheckUpdatesNow()
+    {
         var list = new List<UpdateInfo>();
         Updates = new();
         foreach (var d in All) Refresh(d);
@@ -402,7 +441,7 @@ public static class DependencyService
                         return $"{dep.Name}: {LastLine(o)}";
                     }));
                 }
-                catch (Exception e) { AppPaths.Log($"{d.Name} update check (winget) failed: " + e.Message); }
+                catch (Exception e) { CheckFailed(d.Name, e); }
             }
 
         // PKHeX app vs. its latest release tag (Windows).
@@ -414,20 +453,20 @@ public static class DependencyService
                 if (IsNewer(latest, pk.Version))
                     list.Add(new("PKHeX", $"Installed {pk.Version}, latest is {latest}.", p => InstallPKHeX(p)));
             }
-            catch (Exception e) { AppPaths.Log("PKHeX update check failed: " + e.Message); }
+            catch (Exception e) { CheckFailed("PKHeX", e); }
 
         // pokeldn (only once the wireless-trades feature was set up).
         if (AppSettings.Current.PokeldnSetupDone && PokeldnService.FindApp() is { } pokeldn)
         {
             try
             {
-                var rel = await PokeldnService.LatestAsync();
+                var tag = await LatestTag(PokeldnService.Repo);
                 var have = PokeldnService.InstalledAppTag(pokeldn);
-                if (AppInfo.ParseTag(rel.Tag) is { } latest && (have == null || AppInfo.ParseTag(have) < latest))
-                    list.Add(new("pokeldn", $"Installed {have ?? "unknown version"}, latest is {rel.Tag} (the board's firmware is updated from Wireless trades).",
+                if (AppInfo.ParseTag(tag) is { } latest && (have == null || AppInfo.ParseTag(have) < latest))
+                    list.Add(new("pokeldn", $"Installed {have ?? "unknown version"}, latest is {tag} (the board's firmware is updated from Wireless trades).",
                         p => PokeldnService.InstallAppAndFirmware(p)));
             }
-            catch (Exception e) { AppPaths.Log("pokeldn update check failed: " + e.Message); }
+            catch (Exception e) { CheckFailed("pokeldn", e); }
         }
 
         // PKHeX library bundled inside ShinyForge (new games / save formats).
@@ -439,7 +478,7 @@ public static class DependencyService
             if (newest != null && bundled != null && IsNewer(newest, bundled.ToString()))
                 list.Add(new("PKHeX library", $"ShinyForge uses PKHeX.Core {bundled.ToString(3)}; {newest} is available (needed only for brand-new games).", null));
         }
-        catch (Exception e) { AppPaths.Log("PKHeX.Core check failed: " + e.Message); }
+        catch (Exception e) { CheckFailed("PKHeX library", e); }
 
         // The other tools, all at once (each check is independent and logs its own failure).
         foreach (var found in await Task.WhenAll(CheckSysBot(), CheckEsptool(), CheckPokemonAutomation(), CheckSwitchSysBotBase(), CheckUnixPackages()))
@@ -473,8 +512,7 @@ public static class DependencyService
         return m.Success ? m.Groups[1].Value : null;
     }
 
-    private static async Task<string?> LatestTag(string repo) =>
-        (await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{repo}/releases/latest"))?["tag_name"]?.ToString();
+    private static Task<string> LatestTag(string repo) => WebClients.LatestGitHubTag(repo);
 
     /// <summary>The last "1.2" / "1.2.3" in a text ("v0.71.6-beta" → 0.71.6, "3.32/3.33" → 3.33), or null.</summary>
     internal static Version? ParseVersion(string? text) =>
@@ -542,7 +580,7 @@ public static class DependencyService
             _sysBotCheck = (DateTime.Now, result);
             return result;
         }
-        catch (Exception e) { AppPaths.Log("SysBot.exe version check failed: " + e.Message); return null; }
+        catch (Exception e) { CheckFailed("SysBot.exe", e); return null; }
     }
 
     /// <summary>After SysBot.exe was updated: check again next time.</summary>
@@ -629,7 +667,7 @@ public static class DependencyService
             if (IsNewer(latest, installed))
                 list.Add(new("esptool", $"Installed {installed}, latest is {latest}.", PokeldnService.InstallEsptool));
         }
-        catch (Exception e) { AppPaths.Log("esptool update check failed: " + e.Message); }
+        catch (Exception e) { CheckFailed("esptool", e); }
         return list;
     }
 
@@ -652,7 +690,7 @@ public static class DependencyService
                     return Task.FromResult("Pokémon Automation's download page was opened - unzip the new version next to the old one (not into OneDrive); ShinyForge uses the newest.");
                 }));
         }
-        catch (Exception e) { AppPaths.Log("Pokémon Automation update check failed: " + e.Message); }
+        catch (Exception e) { CheckFailed("Pokémon Automation", e); }
         return list;
     }
 
@@ -680,7 +718,7 @@ public static class DependencyService
                     return Task.FromResult("sys-botbase's download page was opened: copy its atmosphere folder onto the SD card, then restart the Switch.");
                 }));
         }
-        catch (Exception e) { AppPaths.Log("sys-botbase update check failed: " + e.Message); }
+        catch (Exception e) { CheckFailed("sys-botbase", e); }
         return list;
     }
 
@@ -714,7 +752,7 @@ public static class DependencyService
                         list.Add(new(name, $"A newer version is available. Run in a terminal:  sudo apt install --only-upgrade {pkg}", null));
             }
         }
-        catch (Exception e) { AppPaths.Log("Package update check failed: " + e.Message); }
+        catch (Exception e) { CheckFailed("system packages", e); }
         return list;
     }
 

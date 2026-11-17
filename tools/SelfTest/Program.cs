@@ -2228,5 +2228,149 @@ if (tests.Contains("installall"))
     Check(title is { UseMnemonic: false }, "title shows \"Tools & Updates\" (the & isn't eaten)");
 }
 
+if (tests.Contains("recheck"))
+{
+    // A release made while ShinyForge stays open (pokeldn shipped 3 versions overnight; the window opened the evening
+    // before kept saying "up to date"). Drives the REAL main window and Tools & Updates with a fake pokeldn copy whose
+    // version marker is moved (in the work folder only - the real pokeldn and settings aren't touched or saved).
+    InitUi();
+    var s = AppSettings.Current;
+    var keep = (s.PokeldnPath, s.PokeldnSetupDone, s.CheckUpdatesOnStart, s.SkippedAppVersion);
+    // SelfTest calls itself 1.0.0: the start-up check would offer the newest ShinyForge in a window - skip that version
+    s.SkippedAppVersion = (await AppUpdateService.CheckAsync())?.Tag ?? "";
+    var latest = await PokeldnService.LatestTagAsync();
+    var fakeExe = Path.Combine(work, "pokeldn-open-overnight", "pokeldn.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(fakeExe)!);
+    File.WriteAllText(fakeExe, "test");
+    var marker = Path.Combine(Path.GetDirectoryName(fakeExe)!, "shinyforge-version.txt");
+    const System.Reflection.BindingFlags Any = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+    void Age(TimeSpan by) => typeof(DependencyService).GetProperty(nameof(DependencyService.LastChecked))!.GetSetMethod(true)!
+        .Invoke(null, new object[] { DateTime.Now - by });
+    void Pump(Func<bool> done, int seconds)
+    {
+        var until = DateTime.Now.AddSeconds(seconds);
+        while (DateTime.Now < until && !done()) { Application.DoEvents(); Thread.Sleep(50); }
+    }
+    // Like the real app: every window and every await on ONE UI thread with the WinForms message loop.
+    Exception? uiError = null;
+    var ui = new Thread(() =>
+    {
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        var body = UiBody();
+        while (!body.IsCompleted) { Application.DoEvents(); Thread.Sleep(20); }
+        uiError = body.Exception?.GetBaseException();
+    });
+    ui.SetApartmentState(ApartmentState.STA);
+    ui.Start();
+    ui.Join();
+    Check(uiError == null, "the window test ran without errors " + uiError);
+
+    // The newest release of every GitHub tool, read without GitHub's API (60 questions an hour - running out made every
+    // check fail quietly and "No updates found" appear)
+    foreach (var repo in new[] { PokeldnService.Repo, PokeldnService.EsptoolRepo, DependencyService.SysBotRepo, "kwsch/PKHeX",
+                                 "PokemonAutomation/ComputerControl", SysBotBaseInstaller.Repo, AppInfo.Repo })
+    {
+        string? tag = null;
+        try { tag = await WebClients.LatestGitHubTag(repo); } catch (Exception e) { Console.WriteLine("   " + e.Message); }
+        Check(DependencyService.ParseVersion(tag) != null, $"{repo}: newest release {tag}");
+    }
+    // ShinyForge itself (SelfTest says it's 1.0.0, so the newest release is "newer"): offered even when the API is out of
+    // questions, with a download link that really exists
+    var app = await AppUpdateService.CheckAsync();
+    Check(app is { IsNewer: true, ZipUrl: not null }, $"ShinyForge {app?.Tag} offered with its download ({app?.ZipUrl})");
+    if (app?.ZipUrl != null)
+    {
+        using var http = new HttpClient();
+        using var head = await http.SendAsync(new HttpRequestMessage(HttpMethod.Head, app.ZipUrl));
+        Check(head.IsSuccessStatusCode, $"the ShinyForge download link works ({(int)head.StatusCode})");
+    }
+    // offline: the window says which tools couldn't be checked instead of "No updates found"
+    Check(DependencyService.CheckFailures.Count == 0, "the last check reached every tool: " + string.Join(", ", DependencyService.CheckFailures));
+    var failProp = typeof(DependencyService).GetProperty(nameof(DependencyService.CheckFailures))!;
+    failProp.GetSetMethod(true)!.Invoke(null, new object[] { new List<string> { "pokeldn", "esptool" } });
+    var said = DependencyService.CheckSummary(0);
+    Console.WriteLine("   offline: " + said);
+    Check(said.Contains("couldn't check pokeldn, esptool"), "a check that couldn't reach GitHub says so (not just 'No updates found')");
+    failProp.GetSetMethod(true)!.Invoke(null, new object[] { new List<string>() });
+
+    async Task UiBody()
+    {
+    MainForm? main = null;
+    try
+    {
+        s.PokeldnPath = fakeExe; s.PokeldnSetupDone = true; s.CheckUpdatesOnStart = true;
+        File.WriteAllText(marker, latest); // evening: the newest pokeldn is installed
+
+        main = new MainForm { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
+        main.Show();
+        Pump(() => DependencyService.LastChecked > DateTime.Now.AddMinutes(-1), 240); // the start-up check
+        var banner = (Panel)typeof(MainForm).GetField("_banner", Any)!.GetValue(main)!;
+        string BannerText() => banner.Height == 0 ? "" : string.Join(" ", banner.Controls.OfType<Label>().Select(l => l.Text));
+        Check(DependencyService.UpdateFor(DependencyService.All.First(d => d.Name == "pokeldn")) == null,
+            $"start-up: pokeldn {latest} is current - no update (banner: '{BannerText()}')");
+        var timer = (System.Windows.Forms.Timer)typeof(MainForm).GetField("_recheck", Any)!.GetValue(main)!;
+        Check(timer.Enabled && timer.Interval == 5 * 60 * 1000, "the main window keeps checking while it's open (looks every 5 minutes)");
+
+        // overnight: pokeldn publishes a newer version (= the installed one is now older than GitHub's)
+        File.WriteAllText(marker, "v0.1.0");
+        banner.Height = 0;
+        async Task Tick() => await (Task)typeof(MainForm).GetMethod("RecheckInBackground", Any)!.Invoke(main, null)!;
+        await Tick();
+        Check(banner.Height == 0, "a check less than an hour old isn't repeated (no GitHub call every 5 minutes)");
+        // an hour later: the window's OWN timer fires (made quick here) and checks again
+        Age(TimeSpan.FromMinutes(61));
+        timer.Interval = 300;
+        Pump(() => banner.Height > 0 || !DependencyService.CheckIsOlderThan(TimeSpan.FromMinutes(1)), 240);
+        Pump(() => banner.Height > 0, 5);
+        timer.Interval = 5 * 60 * 1000;
+        Console.WriteLine($"   banner: {BannerText()}");
+        Check(banner.Height > 0 && BannerText().Contains("pokeldn"), "an hour later the open window finds the new pokeldn and says so in the banner");
+        var pk = DependencyService.All.First(d => d.Name == "pokeldn");
+        Check(pk.State == DepState.UpdateAvailable && DependencyService.UpdateFor(pk)?.Message.Contains(latest) == true,
+            $"pokeldn's row: 'Update available' ({DependencyService.UpdateFor(pk)?.Message})");
+        banner.Height = 0;
+        Age(TimeSpan.FromMinutes(61));
+        await Tick();
+        Check(banner.Height == 0, "the same update isn't announced again every hour after the banner was closed");
+
+        // Tools & Updates opened after a while: it asks again by itself (no button press)
+        File.WriteAllText(marker, latest);
+        await DependencyService.CheckUpdates();
+        File.WriteAllText(marker, "v0.1.0");
+        Age(TimeSpan.FromMinutes(11));
+        using (var tools = new ToolsForm(true) { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false })
+        {
+            var status = (Label)typeof(ToolsForm).GetField("_status", Any)!.GetValue(tools)!;
+            tools.Show();
+            Pump(() => status.Text.Contains("update(s) available") || status.Text.StartsWith("No updates"), 240);
+            Console.WriteLine($"   Tools & Updates: {status.Text}");
+            Check(DependencyService.UpdateFor(pk) != null && pk.State == DepState.UpdateAvailable,
+                "Tools & Updates opened with an old answer: checks again and shows pokeldn's update");
+            tools.Close();
+        }
+        // ... but not when the answer is fresh
+        var before = DependencyService.LastChecked;
+        using (var tools = new ToolsForm(true) { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false })
+        {
+            tools.Show(); Pump(() => false, 3);
+            Check(DependencyService.LastChecked == before, "a fresh answer is shown as it is (no new check)");
+            tools.Close();
+        }
+
+        // two checks at once (hourly + the button) give one consistent answer
+        var both = await Task.WhenAll(DependencyService.CheckUpdates(), DependencyService.CheckUpdates());
+        Check(both[0].Any(u => u.Item == "pokeldn") && both[1].Any(u => u.Item == "pokeldn") && DependencyService.UpdateFor(pk) != null,
+            "two checks at the same time: both find pokeldn, the row keeps it");
+    }
+    finally
+    {
+        main?.Close();
+        (s.PokeldnPath, s.PokeldnSetupDone, s.CheckUpdatesOnStart, s.SkippedAppVersion) = keep;
+        foreach (var d in DependencyService.All) d.Version = null;
+        await DependencyService.CheckUpdates();
+    }
+    }
+}
+
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
 return failures;

@@ -32,7 +32,7 @@ public sealed class ToolsForm : Form
             var found = await DependencyService.CheckUpdates();
             await DependencyService.ReadVersions();
             Populate(isSwitch);
-            _status.Text = found.Count == 0 ? "No updates found." : $"{found.Count} update(s) available.";
+            _status.Text = DependencyService.CheckSummary(found.Count);
         };
         var installAll = new FancyButton("Install all missing", Theme.GlyphDownload, Theme.Accent) { Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
         installAll.Location = new Point(recheck.Right + 12, 592);
@@ -42,7 +42,19 @@ public sealed class ToolsForm : Form
         Controls.AddRange(new Control[] { title, _list, recheck, installAll, _status });
         Populate(isSwitch);
         // the installed versions (some programs are asked, which takes a moment): filled in when known
-        Shown += async (_, _) => { await DependencyService.ReadVersions(); if (!IsDisposed) Populate(isSwitch); };
+        Shown += async (_, _) =>
+        {
+            await DependencyService.ReadVersions();
+            if (IsDisposed) return;
+            Populate(isSwitch);
+            // the last check is more than 10 minutes old (or never ran): ask again, so a release made since start shows
+            if (!DependencyService.CheckIsOlderThan(TimeSpan.FromMinutes(10))) return;
+            _status.Text = "Checking for updates...";
+            var found = await DependencyService.CheckUpdates();
+            if (IsDisposed) return;
+            Populate(isSwitch);
+            _status.Text = DependencyService.CheckSummary(found.Count);
+        };
     }
 
     private void Populate(bool? isSwitch)

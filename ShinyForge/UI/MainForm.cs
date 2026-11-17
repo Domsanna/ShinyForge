@@ -91,6 +91,7 @@ public sealed class MainForm : Form
         {
             ShowBackupFolderNoticeOnce();
             await StartupChecks();
+            StartRecheckTimer();
         };
         FormClosing += (_, e) =>
         {
@@ -283,6 +284,7 @@ public sealed class MainForm : Form
         {
             var updates = await DependencyService.CheckUpdates();
             var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+            _bannerUpdates = updates.Select(u => u.Item).ToHashSet();
             if (updates.Count == 0 && missing.Count == 0)
             {
                 SetStatus("Everything is up to date.");
@@ -299,6 +301,47 @@ public sealed class MainForm : Form
             SetStatus("Update check failed (offline?).");
             AppPaths.Log("Update check: " + e);
         }
+    }
+
+    /// <summary>The updates the banner already told about: the hourly check only speaks up when something new appears.</summary>
+    private HashSet<string> _bannerUpdates = new();
+    private readonly System.Windows.Forms.Timer _recheck = new() { Interval = 5 * 60 * 1000 };
+    private bool _rechecking;
+
+    /// <summary>
+    /// While ShinyForge stays open, the tools (and ShinyForge itself) are checked again every hour - a release made after
+    /// start (pokeldn, PKHeX, SysBot...) shows up without restarting. Ticks every 5 minutes so a PC that slept catches up.
+    /// </summary>
+    private void StartRecheckTimer()
+    {
+        _recheck.Tick += async (_, _) => await RecheckInBackground();
+        _recheck.Start();
+        FormClosed += (_, _) => _recheck.Dispose();
+    }
+
+    private async Task RecheckInBackground()
+    {
+        if (_rechecking || !AppSettings.Current.CheckUpdatesOnStart || !DependencyService.CheckIsOlderThan(DependencyService.RecheckEvery)) return;
+        _rechecking = true;
+        try
+        {
+            var parts = new List<string>();
+            // ShinyForge itself: only named in the banner (no window pops up in the middle of a hunt); Tools & Updates installs it
+            try
+            {
+                if (await AppUpdateService.CheckAsync() is { IsNewer: true } r && r.Tag != AppSettings.Current.SkippedAppVersion && _bannerUpdates.Add("ShinyForge " + r.Tag))
+                    parts.Add($"ShinyForge {r.VersionText} is available");
+            }
+            catch (Exception e) { AppPaths.Log("ShinyForge update check: " + e.Message); }
+            var updates = await DependencyService.CheckUpdates();
+            var fresh = updates.Where(u => !_bannerUpdates.Contains(u.Item)).ToList();
+            foreach (var u in fresh) _bannerUpdates.Add(u.Item);
+            if (fresh.Count > 0) parts.Add($"{fresh.Count} new update(s) available ({string.Join(", ", fresh.Select(u => u.Item))})");
+            AppPaths.Log($"Hourly update check: {(updates.Count == 0 ? "nothing new" : string.Join(", ", updates.Select(u => u.Item)))}");
+            if (parts.Count > 0) { ShowBanner(string.Join("   •   ", parts)); SetStatus("Update check finished."); }
+        }
+        catch (Exception e) { AppPaths.Log("Hourly update check: " + e.Message); }
+        finally { _rechecking = false; }
     }
 
     /// <summary>

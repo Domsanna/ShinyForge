@@ -35,7 +35,7 @@ public sealed class SettingsForm : Form
         public string PythonBotFolder { get => AppSettings.Current.PythonBotFolder; set => AppSettings.Current.PythonBotFolder = value; }
         [Category("Bots"), DisplayName("SysBot.exe")]
         public string SysBotPath { get => AppSettings.Current.SysBotPath; set => AppSettings.Current.SysBotPath = value; }
-        [Category("Updates"), DisplayName("Check for updates every start")]
+        [Category("Updates"), DisplayName("Check for updates at start and every hour")]
         public bool CheckUpdatesOnStart { get => AppSettings.Current.CheckUpdatesOnStart; set => AppSettings.Current.CheckUpdatesOnStart = value; }
 
         private static AppSettings S => AppSettings.Current;

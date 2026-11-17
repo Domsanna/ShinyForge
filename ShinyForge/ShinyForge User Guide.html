@@ -606,7 +606,7 @@
   <div class="callout warn"><strong>SysBot must be up to date</strong>Before a hunt or a tool starts (recording, sys-botbase, Pokémon Automation, PKHeX, wireless trades, the Checkpoint save reader), ShinyForge checks that SysBot.exe is on its latest release. If it isn't, it asks you to update first: <b>Yes</b> updates it (or, for a copy you built yourself, opens the download page to rebuild), <b>No</b> carries on this time, <b>Cancel</b> stops.</div>
   <ul>
     <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
-    <li><b>Check for updates</b> compares your versions with the latest ones. It runs at every start too (turn that on or off in <b>Settings → Updates</b>). What it checks:
+    <li><b>Check for updates</b> compares your versions with the latest ones. It runs at every start and again every hour while ShinyForge is open, and Tools &amp; Updates checks again by itself when its last answer is more than 10 minutes old (turn the automatic checks on or off in <b>Settings → Updates</b>). A new update shows a banner once. If a tool can't be checked (offline), the window says which one. What it checks:
       <ul>
         <li><b>ShinyForge</b> itself, and the PKHeX library inside it.</li>
         <li><b>FFmpeg, Streamlabs Desktop, Python</b>: winget on Windows (one-click update), Homebrew on macOS (one-click), apt on Linux (shows the command, since it needs your password).</li>

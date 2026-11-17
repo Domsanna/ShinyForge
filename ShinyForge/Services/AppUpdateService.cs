@@ -26,14 +26,26 @@ public static class AppUpdateService
     private static readonly HttpClient Http = WebClients.Make(TimeSpan.FromSeconds(20));
     public static AppRelease? Latest { get; private set; }
 
-    /// <summary>The newest published release (null if none yet or GitHub can't be reached).</summary>
+    /// <summary>
+    /// The newest published release (null if none yet). The tag comes first from github.com (no API quota): when this copy is
+    /// current that's all, and the API (60 questions an hour) is only asked for the notes and download of a NEWER release.
+    /// If the API is out of questions, the release is still offered with its standard download link.
+    /// </summary>
     public static async Task<AppRelease?> CheckAsync()
     {
-        using var resp = await Http.GetAsync($"https://api.github.com/repos/{AppInfo.Repo}/releases/latest");
-        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return Latest = null; // no release published yet
-        resp.EnsureSuccessStatusCode();
-        var j = await resp.Content.ReadFromJsonAsync<JsonObject>() ?? throw new IOException("GitHub returned nothing.");
-        return Latest = Parse(j);
+        var tag = await WebClients.LatestGitHubTag(AppInfo.Repo);
+        if (AppInfo.ParseTag(tag) is not { } v) return Latest = null;
+        var page = $"https://github.com/{AppInfo.Repo}/releases/tag/{tag}";
+        if (v <= AppInfo.Comparable) return Latest = new AppRelease(tag, v, tag, "", page, default, null, 0);
+        try
+        {
+            using var resp = await Http.GetAsync($"https://api.github.com/repos/{AppInfo.Repo}/releases/latest");
+            resp.EnsureSuccessStatusCode();
+            if (await resp.Content.ReadFromJsonAsync<JsonObject>() is { } j && Parse(j) is { } full && full.Tag == tag) return Latest = full;
+        }
+        catch (Exception e) { AppPaths.Log($"ShinyForge {tag} release details: {e.Message} - offering it with the standard download"); }
+        return Latest = new AppRelease(tag, v, "ShinyForge " + tag, "The release notes couldn't be loaded right now - they're on the release page (View on GitHub).",
+            page, default, $"https://github.com/{AppInfo.Repo}/releases/download/{tag}/ShinyForge-Portable.zip", 0);
     }
 
     public static AppRelease? Parse(JsonObject j)

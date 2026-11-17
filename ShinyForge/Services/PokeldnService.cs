@@ -109,6 +109,9 @@ public static class PokeldnService
     }
 
     // ------------------------------------------------------------------ releases
+    /// <summary>The newest pokeldn release's tag (no GitHub API quota used) - enough to tell whether an update exists.</summary>
+    public static Task<string> LatestTagAsync() => WebClients.LatestGitHubTag(Repo);
+
     public static async Task<PokeldnRelease> LatestAsync()
     {
         var j = await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{Repo}/releases/latest")

@@ -133,7 +133,7 @@ public sealed class PokeldnForm : Form
                 s.FirmwareFileVersion = PokeldnService.FirmwareVersionOf(s.FirmwareFile);
                 s.Board = s.Boards.FirstOrDefault(b => b.NativeUsb) ?? s.Boards.FirstOrDefault();
                 if (s.Board != null) s.Firmware = PokeldnService.QueryFirmware(s.Board.Port);
-                try { s.LatestTag = (await PokeldnService.LatestAsync()).Tag; } catch (Exception e) { s.LatestError = e.Message; }
+                try { s.LatestTag = await PokeldnService.LatestTagAsync(); } catch (Exception e) { s.LatestError = e.Message; }
                 return s;
             });
         }

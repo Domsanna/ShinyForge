@@ -75,7 +75,7 @@ public sealed class SettingsWindow : Window
         if (OsInfo.IsWindows) Text("SysBot.exe", () => s.SysBotPath, v => s.SysBotPath = v);
         Text("pokeldn program (blank = installed by ShinyForge)", () => s.PokeldnPath, v => s.PokeldnPath = v);
         Group("Updates");
-        Bool("Check for updates every start", () => s.CheckUpdatesOnStart, v => s.CheckUpdatesOnStart = v);
+        Bool("Check for updates at start and every hour", () => s.CheckUpdatesOnStart, v => s.CheckUpdatesOnStart = v);
         Group("Notifications (phone / Discord)");
         Text("Discord webhook URL", () => s.DiscordWebhookUrl, v => s.DiscordWebhookUrl = v, "Discord: channel settings → Integrations → Webhooks → New Webhook → Copy URL. Paste it here.");
         Bool("Discord: @everyone on a shiny", () => s.DiscordMentionEveryone, v => s.DiscordMentionEveryone = v);

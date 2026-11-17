@@ -29,7 +29,7 @@ public sealed class ToolsWindow : Window
             var found = await DependencyService.CheckUpdates();
             await DependencyService.ReadVersions();
             Populate();
-            _status.Text = found.Count == 0 ? "No updates found." : $"{found.Count} update(s) available.";
+            _status.Text = DependencyService.CheckSummary(found.Count);
         };
         var installAll = new FancyButton("Install all missing", Skin.GlyphDownload, Skin.Accent);
         installAll.Click += async (_, _) => { await InstallAll(this, _isSwitch, everything: true); Populate(); };
@@ -42,7 +42,17 @@ public sealed class ToolsWindow : Window
         Content = new DockPanel { Children = { title, bottom, new ScrollViewer { Content = _list } } };
         Populate();
         // the installed versions (some programs are asked, which takes a moment): filled in when known
-        Opened += async (_, _) => { await DependencyService.ReadVersions(); Populate(); };
+        Opened += async (_, _) =>
+        {
+            await DependencyService.ReadVersions();
+            Populate();
+            // the last check is more than 10 minutes old (or never ran): ask again, so a release made since start shows
+            if (!DependencyService.CheckIsOlderThan(TimeSpan.FromMinutes(10))) return;
+            _status.Text = "Checking for updates...";
+            var found = await DependencyService.CheckUpdates();
+            Populate();
+            _status.Text = DependencyService.CheckSummary(found.Count);
+        };
     }
 
     private Border RowPanel(Color bg, string glyph, Color glyphColor, string name, string detail, Control? button)
