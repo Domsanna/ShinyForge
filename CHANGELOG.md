@@ -2,6 +2,13 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.4
+
+### Fixed
+- **Tool updates show up while ShinyForge stays open.** The check only ran when ShinyForge started, so a release made later (pokeldn published three versions in one night) wasn't seen until a restart. Now ShinyForge checks again every hour while it's open and shows a banner when something new appears (each update is announced once). Tools & Updates also checks again by itself when its last answer is more than 10 minutes old.
+- **Updates aren't missed when GitHub's limit runs out.** GitHub's API answers only 60 questions an hour per computer; once used up, every GitHub tool's check (pokeldn, SysBot, Pokémon Automation, esptool, sys-botbase, PKHeX) failed quietly and "No updates found" was shown. The newest version is now read from the release page itself, which has no such limit (the API is only a fallback), and ShinyForge's own update is still offered with its download when the API is busy.
+- **"Couldn't check" is said out loud.** If a tool can't be checked (offline, GitHub busy), Tools & Updates names it instead of saying "No updates found".
+
 ## 1.2.3
 
 ### Fixed
