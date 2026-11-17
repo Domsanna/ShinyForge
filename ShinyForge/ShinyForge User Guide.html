@@ -220,7 +220,7 @@
 <section id="quickstart">
   <h2><span class="num">3</span> Quick start</h2>
   <ol class="steps">
-    <li><b>Open ShinyForge</b> and pick <b>Nintendo Switch</b> or <b>Nintendo 3DS</b>. ShinyForge asks for the console's IP address (once per run, pre-filled with the last one). On the Switch it's under <b>System Settings → Internet</b>; on the 3DS, Rosalina shows it.</li>
+    <li><b>Open ShinyForge</b> and pick <b>Nintendo Switch</b> or <b>Nintendo 3DS</b>. ShinyForge asks for the console's IP address (once per run, pre-filled with the last one). On the Switch it's under <b>System Settings → Internet</b>; on the 3DS, Rosalina shows it. <b>Cancel</b> still opens the games (recording, trackers and saves don't need the console online); anything that does need it asks again.</li>
     <li>If a yellow banner says programs are missing, click <b>Review</b> → <b>Install all</b>.</li>
     <li><b>Click your game.</b> Its page has four cards: <i>Shiny Hunt</i>, <i>Record Gameplay</i>, <i>Collection Tracker</i> and <i>Pokémon HOME folder + Game Info</i>.</li>
     <li>For hunting, make sure your console is set up (see <a href="#hardware">Switch &amp; 3DS setup</a>). Stand in front of the Pokémon, <b>save in-game</b>, then click <b>Start hunting</b>.</li>
@@ -327,6 +327,13 @@
 <section id="options">
   <h2><span class="num">6</span> Hunt options</h2>
   <p>Open <b>Hunt options</b> from the Shiny Hunt card. The 3DS calls this <b>Stop rules</b>. Your choices are saved and given to the bot the next time it starts. If a hunt is already running, it uses the new options after you restart it (<b>Stop</b>, then <b>Start hunting</b>).</p>
+  <p>Each game only shows what its bot can really do:</p>
+  <ul>
+    <li><b>Shiny RNG manipulation</b> and <b>auto-catch</b>: FireRed / LeafGreen (Switch) only. 3DS games (X/Y, ORAS, Sun/Moon, Ultra Sun/Moon) don't show them.</li>
+    <li><b>Nature and IV rules</b>: Gen 3 and newer. Gen 1/2 Virtual Console games have no natures and use DVs (0–15), so they only have stop targets. Gen 1 also has no genders.</li>
+    <li><b>SysBot.exe games</b>: stop targets only (SysBot has its own other settings).</li>
+    <li><b>Find in Checkpoint</b>: not on GBA games, which Checkpoint can't back up.</li>
+  </ul>
 
   <h3 id="stop-targets">Stop targets</h3>
   <p>Each game has its own list of <b>stop targets</b>: "stop when THIS Pokémon shows up". Pick any Pokémon you can get in that game (type its name or number), then:</p>
@@ -722,6 +729,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>3DS: "Couldn't connect to the 3DS debugger"</td><td>In Rosalina, choose Debugger options → Enable debugger. Turn InputRedirection on as well. Check the IP address.</td></tr>
     <tr><td>Buttons don't respond on the 3DS</td><td>InputRedirection is off, or the 3DS went to sleep. Turn it on again in Rosalina.</td></tr>
     <tr><td>Recording or clips don't start</td><td>Install FFmpeg from Tools &amp; Updates. Choose the right video source, and make sure no other program is using the capture card.</td></tr>
+    <tr><td>"No capture board / capture device / controller was found"</td><td>Before ShinyForge opens an outside program it checks the hardware it needs: a 3DS capture board for 3DS Capture, the chosen capture card for recording, a capture card plus a microcontroller (ESP32-S3, Pico W…) or sys-botbase for Pokémon Automation. Plug it in and press <b>Retry</b>. Not every board can be recognised, so <b>Ignore</b> opens the program anyway.</td></tr>
+    <tr><td>"The Python hunter needs these Python packages"</td><td>Press <b>Yes</b>: ShinyForge installs them with pip from the hunter's requirements.txt (OpenCV, NumPy, PyYAML, mss).</td></tr>
     <tr><td>Tracker sync fails</td><td>Excel must be installed, and the tracker must be closed in Excel. If something goes wrong, restore the spreadsheet from Settings → Backups.</td></tr>
     <tr><td>No save found</td><td>Point the card at the folder that holds the exported save (e.g. your Checkpoint/JKSV backup folder). Sub-folders are searched.</td></tr>
     <tr><td>The phone remote doesn't load</td><td>The phone must be on the same WiFi. Allow ShinyForge in the Windows firewall for private networks. Check the PIN in the address.</td></tr>

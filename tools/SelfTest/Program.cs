@@ -1944,18 +1944,25 @@ if (tests.Contains("gameslist"))
         var page = new GamesPage(sw);
         content.Controls.Add(page);
         for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(30); }
+        var listPanel = page.Controls.OfType<Panel>().First().Controls[0];
+        var head = listPanel.Controls.OfType<Label>().Skip(2).First();
+        var firstTile = listPanel.Controls.OfType<FlowLayoutPanel>().First().Controls.OfType<GameTile>().First();
+        var tileTop = firstTile.Top + firstTile.Parent!.Top;
+        Console.WriteLine($"   header {head.Bounds}, first tile at y {tileTop}");
+        Check(tileTop - head.Bottom < 40, $"{(sw ? "Switch" : "3DS")} list: the tiles start right under their console header (gap {tileTop - head.Bottom})");
         page.ScrollTo(int.MaxValue); // scroll as far down as it goes
         for (var i = 0; i < 5; i++) { Application.DoEvents(); Thread.Sleep(30); }
-        var tiles = page.Controls.OfType<Panel>().First().Controls[0].Controls.OfType<GameTile>().ToList();
         var view = page.Controls.OfType<Panel>().First();
+        var tiles = view.Controls[0].Controls.OfType<FlowLayoutPanel>().SelectMany(f => f.Controls.OfType<GameTile>()).ToList();
         var lastTile = tiles.Last();
-        var bottom = lastTile.Bottom + lastTile.Parent!.Top;
+        int Bottom() => lastTile.Bottom + lastTile.Parent!.Top + lastTile.Parent!.Parent!.Top;
+        var bottom = Bottom();
         Console.WriteLine($"   tiles: {tiles.Count}, scrolled {page.Offset} of {page.MaxOffset}, last tile bottom {bottom} of {view.ClientSize.Height}");
-        Check(bottom <= view.ClientSize.Height && bottom > view.ClientSize.Height - 120,
+        Check(bottom <= view.ClientSize.Height && (page.MaxOffset == 0 || bottom > view.ClientSize.Height - 120), // fits = nothing to scroll
             $"{(sw ? "Switch" : "3DS")} list scrolled to the end: the last game is the last thing on screen (bottom {bottom} of {view.ClientSize.Height})");
         f.WindowState = FormWindowState.Maximized; for (var i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(30); }
         page.ScrollTo(int.MaxValue);
-        bottom = lastTile.Bottom + lastTile.Parent!.Top;
+        bottom = Bottom();
         Check(bottom <= view.ClientSize.Height + 1, $"{(sw ? "Switch" : "3DS")} list after maximizing: still ends at the last game (bottom {bottom} of {view.ClientSize.Height})");
         f.Close();
     }

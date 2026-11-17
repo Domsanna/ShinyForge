@@ -152,10 +152,10 @@ public sealed class MainWindow : Window
             AppSettings.Current.LastPlatform = isSwitch ? "switch" : "3ds";
             AppSettings.Current.Save();
             await CheckPlatformRequirements();
-            // Each console section asks for the console's IP address first (once per run).
-            if (!isSwitch && await IpPrompt.GetOrAsk(this) == null) return;
-            if (isSwitch && await IpPrompt.GetOrAskSwitch(this) == null) return;
-            Navigate(() => BuildGamesPage(isSwitch), isSwitch ? $"Nintendo Switch  ({AppSettings.Current.SwitchIP})" : $"Nintendo 3DS  ({AppSettings.Current.ThreeDSIP})");
+            // Each console section asks for the console's IP address first (once per run). Cancel still opens the games:
+            // recording, trackers and saves don't need the console on the network, and every feature that does asks again.
+            var ip = isSwitch ? await IpPrompt.GetOrAskSwitch(this) : await IpPrompt.GetOrAsk(this);
+            Navigate(() => BuildGamesPage(isSwitch), $"Nintendo {(isSwitch ? "Switch" : "3DS")}  ({(string.IsNullOrWhiteSpace(ip) ? "no IP yet" : ip)})");
         };
         return p;
     }
