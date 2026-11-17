@@ -2,6 +2,16 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.1
+
+### Changed
+- **Each game only shows what its bot can do.** Every game was checked: shiny RNG manipulation and auto-catch only appear for FireRed / LeafGreen (Switch), no longer (greyed out) for Ultra Sun/Moon and the other 3DS games; Gen 1/2 Virtual Console games no longer show natures or 0-31 IV rules (they have no natures and use DVs), and Gen 1 has no gender choice; GBA games no longer show "Find in Checkpoint".
+- **Outside programs check their equipment first.** 3DS Capture: a capture board is plugged in. Recording: the chosen capture card is connected. Tracker spreadsheets: Excel is installed. Python hunter: its Python packages are there (missing ones are installed with pip). Pokémon Automation: a capture card, and a microcontroller or a reachable sys-botbase. Missing hardware shows what to plug in, with Retry / Ignore (open anyway) / Abort.
+- **Cancel on the IP question still opens the game list.** Anything that needs the console asks again.
+
+### Fixed
+- **The game list no longer scrolls past the last game** (Windows): it could scroll screens of empty space, and stayed too long after maximizing. There's also no more empty band under each console's header.
+
 ## 1.2.0
 
 ### New
