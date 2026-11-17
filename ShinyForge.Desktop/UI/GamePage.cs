@@ -206,7 +206,7 @@ public sealed class GamePage : UserControl, IDisposable
         if (r == null || r == Dialogs.Cancel) return;
         try
         {
-            if (r == start && found) PokemonAutomation.Launch();
+            if (r == start && found && await PaEquipmentReady()) PokemonAutomation.Launch();
             if (r == start && !found) { PokemonAutomation.Open(PokemonAutomation.Releases); PokemonAutomation.Open(PokemonAutomation.SetupGuide); }
             PokemonAutomation.Open(PokemonAutomation.ProgramsUrl(_game));
         }
@@ -243,6 +243,7 @@ public sealed class GamePage : UserControl, IDisposable
         {
             var key = radios.First(r => r.IsChecked == true).Tag as string ?? "";
             if (key == "python" && !await EnsureDependency("Python 3")) return;
+            if (key == "python" && !await EnsurePythonPackages()) return;
             if (key == "sysbot" && !await EnsureDependency("SysBot.exe")) return;
             if (!await IpPrompt.EnsureSwitch(this)) return;
             // FireRed / LeafGreen: the game must be open with the save loaded (the hunter decides its mode from where you stand)
@@ -396,7 +397,9 @@ public sealed class GamePage : UserControl, IDisposable
     {
         var o = AppSettings.Current.Hunt;
         var targets = AppSettings.Current.For(game.Id).StopTargets.ToList();
-        if (!o.HasStopRules && targets.Count == 0) return null;
+        // the shared nature / IV rules don't apply to Gen 1 / 2 (no natures; DVs instead of IVs): only the stop targets there
+        var rules = game.Gen >= 3 && o.HasStopRules;
+        if (!rules && targets.Count == 0) return null;
         return pk =>
         {
             var checks = new List<(string Name, bool Ok)>();
@@ -406,10 +409,10 @@ public sealed class GamePage : UserControl, IDisposable
                 checks.Add((hit != null ? StopTargets.Describe(game, hit) : "a stop target", hit != null));
             }
             var nature = ((Nature)pk.Nature).ToString();
-            if (o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
+            if (rules && o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
             var ivs = new Dictionary<string, int> { ["HP"] = pk.IV_HP, ["Atk"] = pk.IV_ATK, ["Def"] = pk.IV_DEF, ["SpA"] = pk.IV_SPA, ["SpD"] = pk.IV_SPD, ["Spe"] = pk.IV_SPE };
-            if (o.MinIvTotal > 0) checks.Add(($"IV total {ivs.Values.Sum()}", ivs.Values.Sum() >= o.MinIvTotal));
-            foreach (var (k, v) in o.MinIvs.Where(kv => kv.Value > 0)) checks.Add(($"{k} IV {ivs[k]}", ivs[k] >= v));
+            if (rules && o.MinIvTotal > 0) checks.Add(($"IV total {ivs.Values.Sum()}", ivs.Values.Sum() >= o.MinIvTotal));
+            if (rules) foreach (var (k, v) in o.MinIvs.Where(kv => kv.Value > 0)) checks.Add(($"{k} IV {ivs[k]}", ivs[k] >= v));
             var hits = checks.Where(c => c.Ok).Select(c => c.Name).ToList();
             var match = o.RequireAll ? hits.Count == checks.Count && checks.Count > 0 : hits.Count > 0;
             return match ? "matches your stop rules (" + string.Join(", ", hits) + ")" : null;
@@ -541,6 +544,55 @@ public sealed class GamePage : UserControl, IDisposable
         return new RecordingService.CaptureSpec(source, Sel(_audio) ?? RecordingService.NoAudio, _game.Platform, overlay, _crop?.IsChecked ?? _gs.CropToGame);
     }
 
+    /// <summary>
+    /// Is the hardware for <paramref name="what"/> there? If not: what's missing, then Check again / Open anyway (detection
+    /// can't know every device) / Cancel. True = go ahead.
+    /// </summary>
+    private async Task<bool> EquipmentReady(string what, Func<bool> present, string missing)
+    {
+        while (!present())
+        {
+            var r = await Dialogs.Show(this, missing, what, "Check again", "Open anyway", Dialogs.Cancel);
+            if (r == "Open anyway") return true;
+            if (r != "Check again") return false;
+        }
+        return true;
+    }
+
+    /// <summary>Pokémon Automation needs a capture card and a microcontroller (or sys-botbase on a modded Switch).</summary>
+    private async Task<bool> PaEquipmentReady()
+    {
+        var s = AppSettings.Current;
+        return await EquipmentReady("Pokémon Automation", () => Equipment.VideoSources().Count > 0,
+                   "No capture card was found. Pokémon Automation watches the game through a capture card - connect it (and the Switch dock).")
+               && await EquipmentReady("Pokémon Automation", () => Equipment.Microcontroller() != false || HealthMonitor.SwitchReachable(1500),
+                   "No controller for Pokémon Automation was found: plug in its microcontroller (ESP32-S3, Raspberry Pi Pico W... with their firmware), " +
+                   $"or turn on the modded Switch so sys-botbase answers at {s.SwitchIP}.");
+    }
+
+    /// <summary>The Python hunter's packages (OpenCV, NumPy, PyYAML, mss): offers to install the missing ones with pip.</summary>
+    private async Task<bool> EnsurePythonPackages()
+    {
+        var python = DependencyService.PathOf("Python 3");
+        var botDir = AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder);
+        if (python == null || botDir == null) return true; // reported by the hunt start itself
+        Status("Checking the Python hunter's packages...");
+        var missing = await DependencyService.MissingPythonPackages(python);
+        Status("");
+        if (missing is not { Count: > 0 }) return true;
+        if (!await Dialogs.YesNo(this, $"The Python hunter needs these Python packages: {string.Join(", ", missing)}.\n\nInstall them now (pip)?", "Python hunter")) return false;
+        Status("Installing Python packages...");
+        var result = await DependencyService.InstallPythonPackages(python, botDir);
+        missing = await DependencyService.MissingPythonPackages(python);
+        Status(missing is { Count: 0 } ? "Python packages installed." : result);
+        if (missing is { Count: > 0 })
+        {
+            await Dialogs.Info(this, $"These packages still aren't installed: {string.Join(", ", missing)}.\n\npip said: {result}", "Python hunter");
+            return false;
+        }
+        return true;
+    }
+
     private async Task Launch3DSCapture()
     {
         if (!await EnsureDependency("3DS Capture")) return;
@@ -569,6 +621,12 @@ public sealed class GamePage : UserControl, IDisposable
         finally { _recButton.IsEnabled = true; }
         var source = Sel(_source) ?? "";
         if (source.Contains("3DS Capture")) { await Launch3DSCapture(); await Task.Delay(1500); }
+        else if (source.StartsWith(RecordingService.DevicePrefix))
+        {
+            var device = source[RecordingService.DevicePrefix.Length..];
+            if (!await EquipmentReady("Record Gameplay", () => Equipment.VideoSources().Contains(device),
+                    $"The capture device \"{device}\" isn't connected. Plug in the capture card (and the console), or choose another video source.")) return;
+        }
         _gs.RecordingFolder = _recFolder.Text!;
         _gs.SegmentMinutes = int.Parse(Sel(_segments) ?? "10");
         _gs.VideoSource = source;
@@ -848,6 +906,8 @@ public sealed class GamePage : UserControl, IDisposable
         card.Body.Children.Add(row);
         var checkpoint = new FancyButton("Find in Checkpoint", Skin.GlyphSave, Skin.PanelHi);
         checkpoint.Click += async (_, _) => await FindInCheckpoint();
+        // Checkpoint backs up 3DS / DS / Virtual Console / Switch saves - not GBA games (a 3DS can't run them in a way it sees)
+        checkpoint.IsVisible = _game.Platform != Platform.GBA;
         var buttons = Skin.Wrap(checkpoint);
         if (_game.IsSwitch)
         {

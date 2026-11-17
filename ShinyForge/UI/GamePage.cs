@@ -319,6 +319,20 @@ public sealed class GamePage : UserControl
         }
     }
 
+    /// <summary>
+    /// Pokémon Automation needs eyes and hands: a capture card, and a microcontroller (ESP32-S3, Pico W, ...) or sys-botbase on
+    /// a modded Switch. Checked before it's opened.
+    /// </summary>
+    private bool PaEquipmentReady()
+    {
+        var s = AppSettings.Current;
+        return EquipmentReady("Pokémon Automation", () => Equipment.VideoSources().Count > 0,
+                   "No capture card was found. Pokémon Automation watches the game through a capture card - connect it (and the Switch dock).")
+               && EquipmentReady("Pokémon Automation", () => Equipment.Microcontroller() != false || HealthMonitor.SwitchReachable(1500),
+                   "No controller for Pokémon Automation was found: plug in its microcontroller (ESP32-S3, Raspberry Pi Pico W... with their firmware), " +
+                   $"or turn on the modded Switch so sys-botbase answers at {s.SwitchIP}.");
+    }
+
     /// <summary>Starts Pokémon Automation's Computer Control (or says where to get it) and opens this game's program list.</summary>
     private void PokemonAutomationMenu()
     {
@@ -334,7 +348,7 @@ public sealed class GamePage : UserControl
         if (r == DialogResult.Cancel) return;
         try
         {
-            if (r == DialogResult.Yes && found) PokemonAutomation.Launch();
+            if (r == DialogResult.Yes && found && PaEquipmentReady()) PokemonAutomation.Launch();
             if (r == DialogResult.Yes && !found) { PokemonAutomation.Open(PokemonAutomation.Releases); PokemonAutomation.Open(PokemonAutomation.SetupGuide); }
             PokemonAutomation.Open(PokemonAutomation.ProgramsUrl(_game));
         }
@@ -382,6 +396,7 @@ public sealed class GamePage : UserControl
             if (!await SysBotCurrent()) return;
             var key = radios.First(r => r.Checked).Tag as string ?? "";
             if (key == "python" && !EnsureDependency("Python 3")) return;
+            if (key == "python" && !await EnsurePythonPackages()) return;
             if (key == "sysbot" && !EnsureDependency("SysBot.exe")) return;
             // The Switch must answer at its saved IP - if its address changed, ask for the new one first.
             if (!IpPrompt.EnsureSwitch(FindForm())) return;
@@ -555,7 +570,9 @@ public sealed class GamePage : UserControl
     {
         var o = AppSettings.Current.Hunt;
         var targets = AppSettings.Current.For(game.Id).StopTargets.ToList();
-        if (!o.HasStopRules && targets.Count == 0) return null;
+        // the shared nature / IV rules don't apply to Gen 1 / 2 (no natures; DVs instead of IVs): only the stop targets there
+        var rules = game.Gen >= 3 && o.HasStopRules;
+        if (!rules && targets.Count == 0) return null;
         return pk =>
         {
             var checks = new List<(string Name, bool Ok)>();
@@ -565,10 +582,10 @@ public sealed class GamePage : UserControl
                 checks.Add((hit != null ? StopTargets.Describe(game, hit) : "a stop target", hit != null));
             }
             var nature = ((PKHeX.Core.Nature)pk.Nature).ToString();
-            if (o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
+            if (rules && o.StopNatures.Count > 0) checks.Add(("nature " + nature, o.StopNatures.Contains(nature, StringComparer.OrdinalIgnoreCase)));
             var ivs = new Dictionary<string, int> { ["HP"] = pk.IV_HP, ["Atk"] = pk.IV_ATK, ["Def"] = pk.IV_DEF, ["SpA"] = pk.IV_SPA, ["SpD"] = pk.IV_SPD, ["Spe"] = pk.IV_SPE };
-            if (o.MinIvTotal > 0) checks.Add(($"IV total {ivs.Values.Sum()}", ivs.Values.Sum() >= o.MinIvTotal));
-            foreach (var (k, v) in o.MinIvs.Where(kv => kv.Value > 0)) checks.Add(($"{k} IV {ivs[k]}", ivs[k] >= v));
+            if (rules && o.MinIvTotal > 0) checks.Add(($"IV total {ivs.Values.Sum()}", ivs.Values.Sum() >= o.MinIvTotal));
+            if (rules) foreach (var (k, v) in o.MinIvs.Where(kv => kv.Value > 0)) checks.Add(($"{k} IV {ivs[k]}", ivs[k] >= v));
             var hits = checks.Where(c => c.Ok).Select(c => c.Name).ToList();
             var match = o.RequireAll ? hits.Count == checks.Count && checks.Count > 0 : hits.Count > 0;
             return match ? "matches your stop rules (" + string.Join(", ", hits) + ")" : null;
@@ -709,12 +726,61 @@ public sealed class GamePage : UserControl
             _audio?.SelectedItem as string ?? RecordingService.NoAudio, _game.Platform, overlay, _crop?.Checked ?? _gs.CropToGame);
     }
 
-    private void Launch3DSCapture()
+    /// <summary>
+    /// Opens 3DS Capture once it's installed AND a capture board is plugged in (or the user chooses to open it anyway -
+    /// not every board can be recognised). False = not opened.
+    /// </summary>
+    private bool Launch3DSCapture()
     {
-        if (!EnsureDependency("3DS Capture")) return;
+        if (!EnsureDependency("3DS Capture")) return false;
         var cap = DependencyService.PathOf("3DS Capture");
-        if (cap != null && Process.GetProcessesByName("3ds_capture").Length == 0)
-            Process.Start(new ProcessStartInfo(cap) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(cap)! });
+        if (cap == null) return false;
+        if (Process.GetProcessesByName("3ds_capture").Length > 0) return true; // already open
+        if (!EquipmentReady("3DS Capture", () => Equipment.ThreeDSCaptureBoard() != false,
+                "No 3DS capture board is plugged in. Connect the 3DS (with its capture board) to this PC by USB and turn it on.")) return false;
+        Process.Start(new ProcessStartInfo(cap) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(cap)! });
+        return true;
+    }
+
+    /// <summary>
+    /// Is the hardware for <paramref name="what"/> there? If not: what's missing, then Retry (check again) / Ignore (open
+    /// anyway - detection can't know every device) / Abort. True = go ahead.
+    /// </summary>
+    private bool EquipmentReady(string what, Func<bool> present, string missing)
+    {
+        while (!present())
+        {
+            var r = MessageBox.Show(FindForm(), missing + "\n\nRetry = check again\nIgnore = open it anyway\nAbort = cancel",
+                what, MessageBoxButtons.AbortRetryIgnore, MessageBoxIcon.Warning);
+            if (r == DialogResult.Ignore) return true;
+            if (r != DialogResult.Retry) return false;
+        }
+        return true;
+    }
+
+    /// <summary>The Python hunter's packages (OpenCV, NumPy, PyYAML, mss): offers to install the missing ones with pip.</summary>
+    private async Task<bool> EnsurePythonPackages()
+    {
+        var python = DependencyService.PathOf("Python 3");
+        var botDir = AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder);
+        if (python == null || botDir == null) return true; // reported by the hunt start itself
+        Status("Checking the Python hunter's packages...");
+        var missing = await DependencyService.MissingPythonPackages(python);
+        Status("");
+        if (missing is not { Count: > 0 }) return true;
+        if (MessageBox.Show(FindForm(), $"The Python hunter needs these Python packages: {string.Join(", ", missing)}.\n\nInstall them now (pip)?",
+                "Python hunter", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+        Status("Installing Python packages...");
+        var result = await DependencyService.InstallPythonPackages(python, botDir);
+        missing = await DependencyService.MissingPythonPackages(python);
+        Status(missing is { Count: 0 } ? "Python packages installed." : result);
+        if (missing is { Count: > 0 })
+        {
+            MessageBox.Show(FindForm(), $"These packages still aren't installed: {string.Join(", ", missing)}.\n\npip said: {result}", "Python hunter",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+        return true;
     }
 
     private async void ToggleRecording()
@@ -741,8 +807,14 @@ public sealed class GamePage : UserControl
         var source = _source.SelectedItem as string ?? "";
         if (source.Contains("3DS Capture"))
         {
-            Launch3DSCapture();
-            Thread.Sleep(1500);
+            if (!Launch3DSCapture()) return;
+            await Task.Delay(1500);
+        }
+        else if (source.StartsWith(RecordingService.DevicePrefix))
+        {
+            var device = source[RecordingService.DevicePrefix.Length..];
+            if (!EquipmentReady("Record Gameplay", () => Equipment.VideoSources().Contains(device),
+                    $"The capture device \"{device}\" isn't connected. Plug in the capture card (and the console), or choose another video source.")) return;
         }
         _gs.RecordingFolder = _recFolder.Text;
         _gs.SegmentMinutes = int.Parse(_segments.SelectedItem as string ?? "10");
@@ -787,6 +859,7 @@ public sealed class GamePage : UserControl
         var openSheet = new FancyButton("Open", Theme.GlyphSheet, Theme.PanelHi);
         openSheet.Click += (_, _) =>
         {
+            if (!EnsureDependency("Microsoft Excel")) return;
             var cur = SpreadsheetService.FindWorkbook(_game);
             if (cur != null) Process.Start(new ProcessStartInfo(cur) { UseShellExecute = true });
         };
@@ -1080,6 +1153,8 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(pkhex, info));
         var checkpoint = new FancyButton("Find in Checkpoint", Theme.GlyphSave, Theme.PanelHi);
         checkpoint.Click += async (_, _) => await FindInCheckpoint();
+        // Checkpoint backs up 3DS / DS / Virtual Console / Switch saves - not GBA games (a 3DS can't run them in a way it sees)
+        checkpoint.Visible = _game.Platform != Platform.GBA;
         var buttons = Row(checkpoint);
         if (_game.IsSwitch)
         {

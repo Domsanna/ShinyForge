@@ -36,6 +36,9 @@ internal sealed class WinUsbDevice : IDisposable
     /// <summary>Is a device with this VID/PID plugged in (any driver)?</summary>
     public static bool IsConnected(ushort vid, ushort pid) => OsInfo.IsWindows && DevicePaths(vid, pid).Any();
 
+    /// <summary>Is any device from this vendor plugged in (any product, any driver)?</summary>
+    public static bool IsVendorConnected(ushort vid) => OsInfo.IsWindows && DevicePaths(vid, null).Any();
+
     /// <summary>Opens the first matching device, or null when none is plugged in. Throws when it's there but can't be used (driver).</summary>
     public static WinUsbDevice? Open(ushort vid, ushort pid)
     {
@@ -102,9 +105,9 @@ internal sealed class WinUsbDevice : IDisposable
     // ------------------------------------------------------------------ finding the device
     private static readonly Guid UsbDeviceInterface = new("A5DCBF10-6530-11D2-901F-00C04FB951ED"); // GUID_DEVINTERFACE_USB_DEVICE
 
-    private static IEnumerable<string> DevicePaths(ushort vid, ushort pid)
+    private static IEnumerable<string> DevicePaths(ushort vid, ushort? pid)
     {
-        var tag = $"vid_{vid:x4}&pid_{pid:x4}";
+        var tag = pid is { } p ? $"vid_{vid:x4}&pid_{p:x4}" : $"vid_{vid:x4}&";
         var list = new List<string>();
         var guid = UsbDeviceInterface;
         var set = SetupDiGetClassDevs(ref guid, IntPtr.Zero, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);

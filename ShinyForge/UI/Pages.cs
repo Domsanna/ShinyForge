@@ -99,44 +99,78 @@ public sealed class GamesPage : UserControl
 {
     public event Action<Game>? Chosen;
 
+    private readonly FlowLayoutPanel _flow;
+    private readonly Panel _view = new() { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+    private readonly VScrollBar _bar = new() { Dock = DockStyle.Right, Visible = false };
+    private int _offset;
+
+    /// <summary>
+    /// The game tiles wrap to the window width; the list scrolls exactly as far as its content - the last game is the end.
+    /// The scrolling is done here rather than by WinForms' AutoScroll, which kept the height of the first, narrow layout
+    /// (one tile per row) and let the list scroll screens past the last game (and recomputing it fought the scrollbar).
+    /// </summary>
     public GamesPage(bool isSwitch)
     {
         BackColor = Theme.Bg;
         Dock = DockStyle.Fill;
-        AutoScroll = true;
-        var root = new FlowLayoutPanel
+        _flow = new FlowLayoutPanel
         {
-            FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, BackColor = Theme.Bg,
-            Padding = new Padding(28, 18, 20, 30),
+            AutoSize = false, WrapContents = true, FlowDirection = FlowDirection.LeftToRight, Location = Point.Empty,
+            BackColor = Theme.Bg, Padding = new Padding(28, 18, 20, 30),
         };
-        root.Controls.Add(Theme.Label(isSwitch ? "Choose your Switch game" : "Choose your game", Theme.Title));
-        root.Controls.Add(Theme.Label("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export.",
+        void Break(Control c) { _flow.Controls.Add(c); _flow.SetFlowBreak(c, true); }
+        Break(Theme.Label(isSwitch ? "Choose your Switch game" : "Choose your game", Theme.Title));
+        Break(Theme.Label("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export.",
             Theme.Body, Theme.Muted));
 
-        var groups = (isSwitch ? GameCatalog.ForSwitch : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel);
-        foreach (var grp in groups)
+        foreach (var grp in (isSwitch ? GameCatalog.ForSwitch : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel))
         {
             var header = Theme.Label(grp.Key.ToUpperInvariant(), new Font("Segoe UI Semibold", 11f), Theme.Gold);
             header.Margin = new Padding(6, 22, 0, 4);
-            root.Controls.Add(header);
-            var flow = new FlowLayoutPanel { AutoSize = true, MaximumSize = new Size(1000, 0), BackColor = Theme.Bg };
-            _flows.Add(flow);
+            Break(header);
+            GameTile? last = null;
             foreach (var game in grp)
             {
                 var tile = new GameTile(game);
                 tile.Click += (_, _) => Chosen?.Invoke(game);
-                flow.Controls.Add(tile);
+                _flow.Controls.Add(tile);
+                last = tile;
             }
-            root.Controls.Add(flow);
+            if (last != null) _flow.SetFlowBreak(last, true); // the next console starts on a new line
         }
-        Controls.Add(root);
-        // Wrap tiles to the window width.
-        Resize += (_, _) =>
-        {
-            var w = Math.Max(300, ClientSize.Width - 80);
-            foreach (var f in _flows) f.MaximumSize = new Size(w, 0);
-        };
+        _view.Controls.Add(_flow);
+        Controls.Add(_view);
+        Controls.Add(_bar);
+        _view.Resize += (_, _) => Fit();
+        _bar.Scroll += (_, e) => ScrollTo(e.NewValue);
+        // the wheel over a tile reaches the view (Windows passes unhandled wheel messages up to the parent)
+        _view.MouseWheel += (_, e) => ScrollTo(_offset - e.Delta);
+        MouseWheel += (_, e) => ScrollTo(_offset - e.Delta);
     }
 
-    private readonly List<FlowLayoutPanel> _flows = new();
+    /// <summary>How far down the list can go: its height at the current width minus what's visible.</summary>
+    internal int MaxOffset => Math.Max(0, _flow.Height - _view.ClientSize.Height);
+    internal int Offset => _offset;
+
+    /// <summary>Lays the tiles out at the view's width and sizes the list (and the scrollbar) to exactly their height.</summary>
+    private void Fit()
+    {
+        if (_view.ClientSize.Width <= 0) return;
+        var width = _view.ClientSize.Width;
+        var height = _flow.GetPreferredSize(new Size(width, 0)).Height;
+        _flow.SetBounds(0, -_offset, width, height);
+        _bar.Visible = height > _view.ClientSize.Height;
+        _bar.Minimum = 0;
+        _bar.SmallChange = 60;
+        _bar.LargeChange = Math.Max(1, _view.ClientSize.Height);
+        _bar.Maximum = Math.Max(0, height - 1);
+        ScrollTo(_offset);
+    }
+
+    internal void ScrollTo(int offset)
+    {
+        _offset = Math.Clamp(offset, 0, MaxOffset);
+        _flow.Top = -_offset;
+        if (_bar.Visible) _bar.Value = Math.Min(_offset, Math.Max(0, _bar.Maximum - _bar.LargeChange + 1));
+    }
 }

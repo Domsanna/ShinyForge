@@ -151,7 +151,9 @@ public sealed class HuntOptionsForm : Form
         };
         remove.Click += (_, _) => { if (targetList.SelectedIndex >= 0) { targets.RemoveAt(targetList.SelectedIndex); ShowTargets(); } };
         body.Controls.Add(Row(L("Pokémon:"), pick, L("Form:"), formBox));
-        body.Controls.Add(Row(L("Gender:"), genderBox, L("Shiny:"), shinyBox, add, remove));
+        var genderLabel = L("Gender:");
+        body.Controls.Add(Row(genderLabel, genderBox, L("Shiny:"), shinyBox, add, remove));
+        if (game.Gen <= 1) genderLabel.Visible = genderBox.Visible = false; // Gen 1 has no genders
 
         // ---------------------------------------------------------------- stop rules
         var rulesStart = body.Controls.Count;
@@ -170,6 +172,7 @@ public sealed class HuntOptionsForm : Form
         body.Controls.Add(all);
 
         // ---------------------------------------------------------------- auto-catch (optional)
+        var catchStart = body.Controls.Count;
         body.Controls.Add(H("Auto-catch (optional - off by default)"));
         body.Controls.Add(P("When the bot finds something it normally stops and leaves the battle to you. If you turn this on it throws " +
                             "Poké Balls by itself until it's caught. It stops and hands the battle back to you if anything unexpected " +
@@ -192,6 +195,7 @@ public sealed class HuntOptionsForm : Form
                             "start of the hunt if the ball isn't in your bag.", Theme.Muted));
 
         // ---------------------------------------------------------------- RNG manipulation (optional)
+        var rngStart = body.Controls.Count;
         body.Controls.Add(H("Shiny RNG manipulation (optional - off by default)"));
         body.Controls.Add(P("Instead of resetting until a shiny shows up by chance (about 1 in 8,192 per reset), ShinyForge can read the " +
                             "game's random number generator from the Switch's memory and press A at the exact moment that produces a shiny " +
@@ -206,7 +210,6 @@ public sealed class HuntOptionsForm : Form
             ForeColor = Theme.Gold, Font = new Font("Segoe UI Semibold", 10.5f), Enabled = _rngAvailable,
         };
         body.Controls.Add(rngOn);
-        if (!_rngAvailable) body.Controls.Add(P("(Only available for FireRed / LeafGreen on the Switch.)", Theme.Warn));
         body.Controls.Add(L("Optional: only these natures (none ticked = any nature; each one ticked makes the wait longer):"));
         var rngNatures = NatureList(_o.RngNatures);
         body.Controls.Add(rngNatures);
@@ -224,22 +227,40 @@ public sealed class HuntOptionsForm : Form
         };
         SyncRng();
 
-        // SysBot.exe games: only the stop targets (the rest is the Python hunter's / 3DS bot's)
-        if (targetsOnly)
-            for (var i = rulesStart; i < body.Controls.Count; i++) body.Controls[i].Visible = false;
+        // Only what this game's bot can do (every game was checked):
+        //  - nature / IV rules: Gen 3+ (Gen 1/2 have no natures, and their "IVs" are 0-15 DVs - the rules are shared by all games)
+        //  - auto-catch: the FireRed / LeafGreen Python hunter
+        //  - shiny RNG manipulation: FireRed / LeafGreen on the Switch (static encounters)
+        //  - SysBot.exe games: only the stop targets
+        var showRules = !targetsOnly && game.Gen >= 3;
+        var showCatch = !targetsOnly && game.Bot == BotKind.FrlgSwitch;
+        var showRng = !targetsOnly && _rngAvailable;
+        void Hide(int from, int to) { for (var i = from; i < to; i++) body.Controls[i].Visible = false; }
+        var end = body.Controls.Count;
+        if (!showRules) Hide(rulesStart, catchStart);
+        if (!showCatch) Hide(catchStart, rngStart);
+        if (!showRng) Hide(rngStart, end);
+        if (!targetsOnly && game.Gen <= 2)
+            body.Controls.Add(P("Gen 1 / 2 games have no natures, and their IVs are DVs (0-15) - so their bot stops on shinies and on the stop targets above.", Theme.Muted));
 
         save.Click += (_, _) =>
         {
             gs.StopTargets = targets;
             _o.StopSpecies = ""; // replaced by the per-game stop targets
-            _o.StopNatures = stopNatures.CheckedItems.Cast<string>().ToList();
-            _o.MinIvTotal = (int)minTotal.Value;
-            _o.MinIvs = stopIvs.ToDictionary(k => k.Key, v => (int)v.Value.Value);
-            _o.RequireAll = all.Checked;
-            _o.AutoCatch = acAll.Checked ? "all" : acNon.Checked ? "non_legendary" : "off";
-            _o.BallItem = HuntOptions.Balls[Math.Max(0, ballBox.SelectedIndex)].Item;
-            _o.MaxBalls = (int)maxBalls.Value;
-            if (_rngAvailable) // the 3DS pages show RNG greyed out - saving there must not switch the Switch's RNG setting off
+            if (showRules) // shared by all games: only saved where they're shown
+            {
+                _o.StopNatures = stopNatures.CheckedItems.Cast<string>().ToList();
+                _o.MinIvTotal = (int)minTotal.Value;
+                _o.MinIvs = stopIvs.ToDictionary(k => k.Key, v => (int)v.Value.Value);
+                _o.RequireAll = all.Checked;
+            }
+            if (showCatch)
+            {
+                _o.AutoCatch = acAll.Checked ? "all" : acNon.Checked ? "non_legendary" : "off";
+                _o.BallItem = HuntOptions.Balls[Math.Max(0, ballBox.SelectedIndex)].Item;
+                _o.MaxBalls = (int)maxBalls.Value;
+            }
+            if (showRng)
             {
                 _o.RngEnabled = rngOn.Checked;
                 _o.RngNatures = rngNatures.CheckedItems.Cast<string>().ToList();

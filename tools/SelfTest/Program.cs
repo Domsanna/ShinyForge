@@ -362,6 +362,17 @@ if (tests.Contains("deps"))
         Check(await DependencyService.SysBotOutdated() == o, "the answer is reused (no GitHub call per click)");
     }
     finally { AppSettings.Current.SysBotPath = keepBot; DependencyService.ForgetSysBotCheck(); }
+
+    // the equipment checks done before outside programs open, on this PC's real hardware
+    Console.WriteLine($"   3DS capture board: {Equipment.ThreeDSCaptureBoard()}, microcontroller: {Equipment.Microcontroller()}, " +
+                      $"video sources: {string.Join(" | ", Equipment.VideoSources())}");
+    Check(Equipment.VideoSources().Count > 0, "capture devices are listed (the recording / Pokémon Automation check)");
+    Check(WinUsbDevice.IsVendorConnected(0x534D) && !WinUsbDevice.IsConnected(0x534D, 0x0001), "USB detection: the MS2109 capture card (534D:2109) is seen, a made-up product isn't");
+    if (DependencyService.PathOf("Python 3") is { } py)
+    {
+        var missing = await DependencyService.MissingPythonPackages(py);
+        Check(missing != null, $"the Python hunter's packages were checked (missing: {(missing is { Count: > 0 } ? string.Join(", ", missing) : "none")})");
+    }
 }
 
 if (tests.Contains("3ds"))
@@ -1917,6 +1928,37 @@ if (tests.Contains("features"))
     Check(PowerGuard.HeldFor == "a test", "keep-awake engaged while busy");
 
     (s.DiscordWebhookUrl, s.NtfyTopic, s.NtfyServer, s.OverlayEnabled, s.RemoteEnabled, s.WebPort, s.AutoBackups) = keep;
+}
+
+if (tests.Contains("gameslist"))
+{
+    // The game lists must end at the last game: the scroll range = the content, no empty screens below it.
+    InitUi();
+    foreach (var sw in new[] { true, false })
+    {
+        // like the main window: the page is built small, then added to a window that's already open, then scrolled to the end
+        var f = new Form { Size = new Size(1320, 900), StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
+        var content = new Panel { Dock = DockStyle.Fill };
+        f.Controls.Add(content);
+        f.Show(); for (var i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(30); }
+        var page = new GamesPage(sw);
+        content.Controls.Add(page);
+        for (var i = 0; i < 20; i++) { Application.DoEvents(); Thread.Sleep(30); }
+        page.ScrollTo(int.MaxValue); // scroll as far down as it goes
+        for (var i = 0; i < 5; i++) { Application.DoEvents(); Thread.Sleep(30); }
+        var tiles = page.Controls.OfType<Panel>().First().Controls[0].Controls.OfType<GameTile>().ToList();
+        var view = page.Controls.OfType<Panel>().First();
+        var lastTile = tiles.Last();
+        var bottom = lastTile.Bottom + lastTile.Parent!.Top;
+        Console.WriteLine($"   tiles: {tiles.Count}, scrolled {page.Offset} of {page.MaxOffset}, last tile bottom {bottom} of {view.ClientSize.Height}");
+        Check(bottom <= view.ClientSize.Height && bottom > view.ClientSize.Height - 120,
+            $"{(sw ? "Switch" : "3DS")} list scrolled to the end: the last game is the last thing on screen (bottom {bottom} of {view.ClientSize.Height})");
+        f.WindowState = FormWindowState.Maximized; for (var i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(30); }
+        page.ScrollTo(int.MaxValue);
+        bottom = lastTile.Bottom + lastTile.Parent!.Top;
+        Check(bottom <= view.ClientSize.Height + 1, $"{(sw ? "Switch" : "3DS")} list after maximizing: still ends at the last game (bottom {bottom} of {view.ClientSize.Height})");
+        f.Close();
+    }
 }
 
 if (tests.Contains("featuresui"))

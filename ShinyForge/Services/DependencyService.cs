@@ -521,6 +521,25 @@ public static class DependencyService
             : ParseVersion(Path.GetDirectoryName(exe))?.ToString();
     }
 
+    // ------------------------------------------------------------------ the Python hunter's packages
+    /// <summary>requirements.txt's packages by import name (the hunter fails to start without them).</summary>
+    private static readonly (string Import, string Package)[] HunterPackages = { ("cv2", "opencv-python"), ("numpy", "numpy"), ("yaml", "pyyaml"), ("mss", "mss") };
+
+    /// <summary>The Python hunter's packages this Python doesn't have (empty = all there; null = Python couldn't be asked).</summary>
+    public static async Task<List<string>?> MissingPythonPackages(string python)
+    {
+        var imports = string.Join(",", HunterPackages.Select(p => $"'{p.Import}'"));
+        var o = await RunTool(python, $"-c \"import importlib.util as u; print('missing:' + ','.join(m for m in [{imports}] if u.find_spec(m) is None))\"");
+        var line = o.Split('\n').FirstOrDefault(l => l.StartsWith("missing:"));
+        if (line == null) return null;
+        var missing = line["missing:".Length..].Trim().Split(',', StringSplitOptions.RemoveEmptyEntries);
+        return HunterPackages.Where(p => missing.Contains(p.Import)).Select(p => p.Package).ToList();
+    }
+
+    /// <summary>pip-installs the hunter's requirements.txt. Returns pip's last line.</summary>
+    public static async Task<string> InstallPythonPackages(string python, string botDir) =>
+        LastLine(await RunTool(python, $"-m pip install -r \"{Path.Combine(botDir, "requirements.txt")}\"", 600000));
+
     // ------------------------------------------------------------------ installed versions (Tools & Updates)
     /// <summary>Reads the version of every tool that was found - all at once, off the UI thread (some ask the program).</summary>
     public static Task ReadVersions() => Task.WhenAll(All.Where(d => d.Path != null).Select(async d =>
