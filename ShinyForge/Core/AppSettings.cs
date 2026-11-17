@@ -45,7 +45,18 @@ public sealed class HuntOptions
     public bool RequireAll { get; set; }
     // optional auto-catch (off by default)
     public string AutoCatch { get; set; } = "off";             // off | non_legendary | all
+    /// <summary>Old setting: the ball's position in the POKé BALLS pocket (used only while <see cref="BallItem"/> is 0).</summary>
     public int BallSlot { get; set; } = 1;
+    /// <summary>The ball auto-catch throws, as its Gen 3 item number (<see cref="Balls"/>); the hunter finds it in the bag.</summary>
+    public int BallItem { get; set; }
+    /// <summary>FireRed / LeafGreen's Poké Balls (Gen 3 item numbers).</summary>
+    public static readonly (int Item, string Name)[] Balls =
+    {
+        (1, "Master Ball"), (2, "Ultra Ball"), (3, "Great Ball"), (4, "Poké Ball"), (6, "Net Ball"), (7, "Dive Ball"), (8, "Nest Ball"),
+        (9, "Repeat Ball"), (10, "Timer Ball"), (11, "Luxury Ball"), (12, "Premier Ball"), (5, "Safari Ball"),
+    };
+    /// <summary>The ball to show as chosen: the one set, or for old settings the Master Ball (position 1) / Poké Ball.</summary>
+    [JsonIgnore] public int ChosenBall => BallItem > 0 ? BallItem : BallSlot == 1 ? 1 : 4;
     public int MaxBalls { get; set; } = 25;
     // optional shiny RNG manipulation (FireRed/LeafGreen Switch, static encounters) - never on unless the user turns it on
     public bool RngEnabled { get; set; }

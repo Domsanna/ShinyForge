@@ -48,8 +48,8 @@ def load_recent_pids(n=500):
     return out
 
 
-from .extras import check_rules, notify, save_screenshot, wait_while_paused, write_status
-from .memory import (BATTLE_MENU, GBA_ANCHOR, IN_BATTLE, INITIAL_SEED, LEGENDARY_OR_MYTHICAL, ROAMERS, STATIC_SPOTS,
+from .extras import check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused, write_status
+from .memory import (BALL_NAMES, BATTLE_MENU, GBA_ANCHOR, IN_BATTLE, INITIAL_SEED, LEGENDARY_OR_MYTHICAL, ROAMERS, STATIC_SPOTS,
                      GameMemory, current_seed_offset)
 from . import rng
 
@@ -227,8 +227,23 @@ class MemoryHunter:
         if p.species_name in LEGENDARY_OR_MYTHICAL and mode != "all":
             print("  Auto-catch is set to non-legendary Pokemon only - leaving this one to you.")
             return False
-        slot, max_balls = max(1, int(ac.get("ball_slot", 1))), int(ac.get("max_balls", 25))
-        print(f"  Auto-catch: throwing up to {max_balls} balls (ball #{slot} in the POKe BALLS pocket)...")
+        max_balls = int(ac.get("max_balls", 25))
+        ball = int(ac.get("ball_item", 0))
+        pocket = self.game.ball_pocket()
+        if ball:
+            if pocket is None:
+                self.warn("Auto-catch: the bag couldn't be read - stopped, the battle is yours.")
+                return False
+            items = [item for item, _ in pocket]
+            if ball not in items:
+                self.warn(f"Auto-catch: there's no {BALL_NAMES.get(ball, ball)} in your bag - stopped, the battle is yours.")
+                return False
+            index, count = items.index(ball), pocket[items.index(ball)][1]
+            max_balls = min(max_balls, count)
+            what = BALL_NAMES.get(ball, f"ball {ball}")
+        else:  # older settings: a position in the pocket
+            index, what = max(1, int(ac.get("ball_slot", 1))) - 1, f"ball #{ac.get('ball_slot', 1)} in the POKe BALLS pocket"
+        print(f"  Auto-catch: throwing up to {max_balls} x {what}...")
         self.status("catching", p)
         for n in range(1, max_balls + 1):
             t0 = time.time()
@@ -246,13 +261,10 @@ class MemoryHunter:
             time.sleep(0.5)
             # FIGHT is top-left: go there first (the menu remembers the last choice), then BAG (top-right)
             self.tap("DUP", 0.2); self.tap("DLEFT", 0.2); self.tap("DRIGHT", 0.25); self.tap("A", 1.6)
-            # pockets ITEMS / KEY ITEMS / POKe BALLS: go to the left end, then two to the right
-            for d in ("DLEFT", "DLEFT", "DRIGHT", "DRIGHT"):
-                self.tap(d, 0.4)
-            for _ in range(12):
-                self.tap("DUP", 0.12)
-            for _ in range(slot - 1):
-                self.tap("DDOWN", 0.2)
+            if not self.select_ball(index):
+                self.warn(f"Auto-catch: the {what} couldn't be selected in the bag (a button press got lost?) - "
+                          "nothing was thrown, the battle is yours.")
+                return False
             self.tap("A", 0.8)    # the ball -> USE / CANCEL
             self.tap("A", 1.0)    # USE -> throw
             print(f"    ball {n} thrown")
@@ -276,6 +288,63 @@ class MemoryHunter:
                 return True
         print("  Auto-catch: out of throws - the battle is yours.")
         return False
+
+    # ---------------------------------------------------------------- picking the ball (checked on screenshots)
+    def screen(self):
+        """The Switch's screen, grey and shrunk (for "did it change?"), or None."""
+        import cv2
+        import numpy as np
+        data = switch_screenshot(self.cfg["controller"]["host"], int(self.cfg["controller"].get("port", 6000)))
+        if not data:
+            return None
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+        return None if img is None else cv2.resize(img, (320, 180), interpolation=cv2.INTER_AREA).astype("int16")
+
+    def press_and_check(self, button: str, tries: int = 3) -> bool | None:
+        """Presses `button` and checks on screenshots that the picture really changed (a dropped press is repeated).
+        Parts that change on their own (blinking scroll arrows) are measured first and ignored.
+        True = it moved, False = nothing moves (end of the list / first pocket), None = no screenshot."""
+        import numpy as np
+        for _ in range(tries):
+            a, b = self.screen(), None
+            time.sleep(0.25)
+            b = self.screen()
+            if a is None or b is None:
+                return None
+            idle = np.abs(a - b) > 12                      # what blinks by itself
+            self.tap(button, 0.55)
+            c = self.screen()
+            if c is None:
+                return None
+            changed = (np.abs(c - b) > 12) & ~idle
+            if changed.mean() > 0.002:                    # a cursor row / pocket really changed
+                return True
+        return False
+
+    def select_ball(self, index: int) -> bool:
+        """In the battle bag: the POKe BALLS pocket (ITEMS, KEY ITEMS, POKe BALLS - the first pocket, then two to the
+        right), then the top of its list, then `index` rows down - every step checked on the screen, so a lost press
+        can't make it throw a different ball. False = something didn't add up (nothing is thrown)."""
+        time.sleep(0.6)
+        for _ in range(4):                                # to the first pocket (LEFT stops moving there)
+            moved = self.press_and_check("DLEFT", tries=2)
+            if moved is None:
+                return False
+            if not moved:
+                break
+        for _ in range(2):                                # two pockets to the right
+            if not self.press_and_check("DRIGHT"):
+                return False
+        for _ in range(16):                               # to the top of the list (UP stops moving there)
+            moved = self.press_and_check("DUP", tries=2)
+            if moved is None:
+                return False
+            if not moved:
+                break
+        for _ in range(index):                            # down to the ball
+            if not self.press_and_check("DDOWN"):
+                return False
+        return True
 
     def wait_for_user(self) -> bool:
         alert_shiny(self.cfg["on_shiny"].get("beep", True))
@@ -469,6 +538,11 @@ class MemoryHunter:
         if not self.game.locate():
             return
         self.mode = self.resolve_mode()
+        ac = self.h.get("auto_catch") or {}
+        if (ac.get("mode") or "off") != "off" and int(ac.get("ball_item", 0)):
+            ball = int(ac["ball_item"])
+            if ball not in [item for item, _ in (self.game.ball_pocket() or [])]:
+                self.warn(f"Auto-catch is on, but there's no {BALL_NAMES.get(ball, ball)} in your bag - it won't throw anything.")
         print(f"Mode: {self.mode}.  {self.stats['encounters']} encounters so far. Ctrl+C to stop.\n")
         if self.mode == "rng":
             print("RNG mode (chosen by you): the bot times the A press to land on a shiny frame. "

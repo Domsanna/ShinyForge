@@ -181,10 +181,15 @@ public sealed class HuntOptionsForm : Form
         var acGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown };
         acGroup.Controls.AddRange(new Control[] { acOff, acNon, acAll });
         body.Controls.Add(acGroup);
-        var slot = Num(1, 16, _o.BallSlot);
+        var ballBox = new ComboBox { Width = 170, DropDownStyle = ComboBoxStyle.DropDownList };
+        Theme.StyleInput(ballBox);
+        ballBox.Items.AddRange(HuntOptions.Balls.Select(b => (object)b.Name).ToArray());
+        ballBox.SelectedIndex = Math.Max(0, Array.FindIndex(HuntOptions.Balls, b => b.Item == _o.ChosenBall));
         var maxBalls = Num(1, 99, _o.MaxBalls);
-        body.Controls.Add(Row(L("Ball = position in the POKé BALLS pocket (1 = top):"), slot, L("   Max. balls:"), maxBalls));
-        body.Controls.Add(P("Tip: position 1 is usually the MASTER BALL if you have one (FireRed/LeafGreen sort the pocket by item number).", Theme.Warn));
+        body.Controls.Add(Row(L("Ball to throw:"), ballBox, L("   Max. balls:"), maxBalls));
+        body.Controls.Add(P("The hunter reads your bag to find this ball, then picks it in the battle bag step by step, checking every step " +
+                            "on the screen - if anything doesn't add up it throws nothing and leaves the battle to you. It warns you at the " +
+                            "start of the hunt if the ball isn't in your bag.", Theme.Muted));
 
         // ---------------------------------------------------------------- RNG manipulation (optional)
         body.Controls.Add(H("Shiny RNG manipulation (optional - off by default)"));
@@ -232,7 +237,7 @@ public sealed class HuntOptionsForm : Form
             _o.MinIvs = stopIvs.ToDictionary(k => k.Key, v => (int)v.Value.Value);
             _o.RequireAll = all.Checked;
             _o.AutoCatch = acAll.Checked ? "all" : acNon.Checked ? "non_legendary" : "off";
-            _o.BallSlot = (int)slot.Value;
+            _o.BallItem = HuntOptions.Balls[Math.Max(0, ballBox.SelectedIndex)].Item;
             _o.MaxBalls = (int)maxBalls.Value;
             if (_rngAvailable) // the 3DS pages show RNG greyed out - saving there must not switch the Switch's RNG setting off
             {

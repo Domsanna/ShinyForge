@@ -152,10 +152,12 @@ public sealed class HuntOptionsWindow : Window
         var acNon = new RadioButton { Content = Skin.T("Catch non-legendary Pokémon only", 13, Skin.Text), GroupName = "ac", IsChecked = o.AutoCatch == "non_legendary" };
         var acAll = new RadioButton { Content = Skin.T("Catch everything, including legendaries (e.g. Deoxys)", 13, Skin.Warn), GroupName = "ac", IsChecked = o.AutoCatch == "all" };
         body.Children.Add(Skin.Column(2, acOff, acNon, acAll));
-        var slot = Skin.Number(1, 16, o.BallSlot);
+        var ballBox = new ComboBox { Width = 180, ItemsSource = HuntOptions.Balls.Select(b => b.Name).ToList(),
+                                     SelectedIndex = Math.Max(0, Array.FindIndex(HuntOptions.Balls, b => b.Item == o.ChosenBall)) };
         var maxBalls = Skin.Number(1, 99, o.MaxBalls);
-        body.Children.Add(Skin.Wrap(Skin.T("Ball = position in the POKé BALLS pocket (1 = top):", 13, Skin.Text, wrap: false), slot, Skin.T("Max. balls:", 13, Skin.Text, wrap: false), maxBalls));
-        body.Children.Add(Skin.T("Tip: position 1 is usually the MASTER BALL if you have one (FireRed/LeafGreen sort the pocket by item number).", 13, Skin.Warn));
+        body.Children.Add(Skin.Wrap(Skin.T("Ball to throw:", 13, Skin.Text, wrap: false), ballBox, Skin.T("Max. balls:", 13, Skin.Text, wrap: false), maxBalls));
+        body.Children.Add(Skin.MutedText("The hunter reads your bag to find this ball, then picks it in the battle bag step by step, checking every step on the screen - " +
+                                         "if anything doesn't add up it throws nothing and leaves the battle to you. It warns you at the start of the hunt if the ball isn't in your bag."));
 
         body.Children.Add(H("Shiny RNG manipulation (optional - off by default)"));
         body.Children.Add(Skin.MutedText("Instead of resetting until a shiny shows up by chance (about 1 in 8,192 per reset), ShinyForge can read the game's random number generator from the Switch's memory " +
@@ -193,7 +195,7 @@ public sealed class HuntOptionsWindow : Window
             o.MinIvs = stopIvs.ToDictionary(k => k.Key, v => (int)(v.Value.Value ?? 0));
             o.RequireAll = all.IsChecked == true;
             o.AutoCatch = acAll.IsChecked == true ? "all" : acNon.IsChecked == true ? "non_legendary" : "off";
-            o.BallSlot = (int)(slot.Value ?? 1);
+            o.BallItem = HuntOptions.Balls[Math.Max(0, ballBox.SelectedIndex)].Item;
             o.MaxBalls = (int)(maxBalls.Value ?? 25);
             if (rngAvailable) // the 3DS pages show RNG greyed out - saving there must not switch the Switch's RNG setting off
             {

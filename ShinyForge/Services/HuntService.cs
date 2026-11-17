@@ -77,7 +77,7 @@ public static class HuntService
                 ["min_ivs"] = new JsonObject(h.MinIvs.Where(kv => kv.Value > 0).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))),
                 ["require_all"] = h.RequireAll,
             },
-            ["auto_catch"] = new JsonObject { ["mode"] = h.AutoCatch, ["ball_slot"] = h.BallSlot, ["max_balls"] = h.MaxBalls },
+            ["auto_catch"] = new JsonObject { ["mode"] = h.AutoCatch, ["ball_item"] = h.ChosenBall, ["ball_slot"] = h.BallSlot, ["max_balls"] = h.MaxBalls },
             ["rng"] = new JsonObject
             {
                 ["natures"] = new JsonArray(h.RngNatures.Select(x => (JsonNode)x).ToArray()),

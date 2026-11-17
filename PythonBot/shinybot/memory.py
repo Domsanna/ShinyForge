@@ -132,6 +132,13 @@ class SysBotMemory:
         self.sock = self.f = None
 
 
+# Gen 3 Poke Ball item IDs (the POKe BALLS pocket holds these)
+BALL_NAMES = {1: "Master Ball", 2: "Ultra Ball", 3: "Great Ball", 4: "Poke Ball", 5: "Safari Ball", 6: "Net Ball",
+              7: "Dive Ball", 8: "Nest Ball", 9: "Repeat Ball", 10: "Timer Ball", 11: "Luxury Ball", 12: "Premier Ball"}
+BALL_POCKET = 0x430      # SaveBlock1: 13 slots of (u16 item, u16 quantity ^ key) - the order the bag shows them in
+ITEM_KEY = 0xF20         # SaveBlock2: the key quantities are XORed with (low 16 bits)
+
+
 class GameMemory:
     def __init__(self, ctrl_cfg: dict, mem_cfg: dict | None = None):
         self.mem = SysBotMemory(ctrl_cfg["host"], int(ctrl_cfg.get("port", 6000)))
@@ -172,6 +179,23 @@ class GameMemory:
         to_s8 = lambda b: b - 256 if b > 127 else b
         return (to_s8(d[4]), to_s8(d[5]), int.from_bytes(d[0:2], "little", signed=True),
                 int.from_bytes(d[2:4], "little", signed=True))
+
+    def ball_pocket(self):
+        """The POKe BALLS pocket as [(item id, count), ...] in the order the bag lists it, or None if unreadable."""
+        if not self.locate():
+            return None
+        ptrs = self.mem.peek(current_seed_offset(self.title) + 8, 8)
+        sb1, sb2 = int.from_bytes(ptrs[0:4], "little"), int.from_bytes(ptrs[4:8], "little")
+        if not (GBA_ANCHOR <= sb1 <= 0x0203FFFF and GBA_ANCHOR <= sb2 <= 0x0203FFFF):
+            return None
+        key = int.from_bytes(self.mem.peek(INITIAL_SEED + (sb2 - GBA_ANCHOR) + ITEM_KEY, 4), "little") & 0xFFFF
+        raw = self.mem.peek(INITIAL_SEED + (sb1 - GBA_ANCHOR) + BALL_POCKET, 13 * 4)
+        pocket = []
+        for i in range(13):
+            item = int.from_bytes(raw[i * 4:i * 4 + 2], "little")
+            if item:
+                pocket.append((item, int.from_bytes(raw[i * 4 + 2:i * 4 + 4], "little") ^ key))
+        return pocket
 
     def read_enemy(self):
         """Return (Pokemon | None, note)."""
