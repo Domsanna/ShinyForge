@@ -2,6 +2,18 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.6
+
+### Added
+- **Install all updates** button in Tools & Updates: installs every update ShinyForge can install itself, one after the other, and then says what happened to each (one that fails doesn't stop the others). Updates that need you (for example a SysBot you built yourself) are listed.
+- **3DS Capture is checked for updates** against the download on 3dscapture.com, and its update installs with one click (the new version is unzipped next to the old one, which is kept).
+
+### Changed
+- **Every tool's row says what the check found**: "Up to date" with the newest version it compared against, "Update available", or why it couldn't check (a version that couldn't be read is shown, never passed off as "up to date"). Excel's row says it's updated by Office itself. Long paths are shortened so they fit.
+
+### Fixed
+- **No tool can be skipped silently any more.** Every installed tool goes through the same comparison, and any installed tool that wasn't checked is reported on its row.
+
 ## 1.2.5
 
 ### Fixed
