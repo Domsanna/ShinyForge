@@ -51,6 +51,8 @@ public static class HuntService
     private static long _warningsOffset = -1;
     private static int _autoRestarts;
     private static DateTime _startedAt;
+    /// <summary>The Python bot's last warning of this run (bot_warnings.log) - shown when it stops on its own.</summary>
+    private static string? _lastBotWarning;
 
     /// <summary>Raised (background thread) when the Switch can't be reached while a hunt runs - the UI asks for a new IP.</summary>
     public static event Action<string>? SwitchUnreachable;
@@ -224,6 +226,9 @@ public static class HuntService
                 "sys-botbase is set to USB. Switch it back to WiFi (Shiny Hunt card → sys-botbase), restart the Switch and dock it.");
         if (key == "python")
         {
+            // checked before _startedAt is reset: a console left open by the previous run must not count as running
+            if (IsPythonHuntRunning())
+                throw new InvalidOperationException("The Python hunter is already running.");
             var botDir = AppPaths.FindPythonBotFolder(s.PythonBotFolder)
                 ?? throw new FileNotFoundException($"The ShinyForge Python bot wasn't found in {s.PythonBotFolder} or the Backup Tools folder ({AppPaths.BackupToolsDir}). Set its folder in Settings.");
             SyncBotConfig(botDir, s.SwitchIP, s.SwitchPort);
@@ -235,10 +240,9 @@ public static class HuntService
             _startedAt = DateTime.Now;
             var warnLog = Path.Combine(botDir, "bot_warnings.log");
             _warningsOffset = File.Exists(warnLog) ? new FileInfo(warnLog).Length : 0;
+            _lastBotWarning = null;
             HealthMonitor.Register("python-hunt", CheckPythonHunt);
             var bat = Path.Combine(botDir, "start_hunt.bat");
-            if (IsPythonHuntRunning())
-                throw new InvalidOperationException("The Python hunter is already running.");
             if (!OsInfo.IsWindows)
             {
                 // macOS / Linux: python3 -m shinybot hunt, its console output kept in hunt_console.log in the bot folder.
@@ -303,7 +307,10 @@ public static class HuntService
     }
 
     public static bool IsPythonHuntRunning() =>
-        (PythonHunt is { HasExited: false }) || PythonProcesses().Any(p => CommandLineContains(p, "shinybot"));
+        PythonProcesses().Any(p => CommandLineContains(p, "shinybot"))
+        // PythonHunt is the console window: it stays open on "Press any key" after the bot ended (to show why), so it only
+        // counts while the bot is still starting - it used to block every new start with "already running"
+        || (PythonHunt is { HasExited: false } && DateTime.Now - _startedAt < TimeSpan.FromSeconds(20));
 
     /// <summary>python / python3 / python3.12 ... processes.</summary>
     private static IEnumerable<Process> PythonProcesses() =>
@@ -333,7 +340,10 @@ public static class HuntService
             var lines = sr.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries);
             _warningsOffset = fs.Length;
             foreach (var l in lines.TakeLast(3))
-                HealthMonitor.Report(F, HealthState.Warning, "Bot: " + (l.Contains('\t') ? l[(l.IndexOf('\t') + 1)..] : l).Trim());
+            {
+                _lastBotWarning = (l.Contains('\t') ? l[(l.IndexOf('\t') + 1)..] : l).Trim();
+                HealthMonitor.Report(F, HealthState.Warning, "Bot: " + _lastBotWarning);
+            }
         }
 
         if (!running)
@@ -341,8 +351,11 @@ public static class HuntService
             if (!_stopRequested && (DateTime.Now - _startedAt).TotalSeconds > 30)
             {
                 _stopRequested = true; // report once
-                yield return HealthMonitor.Warn(F, "The Python hunter has stopped. If it found a shiny its window says so; " +
-                                                   "otherwise it stopped because of a problem (see its window) - start it again from the Shiny Hunt card.");
+                // the bot's own last warning says why (e.g. "the save isn't loaded") - it used to be replaced by this generic text
+                yield return HealthMonitor.Warn(F, _lastBotWarning is { } why
+                    ? $"The Python hunter has stopped: {why}"
+                    : "The Python hunter has stopped. If it found a shiny its window says so; " +
+                      "otherwise it stopped because of a problem (see its window) - start it again from the Shiny Hunt card.");
             }
             yield break;
         }
@@ -423,6 +436,26 @@ public static class HuntService
         foreach (var p in PythonProcesses().Where(p => CommandLineContains(p, "shinybot")))
             try { p.Kill(entireProcessTree: true); } catch { }
         try { PythonHunt?.Kill(entireProcessTree: true); } catch { }
+        MarkStopped();
+    }
+
+    /// <summary>
+    /// The hunter is killed, so it can't write its own last status: bot_status.json would keep saying "hunting" (the overlay,
+    /// the phone remote and other readers then show a hunt that isn't running). "found" stays - something waits in the game.
+    /// </summary>
+    private static void MarkStopped()
+    {
+        try
+        {
+            if (BotDir is not { } d) return;
+            var path = Path.Combine(d, "bot_status.json");
+            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonObject j) return;
+            if (j["state"]?.GetValue<string>() == "found") return;
+            j["state"] = "stopped";
+            j["updated"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            File.WriteAllText(path, j.ToJsonString());
+        }
+        catch (Exception e) { AppPaths.Log("Marking the hunt stopped: " + e.Message); }
     }
 
     private static bool CommandLineContains(Process p, string text)

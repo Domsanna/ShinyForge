@@ -270,7 +270,7 @@ public sealed class HuntOptionsForm : Form
             var bot = AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder);
             if (bot != null && game.Bot == BotKind.FrlgSwitch) try { HuntService.WriteBotOverrides(bot, game); } catch (Exception ex) { MessageBox.Show(this, ex.Message); }
             if (HuntService.IsPythonHuntRunning())
-                MessageBox.Show(this, "Saved. The running Python hunter uses the new options after it's restarted (Stop, then Start hunting).", "Hunt options");
+                MessageBox.Show(this, "Saved. A running Python hunter uses the new options from its next encounter - no restart needed.", "Hunt options");
             DialogResult = DialogResult.OK;
             Close();
         };

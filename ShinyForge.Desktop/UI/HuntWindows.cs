@@ -228,7 +228,7 @@ public sealed class HuntOptionsWindow : Window
             if (game.Bot == BotKind.FrlgSwitch && AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder) is { } bot)
                 try { HuntService.WriteBotOverrides(bot, game); } catch (Exception ex) { await Dialogs.Info(this, ex.Message); }
             if (HuntService.IsPythonHuntRunning())
-                await Dialogs.Info(this, "Saved. The running Python hunter uses the new options after it's restarted (Stop, then Start hunting).", "Hunt options");
+                await Dialogs.Info(this, "Saved. A running Python hunter uses the new options from its next encounter - no restart needed.", "Hunt options");
             Close();
         };
         var bottom = new Border { Background = Skin.B(Skin.Panel), Padding = new Thickness(12, 8), Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, save } } };
@@ -306,7 +306,7 @@ public sealed class HuntStatsWindow : Window
             $"Speed:  {(r.PerHour > 0 ? $"{r.PerHour:0} encounters / hour" : "- (not hunting right now)")}      Time to 90 %:  {eta}\n\n" +
             (r.BestIv is { } b ? $"Best IVs this hunt:  {b.IvTotal}/186 ({string.Join("/", b.Ivs)}) - {b.Species}, {b.Nature} at {b.Time:MM-dd HH:mm}\n" : "") +
             (r.Last is { } l ? $"Last encounter:  {l.Species}, {l.Nature}, IVs {l.IvTotal}/186 at {l.Time:HH:mm:ss}\n" : "") +
-            $"\nAll time in this log: {r.Total:N0} encounters, {r.ShiniesFound} shin{(r.ShiniesFound == 1 ? "y" : "ies")}.";
+            "\n" + HuntStats.AllTimeText(r);
         _side.Text =
             "Species this hunt\n" + string.Join("\n", r.Species.Select(s => $"  {s.Name}  ×{s.Count:N0}")) + "\n\n" +
             "Most common natures\n" + string.Join("\n", r.Natures.Select(n => $"  {n.Name}  ×{n.Count:N0}")) + "\n\n" +

@@ -168,6 +168,14 @@ class GameMemory:
     def in_battle(self) -> bool:
         return self.mem.peek(IN_BATTLE, 1)[0] == 2
 
+    def party_loaded(self) -> bool:
+        """True once a save is really loaded (a valid Pokemon in the first party slot). On the title screen and in a
+        NEW GAME's intro there is none - the location then reads map 0:0 and must not be used to pick a mode."""
+        if not self.locate():
+            return False
+        p = decode(self.mem.peek(self.offsets[1], SLOT))
+        return bool(p and p.checksum_ok)
+
     def location(self):
         """Return (mapGroup, mapNum, x, y) of the player, or None if not readable."""
         if not self.locate():

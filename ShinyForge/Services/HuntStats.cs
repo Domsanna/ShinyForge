@@ -11,7 +11,8 @@ public sealed class HuntStatsResult
     public string Source = "";
     public int Gen = 3;
     public bool ShinyCharm;
-    public int Total;                 // every logged encounter
+    public int Total;                 // every logged encounter (repeats of the same RNG frame not counted)
+    public int Repeats;               // rows skipped: the same Pokémon (PID) right after itself = the reset hit the same RNG frame
     public int Phase;                 // encounters since the last shiny (the current "phase")
     public int ShiniesFound;
     public double Odds;               // per-encounter shiny chance
@@ -31,6 +32,15 @@ public sealed class HuntStatsResult
 
 public static class HuntStats
 {
+    /// <summary>
+    /// The "all time" line of the statistics window. Repeats are explained: the hunter's own counter includes them, so without
+    /// this the two numbers didn't match (6,140 logged vs 5,928 shown) and it looked like encounters were lost.
+    /// </summary>
+    public static string AllTimeText(HuntStatsResult r) =>
+        $"All time in this log: {r.Total:N0} encounters, {r.ShiniesFound} shin{(r.ShiniesFound == 1 ? "y" : "ies")}." +
+        (r.Repeats > 0 ? $"\n{r.Total + r.Repeats:N0} rows logged - {r.Repeats:N0} were the same Pokémon again right after itself " +
+                         "(the reset hit the same RNG frame), so they can't be a new shiny and aren't counted." : "");
+
     public sealed record Source(string Name, string CsvPath, int Gen, string? GameFilter);
 
     /// <summary>All encounter logs that exist: the Python hunter (FRLG on Switch) and the 3DS bot (per game).</summary>
@@ -125,8 +135,8 @@ public static class HuntStats
     public static HuntStatsResult Compute(Source src, bool charm, DateTime? now = null)
     {
         var t = now ?? DateTime.Now;
-        var rows = ReadRows(src.CsvPath, src.GameFilter, out _);
-        var r = new HuntStatsResult { Source = src.Name, Gen = src.Gen, ShinyCharm = charm, Total = rows.Count };
+        var rows = ReadRows(src.CsvPath, src.GameFilter, out var repeats);
+        var r = new HuntStatsResult { Source = src.Name, Gen = src.Gen, ShinyCharm = charm, Total = rows.Count, Repeats = repeats };
         r.Odds = BaseOdds(src.Gen, charm);
         r.Shinies = rows.Where(x => x.Shiny).ToList();
         r.ShiniesFound = r.Shinies.Count;

@@ -8,6 +8,19 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // One ShinyForge per data folder: starting it again brings the open window forward instead of a second copy (two copies
+        // ran two web servers, health monitors and update checks and fought over the Switch). The installed and a portable copy
+        // have different data folders, so they can still run side by side.
+        var key = "ShinyForge-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(AppPaths.DataDir.ToLowerInvariant())))[..16];
+        using var single = new Mutex(true, @"Local\" + key, out var first);
+        if (!first)
+        {
+            try { using var wake = EventWaitHandle.OpenExisting(@"Local\" + key + "-show"); wake.Set(); } catch { }
+            return;
+        }
+        using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\" + key + "-show");
+
         ApplicationConfiguration.Initialize();
         Application.SetColorMode(SystemColorMode.Dark);
         Application.ThreadException += (_, e) => Report(e.Exception);
@@ -34,7 +47,12 @@ internal static class Program
         Services.ConsoleFtpLauncher.Decode = GdiImage.Decode;        // reading Switch screenshots (HOME menu, Homebrew Menu)
         Services.SwitchGameLauncher.ChooseUser = SwitchUserPrompt.Ask; // "Who is using the software?" -> ask which user
         Services.WebServer.Apply();              // stream overlay / phone remote (if turned on)
-        Application.Run(new MainForm());
+        var main = new MainForm();
+        ThreadPool.RegisterWaitForSingleObject(show, (_, _) =>
+        {
+            try { main.BeginInvoke(() => main.BringToFront(true)); } catch { } // window not ready / closing
+        }, null, Timeout.Infinite, false);
+        Application.Run(main);
         Services.WebServer.Stop();
         Services.HealthMonitor.Stop();
     }

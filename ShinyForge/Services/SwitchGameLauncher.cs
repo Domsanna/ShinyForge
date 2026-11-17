@@ -111,6 +111,23 @@ public static class SwitchGameLauncher
         return Ready(bot, game, started, progress, ct);
     }
 
+    /// <summary>
+    /// Closes whatever runs on the Switch (<paramref name="how"/> = Close or SaveAndClose; SaveAndClose only for games
+    /// <see cref="CanSave"/> says ShinyForge can save). Used before the FTP app is started. Nothing running = nothing to do.
+    /// </summary>
+    public static void CloseGame(string host, int port, OtherGame how, Action<string>? progress = null, CancellationToken ct = default)
+    {
+        using var bot = new SysBotSession(host, port);
+        if (bot.TitleId() is not { } running) return;
+        if (how == OtherGame.SaveAndClose)
+        {
+            progress?.Invoke($"Saving {GameName(running)}...");
+            SaveGame(bot, running, ct);
+        }
+        progress?.Invoke($"Closing {GameName(running)} on the Switch...");
+        Close(bot);
+    }
+
     private static string Ready(SysBotSession bot, Game game, string title, Action<string>? progress, CancellationToken ct)
     {
         AppPaths.Log($"Switch: {game.Title} running ({title})");
@@ -562,15 +579,30 @@ public static class SwitchGameLauncher
     private static void LoadFrlgSave(SysBotSession bot, string title, Action<string>? progress, CancellationToken ct)
     {
         var overworld = FrlgOverworld(title);
-        bool Loaded() => bot.Peek(overworld, 4) is { } b && BitConverter.ToUInt32(b) != 0;
+        bool Started() => bot.Peek(overworld, 4) is { } b && BitConverter.ToUInt32(b) != 0;
+        // "started" alone isn't enough: a NEW GAME sets the same pointer - only a trainer name + party mean the save is loaded
+        bool Loaded() => Started() && LiveFrlg.SaveLoaded(bot, title);
         if (Loaded()) return; // already in the game
         progress?.Invoke("Loading your save (pressing A through the title screen)...");
         Thread.Sleep(4000); // the game's own start-up
         var until = DateTime.Now.AddSeconds(90);
+        DateTime? emptyGameSince = null;
         while (!Loaded())
         {
             ct.ThrowIfCancellationRequested();
             if (DateTime.Now > until) throw new IOException("The save didn't load - check the Switch and press CONTINUE yourself.");
+            if (Started())
+            {
+                // in a game but without trainer / party: A went into NEW GAME - there's no save for this Switch user
+                emptyGameSince ??= DateTime.Now;
+                if (DateTime.Now - emptyGameSince > TimeSpan.FromSeconds(6))
+                    throw new IOException($"{GameName(title)} has no save for this Switch user - the title screen only offered NEW GAME, " +
+                                          "so a new game started (nothing was saved). Close it (HOME, X, Close) and choose the user that has " +
+                                          "your save, or play and save the game once.");
+                Thread.Sleep(1000); // a loading save sets the name a moment later - don't press A into the intro
+                continue;
+            }
+            emptyGameSince = null;
             bot.Tap("A", 1000);
         }
         for (var i = 0; i < 4; i++) bot.Tap("B", 800); // "previously on your quest" recap

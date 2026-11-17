@@ -19,6 +19,7 @@ mythical Pokemon: a static legendary switches the bot to soft resets, a roaming 
 from __future__ import annotations
 
 import csv
+import json
 import random
 import time
 from collections import deque
@@ -48,7 +49,7 @@ def load_recent_pids(n=500):
     return out
 
 
-from .extras import check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused, write_status
+from .extras import OVERRIDES, check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused, write_status
 from .memory import (BALL_NAMES, BATTLE_MENU, GBA_ANCHOR, IN_BATTLE, INITIAL_SEED, LEGENDARY_OR_MYTHICAL, ROAMERS, STATIC_SPOTS,
                      GameMemory, current_seed_offset)
 from . import rng
@@ -76,6 +77,32 @@ class MemoryHunter:
         self.started = datetime.now()
         self.rules = self.h.get("stop_rules") or {}
         self.rng_timer = None                # created when the optional RNG mode is used
+        try:
+            self.options_mtime = OVERRIDES.stat().st_mtime   # shinyforge.json as read at the start
+        except OSError:
+            self.options_mtime = None
+
+    def refresh_options(self):
+        """Hunt options saved in ShinyForge while the hunt runs (stop targets / rules, auto-catch, notifications) apply from
+        the next encounter - they used to need Stop + Start. The mode and RNG settings stay as the hunt started."""
+        try:
+            mtime = OVERRIDES.stat().st_mtime
+        except OSError:
+            return
+        if mtime == self.options_mtime:
+            return
+        self.options_mtime = mtime
+        try:
+            o = json.loads(OVERRIDES.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for k in ("stop_rules", "auto_catch", "target_species"):
+            if k in o and o[k] is not None:
+                self.h[k] = o[k]
+        if "notify" in o:
+            self.cfg["notify"] = o["notify"]
+        self.rules = self.h.get("stop_rules") or {}
+        print("  Hunt options changed in ShinyForge - they apply from this encounter on.")
 
     # ---------------------------------------------------------------- status for ShinyForge (overlay / phone remote)
     def status(self, state: str, p=None):
@@ -172,6 +199,7 @@ class MemoryHunter:
     # ---------------------------------------------------------------- encounter handling
     def judge(self, p) -> bool:
         """Log the encounter. Returns True when the bot should stop."""
+        self.refresh_options()
         self.last_pid = p.pid
         n = self.stats["encounters"] + 1
         self.stats["encounters"] = n
@@ -537,6 +565,17 @@ class MemoryHunter:
         self.ctrl.connect()
         if not self.game.locate():
             return
+        # never pick a mode (and start walking) from an unloaded game: wait a little for the save, else stop
+        for _ in range(15):
+            if self.game.party_loaded():
+                break
+            time.sleep(2)
+        else:
+            msg = ("The game's save isn't loaded (no Pokemon in the party). Load your save with CONTINUE - if the title screen "
+                   "only offers NEW GAME, this Switch user has no save in this game. Then start the hunt again.")
+            self.warn(msg)           # bot_warnings.log: ShinyForge shows it
+            self.status("stopped")
+            raise SystemExit(msg)
         self.mode = self.resolve_mode()
         ac = self.h.get("auto_catch") or {}
         if (ac.get("mode") or "off") != "off" and int(ac.get("ball_item", 0)):

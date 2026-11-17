@@ -6,7 +6,7 @@ namespace ShinyForge.Services;
 /// <summary>
 /// Rolling "replay buffer" while a hunt runs: FFmpeg records the capture source into a ring of 10-second pieces
 /// (only the last ~N seconds are kept). When a shiny appears, the pieces are joined into one video
-/// "Shiny_&lt;species&gt;_&lt;time&gt;.mp4" (in the game's recording folder, or Data\Shiny Clips).
+/// "Shiny_&lt;species&gt;_&lt;time&gt;.mp4" (a stop target / rule that isn't shiny: "Found_&lt;species&gt;_...") (in the game's recording folder, or Data\Shiny Clips).
 /// Not used while the normal recording is running (that already has the moment) - one capture device can't be opened twice.
 /// </summary>
 public sealed class ShinyClipService
@@ -89,7 +89,7 @@ public sealed class ShinyClipService
         await File.WriteAllLinesAsync(listFile, list.Select(f => $"file '{f.Replace("'", "'\\''")}'"));
         Directory.CreateDirectory(_outFolder);
         var safe = string.Concat(tag.Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
-        var outFile = Path.Combine(_outFolder, $"Shiny_{safe}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
+        var outFile = Path.Combine(_outFolder, $"{safe}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4"); // tag = "Shiny_<species>" or "Found_<species>"
         var ff = RecordingService.FindFfmpeg()!;
         var psi = new ProcessStartInfo(ff, $"-hide_banner -loglevel error -y -f concat -safe 0 -i \"{listFile}\" -c copy -bsf:a aac_adtstoasc \"{outFile}\"")
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };

@@ -2228,6 +2228,21 @@ if (tests.Contains("installall"))
     Check(title is { UseMnemonic: false }, "title shows \"Tools & Updates\" (the & isn't eaten)");
 }
 
+if (tests.Contains("sbbbackup"))
+{
+    // Read-only: which sys-botbase backup "Restore previous" uses, and which backups are sys-botbase-cpp itself (a reinstall
+    // used to back up cpp, and Restore then put cpp back instead of the original).
+    var root = Path.Combine(AppPaths.DataDir, "Backups");
+    foreach (var d in Directory.Exists(root) ? Directory.GetDirectories(root) : Array.Empty<string>())
+    {
+        var nsp = Path.Combine(d, "exefs.nsp");
+        if (File.Exists(nsp)) Console.WriteLine($"   {Path.GetFileName(d),-55} cpp build: {SysBotBaseInstaller.IsCppBuild(nsp)}  ({new FileInfo(nsp).Length:N0} bytes)");
+    }
+    var latest = SysBotBaseInstaller.LatestBackup();
+    Console.WriteLine("   Restore would use: " + (latest ?? "(none)"));
+    Check(latest != null && !SysBotBaseInstaller.IsCppBuild(Path.Combine(latest, "exefs.nsp")), "Restore uses a backup that isn't sys-botbase-cpp");
+}
+
 if (tests.Contains("audit"))
 {
     // Every installed tool on THIS computer was really compared with its newest version (or says how it's updated) -

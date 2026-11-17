@@ -33,13 +33,23 @@ public static class SysBotBaseInstaller
         return new(json["tag_name"]!.GetValue<string>(), asset["browser_download_url"]!.GetValue<string>(), asset["size"]!.GetValue<long>());
     }
 
+    /// <summary><see cref="InstalledVersion"/>: sys-botbase accepts the connection but answers nothing (a crashed sys-botbase-cpp).</summary>
+    public const string Frozen = "frozen";
+
     /// <summary>
     /// The sys-botbase version the Switch reports ("2.5", "3.33", ...), "old" when sys-botbase answers but is too old to say,
-    /// or null when nothing answers.
+    /// <see cref="Frozen"/> when it connects but answers nothing at all, or null when nothing is there. (A frozen sys-botbase-cpp
+    /// used to be reported as "old" = the original, which hid the Restore button.)
     /// </summary>
     public static string? InstalledVersion(string host, int port)
     {
-        try { using var bot = new SysBotSession(host, port, controller: false); return bot.Version() ?? "old"; }
+        try
+        {
+            using (var bot = new SysBotSession(host, port, controller: false))
+                if (bot.Version() is { } v) return v;
+            using var again = new SysBotSession(host, port, controller: false); // the timed-out session can't be reused
+            return again.Answers() ? "old" : Frozen;
+        }
         catch { return null; }
     }
 
@@ -100,6 +110,13 @@ public static class SysBotBaseInstaller
         progress?.Invoke("Backing up the sys-botbase that's on the SD card now...");
         var backup = Path.Combine(AppPaths.DataDir, "Backups", $"sys-botbase {DateTime.Now:yyyy-MM-dd HH-mm-ss}");
         BackupDir(ftp, ModuleDir, backup);
+        // sys-botbase-cpp is already there (a reinstall / update): that's not "the previous sys-botbase" - keep the real backup
+        // of the original as the one Restore uses
+        if (File.Exists(Path.Combine(backup, "exefs.nsp")) && IsCppBuild(Path.Combine(backup, "exefs.nsp")))
+        {
+            Directory.Delete(backup, true);
+            backup = LatestBackup() ?? "(none - the SD card already had sys-botbase-cpp)";
+        }
 
         progress?.Invoke("Copying sys-botbase-cpp onto the SD card...");
         ftp.MakeDirs(ModuleDir + "/flags");
@@ -133,21 +150,47 @@ public static class SysBotBaseInstaller
         AppSettings.Current.Save();
     }
 
-    /// <summary>The newest backup made by <see cref="Install"/> (the sys-botbase that was on the SD card before), or null.</summary>
+    /// <summary>
+    /// The newest backup made by <see cref="Install"/> that holds a sys-botbase OTHER than sys-botbase-cpp (the one that was on
+    /// the SD card before), or null. A backup taken while cpp was already installed would just put cpp back.
+    /// </summary>
     public static string? LatestBackup()
     {
         var root = Path.Combine(AppPaths.DataDir, "Backups");
         return Directory.Exists(root)
-            ? Directory.GetDirectories(root, "sys-botbase *").Where(d => File.Exists(Path.Combine(d, "exefs.nsp"))).OrderByDescending(d => d).FirstOrDefault()
+            ? Directory.GetDirectories(root, "sys-botbase *").Where(d => File.Exists(Path.Combine(d, "exefs.nsp")))
+                .OrderByDescending(d => d).FirstOrDefault(d => !IsCppBuild(Path.Combine(d, "exefs.nsp")))
             : null;
     }
 
-    /// <summary>
-    /// Can sys-botbase take a screenshot? ShinyForge needs that to open games, find the FTP app and save. (On some consoles
-    /// sys-botbase-cpp 3.33 never answers pixelPeek over WiFi and then stops answering anything until the Switch restarts.)
-    /// </summary>
-    public static bool ScreenshotWorks(string host, int port)
+    /// <summary>Is this exefs.nsp byte-for-byte one of the sys-botbase-cpp releases ShinyForge downloaded?</summary>
+    internal static bool IsCppBuild(string nsp)
     {
+        var root = Path.Combine(AppPaths.ToolsDir, "sys-botbase-cpp");
+        if (!Directory.Exists(root)) return false;
+        var bytes = File.ReadAllBytes(nsp);
+        return Directory.EnumerateFiles(root, "exefs.nsp", SearchOption.AllDirectories)
+            .Any(k => new FileInfo(k).Length == bytes.Length && File.ReadAllBytes(k).AsSpan().SequenceEqual(bytes));
+    }
+
+    /// <summary>
+    /// Why sys-botbase-cpp can't be used over WiFi on consoles like the user's: its screenshot command runs out of memory
+    /// (std::bad_alloc in pixelPeek_cmd, seen in its log.txt) and its command thread dies - it keeps accepting connections but
+    /// answers nothing until the Switch restarts. ShinyForge needs screenshots to open games, find the FTP app and save.
+    /// </summary>
+    public const string CppWifiProblem =
+        "sys-botbase-cpp runs out of memory when it's asked for a screenshot over WiFi and then stops answering anything until the " +
+        "Switch restarts (its log on the SD card says \"std::bad_alloc in pixelPeek\"). ShinyForge needs screenshots to open games, " +
+        "find the FTP app and save.";
+
+    /// <summary>
+    /// Can sys-botbase take a screenshot? ShinyForge needs that to open games, find the FTP app and save. sys-botbase-cpp over
+    /// WiFi is never asked: the test itself would crash it (<see cref="CppWifiProblem"/>). <paramref name="version"/> = what
+    /// <see cref="InstalledVersion"/> said.
+    /// </summary>
+    public static bool ScreenshotWorks(string host, int port, string? version)
+    {
+        if (version == null || version == Frozen || (IsCpp(version) && !AppSettings.Current.SwitchUsb)) return false;
         try
         {
             using var bot = new SysBotSession(host, port, controller: false);

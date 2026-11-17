@@ -115,6 +115,17 @@ internal sealed class SysBotSession : IDisposable
         return id != null && Regex.IsMatch(id, "^[0-9A-Fa-f]{16}$") && id.TrimStart('0').Length > 0 ? id.ToUpperInvariant() : null;
     }
 
+    /// <summary>
+    /// Does sys-botbase answer at all? getTitleID is known by every version and always answers (zeros on the HOME menu). A
+    /// sys-botbase-cpp whose command thread crashed still accepts connections but never answers anything.
+    /// </summary>
+    public bool Answers(int timeoutMs = 3000)
+    {
+        _link.ReadTimeoutMs = timeoutMs;
+        try { return _link.Request("getTitleID", SysBotReply.Value) != null; }
+        catch (IOException) { return false; }
+    }
+
     /// <summary>The Switch's screen as a JPEG, or null.</summary>
     public byte[]? Screenshot() => _link.Request("pixelPeek", SysBotReply.Image);
 

@@ -326,7 +326,7 @@
 <!-- ============================================================ 6 -->
 <section id="options">
   <h2><span class="num">6</span> Hunt options</h2>
-  <p>Open <b>Hunt options</b> from the Shiny Hunt card. The 3DS calls this <b>Stop rules</b>. Your choices are saved and given to the bot the next time it starts. If a hunt is already running, it uses the new options after you restart it (<b>Stop</b>, then <b>Start hunting</b>).</p>
+  <p>Open <b>Hunt options</b> from the Shiny Hunt card. The 3DS calls this <b>Stop rules</b>. Your choices are saved and given to the bot the next time it starts. If the Python hunter is already running, it uses the new stop targets, rules, auto-catch and notification settings from its next encounter (no restart needed).</p>
   <p>Each game only shows what its bot can really do:</p>
   <ul>
     <li><b>Shiny RNG manipulation</b> and <b>auto-catch</b>: FireRed / LeafGreen (Switch) only. 3DS games (X/Y, ORAS, Sun/Moon, Ultra Sun/Moon) don't show them.</li>
@@ -408,7 +408,7 @@
       If the Switch can't be reached, the recording starts without the check.</li>
   </ul>
   <h3>Shiny clips <span class="badge on">on by default</span></h3>
-  <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>. The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
+  <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code> (a stop target that isn't shiny: <code>Found_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>). The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
   <ul>
     <li>Uses the capture source chosen on the <b>Record Gameplay</b> card.</li>
     <li>Change the length (20–300 seconds) or turn it off in <b>Settings → Shiny clips</b>.</li>

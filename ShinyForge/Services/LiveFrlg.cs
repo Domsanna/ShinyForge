@@ -28,6 +28,20 @@ public sealed class LiveFrlg : IDisposable
 
     public string TitleId() => _bot.TitleId() ?? throw new IOException("No game is running on the Switch.");
 
+    /// <summary>
+    /// Is a real save loaded? The trainer has a name and the first party slot holds a Pokémon. A NEW GAME (no CONTINUE on the
+    /// title screen = this Switch user has no save) also sets the save pointers, but in its intro both are still empty.
+    /// </summary>
+    internal static bool SaveLoaded(SysBotSession bot, string title)
+    {
+        var (partyOff, seed) = Offsets(title);
+        if (bot.Peek(seed + 8, 12) is not { } ptrs) return false;
+        var sb2 = BitConverter.ToUInt32(ptrs, 4);
+        if (sb2 < GbaAnchor || sb2 > 0x0203FFFF || bot.Peek(ToHeap(sb2), 8) is not { } name) return false;
+        if (string.IsNullOrWhiteSpace(StringConverter3.GetString(name, false))) return false;
+        return bot.Peek(partyOff, 100) is { } p && new PK3(p).Species != 0;
+    }
+
     /// <summary>Reads trainer, party and all 14 PC boxes. Returns null when the save isn't loaded (title screen).</summary>
     public (string Trainer, ushort TID, ushort SID, List<PK3> Party, List<PK3> Boxes)? Read()
     {
@@ -73,10 +87,20 @@ public sealed class LiveFrlg : IDisposable
 
     private readonly List<int> _boxSlots = new();
 
-    public Collection ReadCollection()
+    /// <summary>
+    /// Party + PC boxes as a collection. <paramref name="expected"/> = the game the caller is about: if another game runs on the
+    /// Switch, nothing is read (its Pokémon would otherwise be marked in this game's tracker / Pokédex).
+    /// </summary>
+    public Collection ReadCollection(Core.Game? expected = null)
     {
         _boxSlots.Clear();
+        var title = TitleId();
+        if (expected != null && SwitchGameLauncher.TitleIds(expected) is { Length: > 0 } ids && !ids.Contains(title))
+            throw new InvalidOperationException($"{SwitchGameLauncher.GameName(title)} is running on the Switch, not Pokémon {expected.Title} - its Pokémon aren't read.");
         var r = Read() ?? throw new InvalidOperationException("The game isn't loaded into a save yet (title screen?) - try again in a moment.");
+        // a NEW GAME (no save for this Switch user) has valid pointers but no trainer yet: that's "not loaded", not 0 Pokémon
+        if (string.IsNullOrWhiteSpace(r.Trainer))
+            throw new InvalidOperationException("The game isn't loaded into a save yet (title screen or a new game without a save).");
         var c = new Collection { Source = $"Live from Switch (trainer {r.Trainer}, TID {r.TID})" };
         bool Own(PK3 pk) => pk.OriginalTrainerName == r.Trainer && pk.TID16 == r.TID && pk.SID16 == r.SID;
         var n = 0;

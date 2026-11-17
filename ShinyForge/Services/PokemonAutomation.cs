@@ -75,6 +75,32 @@ public static class PokemonAutomation
         return true;
     }
 
+    /// <summary>
+    /// Windows: does its launcher carry the "downloaded from the internet" mark (Mark of the Web, a Zone.Identifier stream)?
+    /// Then Windows asks "The publisher could not be verified" every time it's started.
+    /// </summary>
+    public static bool IsBlocked() => OsInfo.IsWindows && Find() is { } cmd && File.Exists(cmd + ":Zone.Identifier");
+
+    /// <summary>
+    /// Removes that mark from every file in Pokémon Automation's folder (what Windows' Properties → Unblock does). Only after
+    /// the user agreed. Returns how many files were unblocked.
+    /// </summary>
+    public static int Unblock()
+    {
+        if (Find() is not { } cmd) return 0;
+        var n = 0;
+        foreach (var f in Directory.EnumerateFiles(Path.GetDirectoryName(cmd)!, "*", SearchOption.AllDirectories))
+            try
+            {
+                if (!File.Exists(f + ":Zone.Identifier")) continue;
+                File.Delete(f + ":Zone.Identifier");
+                n++;
+            }
+            catch (Exception e) { AppPaths.Log($"Unblock {f}: {e.Message}"); }
+        AppPaths.Log($"Pokémon Automation: removed the downloaded-from-the-internet mark from {n} file(s)");
+        return n;
+    }
+
     /// <summary>Opens one of its web pages in the default browser (Windows, macOS, Linux).</summary>
     public static void Open(string url) => OsInfo.Open(url);
 }

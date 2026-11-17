@@ -244,17 +244,24 @@ public sealed class GamePage : UserControl
         Status("Asking the Switch which sys-botbase it runs...");
         var version = await Task.Run(() => SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort));
         var cpp = SysBotBaseInstaller.IsCpp(version);
-        // sys-botbase-cpp can fail to take screenshots on some consoles - and ShinyForge needs them
-        var shots = version != null && await Task.Run(() => SysBotBaseInstaller.ScreenshotWorks(s.SwitchIP, s.SwitchPort));
+        var frozen = version == SysBotBaseInstaller.Frozen;
+        // ShinyForge needs screenshots; sys-botbase-cpp over WiFi isn't even asked (the test itself would crash it)
+        var shots = await Task.Run(() => SysBotBaseInstaller.ScreenshotWorks(s.SwitchIP, s.SwitchPort, version));
         Status("");
         var backup = SysBotBaseInstaller.LatestBackup();
+        var restoreHow = backup != null
+            ? "Restore the previous sys-botbase: start the FTP app on the Switch yourself first (on the HOME menu hold R and press A on any game " +
+              "until the Homebrew Menu appears, then choose ftpd), click Restore, then restart the Switch."
+            : "There's no backup of the previous sys-botbase on this PC - put it back on the SD card yourself.";
         var page = new TaskDialogPage
         {
             Caption = "ShinyForge - sys-botbase",
-            Heading = version == null ? "The Switch doesn't answer" : cpp ? $"sys-botbase-cpp {version} (Pokémon Automation)" : $"sys-botbase {version} (original)",
+            Heading = version == null ? "The Switch doesn't answer" : frozen ? "sys-botbase is frozen" : cpp ? $"sys-botbase-cpp {version} (Pokémon Automation)" : $"sys-botbase {version} (original)",
             Text = (version == null ? (s.SwitchUsb ? IpPrompt.UsbMissing : $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}. Is the Switch on, on WiFi, and running Atmosphère?") + "\n\n" : "") +
-                   (version != null && !shots ? "⚠ It can't take screenshots on this Switch, and ShinyForge needs them to open games, find the FTP app and save. " +
-                        (backup != null ? "Restore the previous sys-botbase (start the FTP app yourself first: hold R while starting a game → ftpd)." : "") + "\n\n" : "") +
+                   (frozen ? "⚠ sys-botbase accepts the connection but answers nothing. That's how sys-botbase-cpp breaks: " + SysBotBaseInstaller.CppWifiProblem +
+                             " A restart brings it back until the next screenshot. " + restoreHow + "\n\n"
+                    : cpp && !s.SwitchUsb ? "⚠ " + SysBotBaseInstaller.CppWifiProblem + " " + restoreHow + "\n\n"
+                    : version != null && !shots ? "⚠ It can't take screenshots on this Switch, and ShinyForge needs them to open games, find the FTP app and save. " + restoreHow + "\n\n" : "") +
                    $"Connection: {(s.SwitchUsb ? "USB cable" : "WiFi")}.\n\n" +
                    "sys-botbase-cpp (github.com/PokemonAutomation/sys-botbase-cpp, GPL-3.0) is a rewrite of sys-botbase with the same commands: " +
                    "lighter on memory, a fix for random crashes, exact button timing, a log file on the SD card and a USB mode. " +
@@ -264,14 +271,17 @@ public sealed class GamePage : UserControl
             Icon = version == null || !shots ? TaskDialogIcon.Warning : TaskDialogIcon.Information,
             AllowCancel = true,
         };
-        var install = new TaskDialogButton(cpp ? "Reinstall / update sys-botbase-cpp" : "Install sys-botbase-cpp") { Enabled = version != null };
+        var install = new TaskDialogButton(cpp ? "Reinstall / update sys-botbase-cpp" : "Install sys-botbase-cpp") { Enabled = version != null && !frozen };
         var toUsb = new TaskDialogButton("Use USB") { Enabled = cpp && !s.SwitchUsb };
         var toWifi = new TaskDialogButton("Use WiFi") { Enabled = s.SwitchUsb };
-        var restore = new TaskDialogButton("Restore previous sys-botbase") { Enabled = backup != null && (cpp || version == null) };
+        var restore = new TaskDialogButton("Restore previous sys-botbase") { Enabled = backup != null && (cpp || frozen || version == null) };
+        var close = TaskDialogButton.Close;
         page.Buttons.Add(install);
         page.Buttons.Add(s.SwitchUsb ? toWifi : toUsb);
         if (backup != null) page.Buttons.Add(restore);
-        page.Buttons.Add(TaskDialogButton.Close);
+        page.Buttons.Add(close);
+        // Enter / Space must never install: Restore when sys-botbase-cpp is the problem, otherwise Close
+        page.DefaultButton = restore.Enabled && backup != null ? restore : close;
         var choice = TaskDialog.ShowDialog(FindForm()!, page);
         if (choice == restore)
         {
@@ -287,8 +297,12 @@ public sealed class GamePage : UserControl
         }
         if (choice != install && choice != toUsb && choice != toWifi) return;
         if (HuntService.IsPythonHuntRunning()) { MessageBox.Show(FindForm(), "The hunter is running - stop it first.", "sys-botbase"); return; }
+        if (choice == install && !s.SwitchUsb && MessageBox.Show(FindForm(), "Install sys-botbase-cpp over WiFi anyway?\n\n" + SysBotBaseInstaller.CppWifiProblem +
+                "\n\nThis happened on this kind of console: afterwards ShinyForge can't open games until the old sys-botbase is restored " +
+                "(the FTP app has to be started by hand for that, then the Switch restarted).", "sys-botbase",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         if (choice == install && MessageBox.Show(FindForm(), "No game may be open on the Switch (ShinyForge starts the FTP app from the HOME menu). " +
-                "Save and close your game, then press OK.", "sys-botbase", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                "Save and close your game, then press OK.", "sys-botbase", MessageBoxButtons.OKCancel, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
         try
         {
             if (choice == install)
@@ -348,11 +362,33 @@ public sealed class GamePage : UserControl
         if (r == DialogResult.Cancel) return;
         try
         {
-            if (r == DialogResult.Yes && found && PaEquipmentReady()) PokemonAutomation.Launch();
+            if (r == DialogResult.Yes && found && PaEquipmentReady() && PaUnblocked()) PokemonAutomation.Launch();
             if (r == DialogResult.Yes && !found) { PokemonAutomation.Open(PokemonAutomation.Releases); PokemonAutomation.Open(PokemonAutomation.SetupGuide); }
             PokemonAutomation.Open(PokemonAutomation.ProgramsUrl(_game));
         }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223) // "The operation was canceled by the user"
+        {
+            Status("Pokémon Automation wasn't started - Windows' security question was cancelled.");
+        }
         catch (Exception ex) { MessageBox.Show(FindForm(), ex.Message, "Pokémon Automation", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    /// <summary>
+    /// Windows asks "The publisher could not be verified" before every start while Pokémon Automation's files carry the
+    /// downloaded-from-the-internet mark. Offers to remove it (the user decides). False = don't start it.
+    /// </summary>
+    private bool PaUnblocked()
+    {
+        if (!PokemonAutomation.IsBlocked()) return true;
+        var r = MessageBox.Show(FindForm(),
+            "Windows marks Pokémon Automation as downloaded from the internet, so it asks \"The publisher could not be verified. " +
+            "Are you sure you want to run this software?\" every time it starts.\n\n" +
+            "Yes = remove that mark from its folder (what Properties → Unblock does) - only if you downloaded it from Pokémon Automation's GitHub\n" +
+            "No = start it anyway (Windows asks - choose Run)",
+            "Pokémon Automation", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        if (r == DialogResult.Cancel) return false;
+        if (r == DialogResult.Yes) Status($"Unblocked {PokemonAutomation.Unblock()} file(s) of Pokémon Automation.");
+        return true;
     }
 
     // ================================================================ shiny hunt
@@ -400,11 +436,12 @@ public sealed class GamePage : UserControl
             if (key == "sysbot" && !EnsureDependency("SysBot.exe")) return;
             // The Switch must answer at its saved IP - if its address changed, ask for the new one first.
             if (!IpPrompt.EnsureSwitch(FindForm())) return;
-            // FireRed / LeafGreen: the game must be open with the save loaded (the hunter decides its mode from where you stand)
-            if (key == "python" && !await EnsureGameOpen()) return;
+            // The game must be open (FireRed / LeafGreen: with the save loaded - the hunter decides its mode from where you stand).
+            // SysBot.exe too: started without the game it stops at once ("Title ID ... Disconnecting").
+            if ((key == "python" || key == "sysbot") && !await EnsureGameOpen()) return;
             StartHuntNow(key);
         };
-        stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); };
+        stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); Status("Python hunter stopped."); };
         // "Stop Python hunter" only where the Python hunter exists (FireRed/LeafGreen); SysBot is stopped in its own window.
         card.Body.Controls.Add(options.Any(o => o.Key == "python") ? Row(start, stop) : Row(start));
         if (_game.Bot == BotKind.FrlgSwitch)
@@ -632,7 +669,7 @@ public sealed class GamePage : UserControl
         if (_clips.Running)
             _ = Task.Run(async () =>
             {
-                var clip = await _clips.SaveClipAsync((shiny ? "shiny_" : "") + species);
+                var clip = await _clips.SaveClipAsync((shiny ? "Shiny_" : "Found_") + species); // a non-shiny stop target isn't called "Shiny"
                 if (clip != null)
                 {
                     Ui(() => Status("Clip saved: " + clip));
@@ -968,12 +1005,30 @@ public sealed class GamePage : UserControl
             }
             progress("Reading party and PC boxes from the Switch...");
             var s = AppSettings.Current;
-            using var lf = new LiveFrlg(s.SwitchIP, s.SwitchPort);
-            return lf.ReadCollection();
+            try
+            {
+                using var lf = new LiveFrlg(s.SwitchIP, s.SwitchPort);
+                return lf.ReadCollection(_game);
+            }
+            catch (Exception e) { return SaveInstead(e, progress); }
         }
         progress("Reading the save file...");
         var save = ResolveTrackerSave();
         return save == null ? null : Collection.FromSave(save.Save, save.Path);
+    }
+
+    /// <summary>
+    /// The live read failed (title screen, Switch busy...): use the save file instead of showing an empty Pokédex, and say so.
+    /// No save file either → the live error is shown.
+    /// </summary>
+    private Collection? SaveInstead(Exception live, Action<string> progress)
+    {
+        progress("The Switch game couldn't be read - using the save file...");
+        var save = ResolveTrackerSave();
+        if (save == null) throw live;
+        var c = Collection.FromSave(save.Save, save.Path);
+        c.Source = $"the save file (the Switch couldn't be read: {live.Message.TrimEnd('.')})";
+        return c;
     }
 
     /// <summary>The save the tracker reads: the one you chose, else the one the Pokémon HOME card found, else the newest in the game folder.</summary>
@@ -1086,7 +1141,7 @@ public sealed class GamePage : UserControl
                 }
                 Log("Reading party and PC boxes from the Switch...");
                 var s = AppSettings.Current;
-                owned = await Task.Run(() => { using var live = new LiveFrlg(s.SwitchIP, s.SwitchPort); return live.ReadCollection(); });
+                owned = await Task.Run(() => { using var live = new LiveFrlg(s.SwitchIP, s.SwitchPort); return live.ReadCollection(_game); });
             }
             else
             {
@@ -1395,13 +1450,16 @@ public sealed class GamePage : UserControl
                 return (null, false);
             }
             if (running == null) break;
-            if (MessageBox.Show(owner,
-                    "A game is open on the Switch. It has to be closed before ShinyForge can open the FTP app.\n\n" +
-                    "  1. Save your game.\n" +
-                    "  2. Press HOME, then X on the game, and choose Close.\n\n" +
-                    "Click OK once the game is closed.",
-                    "ShinyForge - close the game first", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+            var how = await AskAboutOtherGame(running, "open the FTP app", "ShinyForge - close the game first");
+            if (how == null) return (null, true);
+            if (how == SwitchGameLauncher.OtherGame.Refuse) continue; // the user closed it - check again
+            try { await Task.Run(() => SwitchGameLauncher.CloseGame(ip, botPort, how.Value, msg => Ui(() => _saveStatus.Text = msg))); }
+            catch (Exception ex)
+            {
+                AppPaths.Log("Closing the Switch game failed: " + ex.Message);
+                MessageBox.Show(owner, ex.Message, "ShinyForge - close the game first", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return (null, true);
+            }
         }
         if (MessageBox.Show(owner,
                 "The game is closed. ShinyForge will now, through sys-botbase:\n\n" +
@@ -1460,13 +1518,14 @@ public sealed class GamePage : UserControl
         if (running != null && ids.Contains(running) && !ftp) return true;
         if (running != null && !ftp)
         {
-            MessageBox.Show(FindForm(), $"Another game is open on the Switch ({running}). Save and close it, then start the hunt again.",
-                "Shiny Hunt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return false;
+            var how = await AskAboutOtherGame(running, $"start Pokémon {_game.Title} and the hunt", "Shiny Hunt");
+            return how != null && await OpenGameOnSwitch(Status, how.Value);
         }
         var r = MessageBox.Show(FindForm(),
             (ftp ? "The FTP app is still open on the Switch." : $"Pokémon {_game.Title} isn't open on the Switch.") + "\n\n" +
-            $"Yes = open Pokémon {_game.Title} and load your save first (ShinyForge finds it on the HOME menu or in All Software by its icon)\n" +
+            $"Yes = open Pokémon {_game.Title}" + (_game.Bot == BotKind.FrlgSwitch ? " and load your save" : "") +
+            " first (ShinyForge finds it on the HOME menu or in All Software by its icon)" +
+            (_game.Bot == BotKind.FrlgSwitch ? "" : " - then get into the game where the bot should start") + "\n" +
             "No = start the hunt anyway",
             "Shiny Hunt", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
         return r == DialogResult.No || (r == DialogResult.Yes && await OpenGameOnSwitch(Status));
@@ -1491,41 +1550,48 @@ public sealed class GamePage : UserControl
         var mode = SwitchGameLauncher.OtherGame.Refuse;
         if (running.TitleId is { } id && !running.Homebrew && !SwitchGameLauncher.TitleIds(_game).Contains(id))
         {
-            var name = SwitchGameLauncher.GameName(id);
-            var head = $"{name} is open on the Switch, not Pokémon {_game.Title}.\n\n";
-            if (SwitchGameLauncher.GameOf(id) == null)
-            {
-                if (MessageBox.Show(FindForm(), head + "Save your progress in it and close it yourself (HOME, X, Close), then press OK - " +
-                                    $"ShinyForge then starts Pokémon {_game.Title} and records.",
-                        "Record Gameplay", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return false;
-                string? still;
-                try { still = (await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort))).TitleId; }
-                catch { still = null; } // can't tell - opening the game reports it if it's still open
-                if (still == id)
-                {
-                    MessageBox.Show(FindForm(), $"{name} is still open on the Switch - close it, then start recording again.",
-                        "Record Gameplay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-            }
-            else if (SwitchGameLauncher.CanSave(id))
-            {
-                var r = MessageBox.Show(FindForm(), head + $"Should ShinyForge save {name} before closing it?\n\n" +
-                    $"Yes = save it, close it, then start Pokémon {_game.Title} and record\n" +
-                    "No = close it WITHOUT saving (unsaved progress is lost)",
-                    "Record Gameplay", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-                if (r == DialogResult.Cancel) return false;
-                mode = r == DialogResult.Yes ? SwitchGameLauncher.OtherGame.SaveAndClose : SwitchGameLauncher.OtherGame.Close;
-            }
-            else
-            {
-                if (MessageBox.Show(FindForm(), head + $"ShinyForge can't save {name} itself. Save your progress in it now, then press OK - " +
-                                    $"ShinyForge closes it, starts Pokémon {_game.Title} and records.",
-                        "Record Gameplay", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return false;
-                mode = SwitchGameLauncher.OtherGame.Close;
-            }
+            var how = await AskAboutOtherGame(id, $"start Pokémon {_game.Title} and record", "Record Gameplay");
+            if (how == null) return false;
+            mode = how.Value;
         }
         return await OpenGameOnSwitch(Status, mode);
+    }
+
+    /// <summary>
+    /// Another game (<paramref name="id"/>) is open on the Switch and ShinyForge wants to <paramref name="then"/>. By name, never a
+    /// title ID:
+    ///   - a Pokémon game ShinyForge can save → "save it first?" (Yes = save + close, No = close without saving),
+    ///   - a Pokémon game it can't save → the user saves it, then ShinyForge closes it,
+    ///   - any other game → the user saves and closes it (ShinyForge never closes games it doesn't know) → Refuse once it's closed.
+    /// Returns how to deal with it, or null = cancelled / still open.
+    /// </summary>
+    private async Task<SwitchGameLauncher.OtherGame?> AskAboutOtherGame(string id, string then, string caption)
+    {
+        var s = AppSettings.Current;
+        var name = SwitchGameLauncher.GameName(id);
+        var head = $"{name} is open on the Switch.\n\n";
+        if (SwitchGameLauncher.GameOf(id) == null)
+        {
+            if (MessageBox.Show(FindForm(), head + $"Save your progress in it and close it yourself (HOME, X, Close), then press OK - ShinyForge then goes on to {then}.",
+                    caption, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return null;
+            string? still;
+            try { still = (await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort))).TitleId; }
+            catch { still = null; } // can't tell - the next step reports it if it's still open
+            if (still != id) return SwitchGameLauncher.OtherGame.Refuse;
+            MessageBox.Show(FindForm(), $"{name} is still open on the Switch - close it, then try again.", caption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return null;
+        }
+        if (SwitchGameLauncher.CanSave(id))
+        {
+            var r = MessageBox.Show(FindForm(), head + $"Should ShinyForge save {name} before closing it?\n\n" +
+                $"Yes = save it, close it, then {then}\n" +
+                "No = close it WITHOUT saving (unsaved progress is lost)",
+                caption, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            return r == DialogResult.Yes ? SwitchGameLauncher.OtherGame.SaveAndClose : r == DialogResult.No ? SwitchGameLauncher.OtherGame.Close : null;
+        }
+        return MessageBox.Show(FindForm(), head + $"ShinyForge can't save {name} itself. Save your progress in it now, then press OK - ShinyForge closes it and goes on to {then}.",
+                caption, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK
+            ? SwitchGameLauncher.OtherGame.Close : null;
     }
 
     /// <summary>Opens this game on the Switch (closing the FTP app first) and, for FireRed / LeafGreen, loads the save.</summary>

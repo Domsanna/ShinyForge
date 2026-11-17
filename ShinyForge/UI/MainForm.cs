@@ -271,6 +271,15 @@ public sealed class MainForm : Form
         if (r == DialogResult.Yes) ToolsForm.OpenBackupFolder();
     }
 
+    /// <summary>Shows the window on top (ShinyForge was started again while it's open).</summary>
+    public void BringToFront(bool activate)
+    {
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show();
+        BringToFront();
+        if (activate) Activate();
+    }
+
     /// <summary>Runs every time the program starts: checks the outside programs and downloadable files for updates.</summary>
     private async Task StartupChecks()
     {
