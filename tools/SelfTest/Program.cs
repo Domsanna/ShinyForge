@@ -319,7 +319,10 @@ if (tests.Contains("live"))
 if (tests.Contains("deps"))
 {
     var updates = await DependencyService.CheckUpdates();
-    foreach (var d in DependencyService.All) Console.WriteLine($"   {d.Name,-20} {d.State,-16} {d.Detail}");
+    await DependencyService.ReadVersions();
+    foreach (var d in DependencyService.All) Console.WriteLine($"   {d.Name,-20} {d.Version ?? "-",-18} {d.State,-16} {d.Detail}");
+    Check(DependencyService.All.Where(d => d.Path != null && d.Name != "Microsoft Excel").All(d => d.Version != null),
+        "every installed tool's version was read: " + string.Join(", ", DependencyService.All.Where(d => d.Path != null && d.Version == null).Select(d => d.Name)));
     foreach (var u in updates) Console.WriteLine($"   UPDATE {u.Item}: {u.Message}");
     Check(DependencyService.All.First(d => d.Name == "FFmpeg").State != DepState.Missing, "FFmpeg detected");
     // version texts as the tools / GitHub really write them
@@ -344,6 +347,21 @@ if (tests.Contains("deps"))
         Check(pa != null && pa.Message.Contains("0.60.0") && pa.Apply != null, $"an outdated Pokémon Automation is reported ({pa?.Message})");
     }
     finally { AppSettings.Current.PokemonAutomationPath = keep; }
+
+    // SysBot must be current before any hunt or tool: the real copy (2.7.1) is current; a fake older self-built copy isn't
+    Check(await DependencyService.SysBotOutdated(fresh: true) == null, "the installed SysBot.exe is the latest release");
+    var oldBot = Path.Combine(work, "Sys-EncounterBot.NET-2.6.0", "SysBot.Pokemon.WinForms", "bin", "Release", "SysBot.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(oldBot)!);
+    File.WriteAllText(oldBot, "test");
+    var keepBot = AppSettings.Current.SysBotPath;
+    AppSettings.Current.SysBotPath = oldBot;
+    try
+    {
+        var o = await DependencyService.SysBotOutdated(fresh: true);
+        Check(o is { Installed: "2.6.0", SelfBuilt: true }, $"an outdated self-built SysBot is caught ({o})");
+        Check(await DependencyService.SysBotOutdated() == o, "the answer is reused (no GitHub call per click)");
+    }
+    finally { AppSettings.Current.SysBotPath = keepBot; DependencyService.ForgetSysBotCheck(); }
 }
 
 if (tests.Contains("3ds"))

@@ -182,6 +182,35 @@ public sealed class GamePage : UserControl
         return tcs.Task;
     }
 
+    /// <summary>
+    /// Before any hunt or tool (the user's rule): SysBot.exe must be on its latest release. Outdated → asks to update first
+    /// (Yes = update, No = continue this time, Cancel = stop). A copy built from source is updated by rebuilding it, so Yes
+    /// opens the download page and stops. Offline / not installed = nothing to check.
+    /// </summary>
+    private async Task<bool> SysBotCurrent()
+    {
+        if (await DependencyService.SysBotOutdated() is not { } o) return true;
+        var r = MessageBox.Show(FindForm(),
+            $"SysBot.exe is version {o.Installed}, but {o.Latest} is out. Please update it before continuing.\n\n" +
+            (o.SelfBuilt
+                ? "Your copy is built from source (with your own routines, such as FRLG), so it's updated by getting the new source " +
+                  "and building it again.\n\nYes = open the download page (and stop here)\n"
+                : "Yes = update it now, then continue\n") +
+            "No = continue this time without updating\nCancel = stop",
+            "SysBot update", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+        if (r == DialogResult.No) return true;
+        if (r != DialogResult.Yes) return false;
+        if (o.SelfBuilt) { DependencyService.OpenUrl(DependencyService.SysBotReleases); return false; }
+        var dep = DependencyService.All.First(d => d.Name == "SysBot.exe");
+        try
+        {
+            var msg = await DependencyService.Install(dep, m => Ui(() => Status(m)));
+            Status(msg);
+        }
+        catch (Exception ex) { MessageBox.Show(FindForm(), ex.Message, "SysBot update", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
+        return await DependencyService.SysBotOutdated(fresh: true) == null;
+    }
+
     private bool EnsureDependency(string name)
     {
         var dep = DependencyService.All.First(d => d.Name == name);
@@ -203,13 +232,14 @@ public sealed class GamePage : UserControl
         var sbb = new FancyButton("sys-botbase", Theme.GlyphSettings, Theme.PanelHi);
         sbb.Click += async (_, _) => await SysBotBaseMenu();
         var pa = new FancyButton("Pokémon Automation", Theme.GlyphPlay, Theme.PanelHi);
-        pa.Click += (_, _) => PokemonAutomationMenu();
+        pa.Click += async (_, _) => { if (await SysBotCurrent()) PokemonAutomationMenu(); };
         card.Body.Controls.Add(Row(sbb, pa));
     }
 
     /// <summary>Shows what runs on the Switch and offers: install / update sys-botbase-cpp, switch WiFi ↔ USB.</summary>
     private async Task SysBotBaseMenu()
     {
+        if (!await SysBotCurrent()) return;
         var s = AppSettings.Current;
         Status("Asking the Switch which sys-botbase it runs...");
         var version = await Task.Run(() => SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort));
@@ -349,6 +379,7 @@ public sealed class GamePage : UserControl
         var stop = new FancyButton("Stop Python hunter", Theme.GlyphStop, Color.FromArgb(150, 40, 60));
         start.Click += async (_, _) =>
         {
+            if (!await SysBotCurrent()) return;
             var key = radios.First(r => r.Checked).Tag as string ?? "";
             if (key == "python" && !EnsureDependency("Python 3")) return;
             if (key == "sysbot" && !EnsureDependency("SysBot.exe")) return;
@@ -429,8 +460,9 @@ public sealed class GamePage : UserControl
             });
         };
 
-        start.Click += (_, _) =>
+        start.Click += async (_, _) =>
         {
+            if (!await SysBotCurrent()) return;
             var ip = IpPrompt.GetChecked3DS(FindForm());
             if (ip == null) return;
             var options = new Services.ThreeDS.Bot3DSOptions
@@ -683,6 +715,7 @@ public sealed class GamePage : UserControl
             _recButton.Invalidate();
             return;
         }
+        if (!await SysBotCurrent()) return;
         if (!EnsureDependency("FFmpeg")) return;
         if (_game.IsSwitch && !EnsureDependency("Streamlabs Desktop")) return;
         if (string.IsNullOrWhiteSpace(_recFolder.Text) || !Directory.Exists(_recFolder.Text))
@@ -1025,7 +1058,7 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(scan, export));
 
         var pkhex = new FancyButton("Open in PKHeX", Theme.GlyphTools, Theme.PanelHi);
-        pkhex.Click += (_, _) => OpenInPKHeX();
+        pkhex.Click += async (_, _) => { if (await SysBotCurrent()) OpenInPKHeX(); };
         var info = new FancyButton("View Game Info", Theme.GlyphInfo, Theme.PanelHi);
         info.Click += (_, _) =>
         {
@@ -1040,7 +1073,7 @@ public sealed class GamePage : UserControl
         if (_game.IsSwitch)
         {
             var trades = new FancyButton("Wireless trades (pokeldn)", Theme.GlyphWifi, Theme.PanelHi);
-            trades.Click += (_, _) => { using var f = new PokeldnForm(); f.ShowDialog(FindForm()); };
+            trades.Click += async (_, _) => { if (!await SysBotCurrent()) return; using var f = new PokeldnForm(); f.ShowDialog(FindForm()); };
             buttons.Controls.Add(trades);
         }
         card.Body.Controls.Add(buttons);
@@ -1065,6 +1098,7 @@ public sealed class GamePage : UserControl
 
     private async Task FindInCheckpoint()
     {
+        if (!await SysBotCurrent()) return;
         try { await FindInCheckpointSteps(); }
         finally
         {

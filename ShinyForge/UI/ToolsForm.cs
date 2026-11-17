@@ -41,6 +41,8 @@ public sealed class ToolsForm : Form
         _status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         Controls.AddRange(new Control[] { title, _list, recheck, installAll, _status });
         Populate(isSwitch);
+        // the installed versions (some programs are asked, which takes a moment): filled in when known
+        Shown += async (_, _) => { await DependencyService.ReadVersions(); if (!IsDisposed) Populate(isSwitch); };
     }
 
     private void Populate(bool? isSwitch)
@@ -93,7 +95,7 @@ public sealed class ToolsForm : Form
             };
             var icon = Theme.Label(glyph, Theme.Icons, color);
             icon.Location = new Point(14, 22);
-            var name = Theme.Label($"{d.Name}   —   {state}", Theme.H2, Theme.Text);
+            var name = Theme.Label($"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}", Theme.H2, Theme.Text);
             name.Location = new Point(48, 8);
             var purpose = Theme.Label(d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), Theme.Small, Theme.Muted);
             purpose.Location = new Point(50, 34);

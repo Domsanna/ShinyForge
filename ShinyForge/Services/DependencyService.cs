@@ -25,6 +25,8 @@ public sealed class Dependency
     public bool FromBackup => AppPaths.IsInBackupTools(Path);
     public DepState State { get; set; }
     public string Detail { get; set; } = "";
+    /// <summary>The installed version ("9.0.2", "v0.66.4", ...), read by <see cref="DependencyService.ReadVersions"/>; null = unknown.</summary>
+    public string? Version { get; set; }
     public bool CanAutoInstall => WingetId != null || Name is "PKHeX" or "SysBot.exe" or "pokeldn" or "esptool";
     /// <summary>Only needed once the user set up that feature (the ESP32-S3 trades): not reported as missing before.</summary>
     public bool OnlyAfterSetup { get; init; }
@@ -227,7 +229,7 @@ public static class DependencyService
     private static async Task<string> InstallSysBot(Action<string> progress)
     {
         progress("Looking up the latest Sys-EncounterBot.NET release...");
-        var rel = await Http.GetFromJsonAsync<JsonObject>("https://api.github.com/repos/Manu098vm/Sys-EncounterBot.NET/releases/latest")
+        var rel = await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{SysBotRepo}/releases/latest")
                   ?? throw new IOException("GitHub didn't return the Sys-EncounterBot.NET release.");
         var tag = rel["tag_name"]?.ToString() ?? "latest";
         var asset = (rel["assets"] as JsonArray)?.OfType<JsonObject>()
@@ -235,7 +237,7 @@ public static class DependencyService
         var url = asset?["browser_download_url"]?.ToString();
         if (url == null)
         {
-            OpenUrl("https://github.com/Manu098vm/Sys-EncounterBot.NET/releases/latest");
+            OpenUrl(SysBotReleases);
             return "The Sys-EncounterBot.NET release has no zip to download - its download page was opened.";
         }
 
@@ -251,6 +253,7 @@ public static class DependencyService
         if (Directory.Exists(dest)) Directory.Delete(dest, true);
         ZipFile.ExtractToDirectory(zipPath, dest);
         File.WriteAllText(Path.Combine(dest, VersionMarker), tag); // what the update check compares with
+        ForgetSysBotCheck();
         try { File.Delete(zipPath); } catch { }
 
         var exe = Directory.EnumerateFiles(dest, "SysBot.exe", SearchOption.AllDirectories).FirstOrDefault()
@@ -464,24 +467,96 @@ public static class DependencyService
     private static async Task<List<UpdateInfo>> CheckSysBot()
     {
         var list = new List<UpdateInfo>();
-        if (!OsInfo.IsWindows || PathOf("SysBot.exe") is not { } exe) return list;
+        if (await SysBotOutdated(fresh: true) is not { } o) return list;
+        list.Add(o.SelfBuilt
+            ? new("SysBot.exe", $"Installed {o.Installed}, latest is {o.Latest}. Your copy is built from source (with your own routines, e.g. FRLG): " +
+                                "update the source and rebuild - the download wouldn't have them.", null)
+            : new("SysBot.exe", $"Installed {o.Installed}, latest is {o.Latest}.", InstallSysBot));
+        return list;
+    }
+
+    public const string SysBotRepo = "Manu098vm/Sys-EncounterBot.NET";
+    public const string SysBotReleases = "https://github.com/" + SysBotRepo + "/releases/latest";
+
+    /// <summary>An outdated SysBot.exe: its version, the newest release, and whether it was built from source (…\bin\…).</summary>
+    public sealed record SysBotOutdatedInfo(string Installed, string Latest, bool SelfBuilt);
+
+    private static (DateTime At, SysBotOutdatedInfo? Result)? _sysBotCheck;
+
+    /// <summary>
+    /// Is SysBot.exe older than its latest release? Null = up to date, not installed, or unknown (offline - nothing is
+    /// blocked then). The answer is kept for an hour so starting several things doesn't ask GitHub every time
+    /// (<paramref name="fresh"/> = ask now).
+    /// </summary>
+    public static async Task<SysBotOutdatedInfo?> SysBotOutdated(bool fresh = false)
+    {
+        if (!fresh && _sysBotCheck is { } c && DateTime.Now - c.At < TimeSpan.FromHours(1)) return c.Result;
+        if (!OsInfo.IsWindows || PathOf("SysBot.exe") is not { } exe) return null;
         try
         {
+            var installed = SysBotVersion(exe);
+            var latest = await LatestTag(SysBotRepo);
             var dir = Path.GetDirectoryName(exe)!;
-            var marker = Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot", VersionMarker);
-            var installed = exe.StartsWith(Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot"), StringComparison.OrdinalIgnoreCase) && File.Exists(marker)
-                ? File.ReadAllText(marker).Trim()
-                : ParseVersion(dir)?.ToString();
-            var latest = await LatestTag("Manu098vm/Sys-EncounterBot.NET");
-            if (!IsNewer(latest, installed)) return list;
-            var selfBuilt = dir.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-            list.Add(selfBuilt
-                ? new("SysBot.exe", $"Installed {installed}, latest is {latest}. Your copy is built from source (with your own routines, e.g. FRLG): " +
-                                    "update the source and rebuild - the download wouldn't have them.", null)
-                : new("SysBot.exe", $"Installed {installed ?? "unknown version"}, latest is {latest}.", InstallSysBot));
+            var result = IsNewer(latest, installed)
+                ? new SysBotOutdatedInfo(installed ?? "unknown", latest!, dir.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                : null;
+            _sysBotCheck = (DateTime.Now, result);
+            return result;
         }
-        catch (Exception e) { AppPaths.Log("SysBot.exe update check failed: " + e.Message); }
-        return list;
+        catch (Exception e) { AppPaths.Log("SysBot.exe version check failed: " + e.Message); return null; }
+    }
+
+    /// <summary>After SysBot.exe was updated: check again next time.</summary>
+    public static void ForgetSysBotCheck() => _sysBotCheck = null;
+
+    /// <summary>
+    /// SysBot.exe's version: the release tag ShinyForge wrote when it downloaded it, else the version in its folder names
+    /// ("Sys-EncounterBot.NET-2.7.1\...") - the program itself always says 1.0.0.0.
+    /// </summary>
+    public static string? SysBotVersion(string exe)
+    {
+        var marker = Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot", VersionMarker);
+        return exe.StartsWith(Path.Combine(AppPaths.ToolsDir, "Sys-EncounterBot"), StringComparison.OrdinalIgnoreCase) && File.Exists(marker)
+            ? File.ReadAllText(marker).Trim()
+            : ParseVersion(Path.GetDirectoryName(exe))?.ToString();
+    }
+
+    // ------------------------------------------------------------------ installed versions (Tools & Updates)
+    /// <summary>Reads the version of every tool that was found - all at once, off the UI thread (some ask the program).</summary>
+    public static Task ReadVersions() => Task.WhenAll(All.Where(d => d.Path != null).Select(async d =>
+    {
+        try { d.Version = await ReadVersion(d); }
+        catch (Exception e) { d.Version = null; AppPaths.Log($"Version of {d.Name}: {e.Message}"); }
+    }));
+
+    private static async Task<string?> ReadVersion(Dependency d)
+    {
+        var path = d.Path!;
+        string? First(string text) => ParseVersion(text.Split('\n').FirstOrDefault())?.ToString();
+        string? FileVersion() => File.Exists(path) && FileVersionInfo.GetVersionInfo(path) is var v
+            ? ParseVersion(v.ProductVersion) is { } pv && pv > new Version(0, 0) ? pv.ToString() : ParseVersion(v.FileVersion)?.ToString()
+            : null;
+        return d.Name switch
+        {
+            "FFmpeg" => First(await RunTool(path, "-version")),                   // "ffmpeg version 9.0.2-full_build-..."
+            "Python 3" => First(await RunTool(path, "--version")),                // "Python 3.13.1"
+            "esptool" => First(await RunTool(path, "version")),                   // "esptool v5.6.0"
+            "pokeldn" => PokeldnService.InstalledAppTag(path),
+            "SysBot.exe" => SysBotVersion(path),
+            "Pokémon Automation" => PokemonAutomation.VersionOf(path)?.ToString(),
+            "Microsoft Excel" => ExcelVersion(),
+            // 3DS Capture's program has no version: its folder does ("3ds_capture.6.1")
+            "3DS Capture" => FileVersion() is { } fv && fv != "1.0.0.0" ? fv : ParseVersion(Path.GetFileName(Path.GetDirectoryName(path)))?.ToString(),
+            _ => FileVersion(),                                                    // Streamlabs, PKHeX: the program's own version
+        };
+    }
+
+    /// <summary>Office's version (Click-to-Run writes it to the registry; Excel itself isn't started).</summary>
+    private static string? ExcelVersion()
+    {
+        if (!OsInfo.IsWindows) return null;
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Office\ClickToRun\Configuration");
+        return key?.GetValue("VersionToReport") as string;
     }
 
     /// <summary>esptool (only once the ESP32-S3 / pokeldn feature was set up): asks the program itself for its version.</summary>

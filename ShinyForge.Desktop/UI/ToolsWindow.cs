@@ -41,6 +41,8 @@ public sealed class ToolsWindow : Window
         DockPanel.SetDock(title, Dock.Top);
         Content = new DockPanel { Children = { title, bottom, new ScrollViewer { Content = _list } } };
         Populate();
+        // the installed versions (some programs are asked, which takes a moment): filled in when known
+        Opened += async (_, _) => { await DependencyService.ReadVersions(); Populate(); };
     }
 
     private Border RowPanel(Color bg, string glyph, Color glyphColor, string name, string detail, Control? button)
@@ -86,7 +88,7 @@ public sealed class ToolsWindow : Window
                 var dep = d;
                 install.Click += async (_, _) => { await AskInstall(this, dep); Populate(); };
             }
-            _list.Children.Add(RowPanel(Skin.Panel, glyph, color, $"{d.Name}   —   {state}", d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), install));
+            _list.Children.Add(RowPanel(Skin.Panel, glyph, color, $"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}", d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), install));
         }
         foreach (var u in LastUpdates)
         {
