@@ -2,6 +2,12 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.3
+
+### Fixed
+- **"Install all missing" installs every tool shown as "Not installed".** In Tools & Updates it skipped tools ShinyForge doesn't need yet (pokeldn and esptool before the wireless-trades setup, the optional Pokémon Automation) and answered "Everything is already installed". Now it covers every missing row; tools that can't be installed automatically get their download page opened. The startup message still only offers what's needed now.
+- **"Tools & Updates" title** (Windows): the "&" was hidden ("Tools  Updates").
+
 ## 1.2.2
 
 ### Fixed
