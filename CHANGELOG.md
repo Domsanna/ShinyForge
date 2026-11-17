@@ -2,6 +2,14 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.2
+
+### Fixed
+- **Tools & Updates finds updates for every tool.** A newer pokeldn (and other GitHub tools such as Pokémon Automation and SysBot) was found but not shown: the next check reset the tool to "Installed". Now each outdated tool shows "Update available", the versions and an **Update** button in its own row, and keeps it until it is updated.
+- **Python updates are found.** The check asked winget which programs it can upgrade, and winget only knows programs it installed itself, not Python from python.org. Now the version each program really has (Python, FFmpeg, Streamlabs, 3DS Capture, Excel) is compared with the newest one winget offers, and Update upgrades any copy.
+- **No false Streamlabs update.** Streamlabs updates itself, so winget's record could be older than the installed version and show an "update" to an older one.
+- **PKHeX and the PKHeX library use the same version check as every other tool.** On Linux, FFmpeg and Python updates are shown in their own rows.
+
 ## 1.2.1
 
 ### Changed
