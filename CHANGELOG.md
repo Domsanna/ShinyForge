@@ -2,6 +2,11 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.5
+
+### Fixed
+- **pokeldn and esptool updates are found even if Wireless trades was never set up.** Their update check only ran after the Wireless trades setup was finished, so a pokeldn installed another way (for example with "Install all missing") showed "Installed" in Tools & Updates but was never checked, and "No updates found" was shown. Every installed tool is now checked.
+
 ## 1.2.4
 
 ### Fixed
