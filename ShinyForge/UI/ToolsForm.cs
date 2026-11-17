@@ -37,9 +37,12 @@ public sealed class ToolsForm : Form
         var installAll = new FancyButton("Install all missing", Theme.GlyphDownload, Theme.Accent) { Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
         installAll.Location = new Point(recheck.Right + 12, 592);
         installAll.Click += (_, _) => { InstallAll(this, isSwitch, everything: true); Populate(isSwitch); };
-        _status.Location = new Point(installAll.Right + 16, 600);
+        _updateAll.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+        _updateAll.Location = new Point(installAll.Right + 12, 592);
+        _updateAll.Click += (_, _) => { InstallAllUpdates(this); Populate(isSwitch); _status.Text = DependencyService.CheckSummary(DependencyService.Updates.Count); };
+        _status.Location = new Point(_updateAll.Right + 16, 600);
         _status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
-        Controls.AddRange(new Control[] { title, _list, recheck, installAll, _status });
+        Controls.AddRange(new Control[] { title, _list, recheck, installAll, _updateAll, _status });
         Populate(isSwitch);
         // the installed versions (some programs are asked, which takes a moment): filled in when known
         Shown += async (_, _) =>
@@ -57,9 +60,31 @@ public sealed class ToolsForm : Form
         };
     }
 
+    /// <summary>Installs every update ShinyForge can install itself (greyed out when there's none).</summary>
+    private readonly FancyButton _updateAll = new("Install all updates", Theme.GlyphDownload, Theme.Accent);
+
+    /// <summary>Confirms the list, then runs every update one after the other and shows what happened to each.</summary>
+    public static void InstallAllUpdates(IWin32Window? owner)
+    {
+        var todo = DependencyService.InstallableUpdates;
+        var manual = DependencyService.Updates.Where(u => u.Apply == null).ToList();
+        if (todo.Count == 0)
+        {
+            MessageBox.Show(owner, manual.Count == 0 ? "There are no updates to install." :
+                "These updates need you:\n\n" + string.Join("\n\n", manual.Select(u => $"• {u.Item}: {u.Message}")), "ShinyForge");
+            return;
+        }
+        var text = "Install all updates?\n\n" + string.Join("\n", todo.Select(u => $"  • {u.Item}: {u.Message}")) +
+                   (manual.Count > 0 ? "\n\nThese need you (not installed automatically):\n" + string.Join("\n", manual.Select(u => "  • " + u.Item)) : "") +
+                   "\n\nPrograms that are being updated should be closed. Windows may ask for permission - click Yes.";
+        if (MessageBox.Show(owner, text, "ShinyForge - install all updates", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK)
+            RunInstall(owner, "Installing updates...", DependencyService.InstallAllUpdates);
+    }
+
     private void Populate(bool? isSwitch)
     {
         _list.Controls.Clear();
+        _updateAll.Enabled = DependencyService.InstallableUpdates.Count > 0;
 
         // ShinyForge itself: version, build and the newest release on GitHub.
         var app = new Panel { Size = new Size(770, 70), BackColor = Color.FromArgb(36, 30, 70), Margin = new Padding(0, 0, 0, 12) };
@@ -100,18 +125,20 @@ public sealed class ToolsForm : Form
             DependencyService.Refresh(d); // keeps "update available" for tools the last check found a newer version of
             var update = DependencyService.UpdateFor(d);
             var row = new Panel { Size = new Size(770, 70), BackColor = update != null ? Color.FromArgb(50, 40, 12) : Theme.Panel, Margin = new Padding(0, 0, 0, 8) };
-            var (glyph, color, state) = d.State switch
+            var problem = d.State == DepState.Ok && DependencyService.CheckedFor(d)?.Problem != null;
+            var (glyph, color) = d.State switch
             {
-                DepState.Ok => (Theme.GlyphCheck, Theme.Good, d.FromBackup ? "Using Backup Tools folder" : "Installed"),
-                DepState.UpdateAvailable => (Theme.GlyphDownload, Theme.Warn, "Update available"),
-                _ => (Theme.GlyphWarn, Theme.Bad, "Not installed"),
+                DepState.Ok => problem ? (Theme.GlyphWarn, Theme.Warn) : (Theme.GlyphCheck, Theme.Good),
+                DepState.UpdateAvailable => (Theme.GlyphDownload, Theme.Warn),
+                _ => (Theme.GlyphWarn, Theme.Bad),
             };
+            var state = DependencyService.StateText(d);
             var icon = Theme.Label(glyph, Theme.Icons, color);
             icon.Location = new Point(14, 22);
             var name = Theme.Label($"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}", Theme.H2, Theme.Text);
             name.Location = new Point(48, 8);
-            var purpose = Theme.Label(update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""),
-                Theme.Small, update != null ? Theme.Warn : Theme.Muted);
+            var purpose = Theme.Label(update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? "\n" + DependencyService.CheckLine(d) : ""),
+                Theme.Small, update != null || problem ? Theme.Warn : Theme.Muted);
             purpose.Location = new Point(50, 34);
             purpose.MaximumSize = new Size(560, 34);
             row.Controls.AddRange(new Control[] { icon, name, purpose });

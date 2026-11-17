@@ -605,17 +605,19 @@
   <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, where, and <b>which version you have</b> (shown next to its name a moment after the window opens).</p>
   <div class="callout warn"><strong>SysBot must be up to date</strong>Before a hunt or a tool starts (recording, sys-botbase, Pokémon Automation, PKHeX, wireless trades, the Checkpoint save reader), ShinyForge checks that SysBot.exe is on its latest release. If it isn't, it asks you to update first: <b>Yes</b> updates it (or, for a copy you built yourself, opens the download page to rebuild), <b>No</b> carries on this time, <b>Cancel</b> stops.</div>
   <ul>
+    <li><b>Install all updates</b> installs every update ShinyForge can install itself, one after the other, and then lists what happened to each. Updates that need you (such as a SysBot you built yourself) are listed instead.</li>
     <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
     <li><b>Check for updates</b> compares your versions with the latest ones. It runs at every start and again every hour while ShinyForge is open, and Tools &amp; Updates checks again by itself when its last answer is more than 10 minutes old (turn the automatic checks on or off in <b>Settings → Updates</b>). A new update shows a banner once. If a tool can't be checked (offline), the window says which one. What it checks:
       <ul>
         <li><b>ShinyForge</b> itself, and the PKHeX library inside it.</li>
         <li><b>FFmpeg, Streamlabs Desktop, Python</b>: winget on Windows (one-click update), Homebrew on macOS (one-click), apt on Linux (shows the command, since it needs your password).</li>
-        <li><b>PKHeX</b>, <b>pokeldn</b> and <b>esptool</b>: against their latest releases, with one-click updates.</li>
+        <li><b>PKHeX</b>, <b>pokeldn</b> and <b>esptool</b>: against their latest releases, with one-click updates (pokeldn and esptool also when Wireless trades isn't set up).</li>
+        <li><b>3DS Capture</b>: against the download on 3dscapture.com. The update unzips the new version next to the old one (which is kept) and ShinyForge uses it.</li>
         <li><b>SysBot.exe</b>: a copy ShinyForge downloaded updates with one click. A copy you built from source (with your own routines, such as FRLG) is only reported, because the download wouldn't have your routines.</li>
         <li><b>Pokémon Automation</b>: its version comes from the unzipped folder. The update opens their download page; unzip the new version next to the old one and ShinyForge uses the newest.</li>
         <li><b>sys-botbase on the Switch</b>, when the Switch answers and no hunt is running: the original against olliz0r's latest release, sys-botbase-cpp against Pokémon Automation's.</li>
       </ul>
-      3DS Capture and Microsoft Excel publish no version information, so they're only checked for being installed. Excel updates itself through Office.</li>
+      Each row says what the check found: <b>Up to date</b> with the newest version it compared against, <b>Update available</b>, or why it couldn't check. Microsoft Excel publishes no version to compare with; it's updated by Office itself (in Excel: File → Account → Update Options → Update Now).</li>
   </ul>
   <h3 id="updates">Updating ShinyForge</h3>
   <p>Versions are numbered <b>1.X.Z</b>, shown at the bottom-right of the window, e.g. <code>v1.0.15</code>. <b>X</b> goes up for big updates; <b>Z</b> goes up for patches and small fixes (it starts again at 0 after a big update). So 1.1.0 is newer than 1.0.20.</p>

@@ -361,15 +361,82 @@ public static class DependencyService
     /// <summary>Tools the last check couldn't ask (offline, GitHub busy...): "No updates found" isn't said for them.</summary>
     public static List<string> CheckFailures { get; private set; } = new();
     private static List<string> _failing = new();
-    private static void CheckFailed(string what, Exception e)
-    {
-        AppPaths.Log($"{what} update check failed: {e.Message}");
-        lock (_failing) _failing.Add(what);
-    }
+    private static void CheckFailed(string what, Exception e) => Note(what, null, "couldn't reach its download site: " + e.GetBaseException().Message);
     /// <summary>The outcome in words for Tools &amp; Updates: updates found, nothing found, or which tools couldn't be checked.</summary>
     public static string CheckSummary(int found) =>
         (found == 0 ? "No updates found" : $"{found} update(s) available") +
-        (CheckFailures.Count == 0 ? "." : $" - couldn't check {string.Join(", ", CheckFailures)} (offline or GitHub busy); try again later.");
+        (CheckFailures.Count == 0 ? "." : $" - couldn't check {string.Join(", ", CheckFailures)} (see their rows).");
+
+    /// <summary>
+    /// What the last check found for one tool: the newest version it saw (<paramref name="Latest"/>), why it couldn't compare
+    /// (<paramref name="Problem"/>), or how the tool gets its updates instead (<paramref name="Info"/>, e.g. Excel via Office).
+    /// Every installed tool gets one - a tool can't silently show "Installed" without having been compared.
+    /// </summary>
+    public sealed record CheckResult(string? Latest, string? Problem, string? Info = null);
+    /// <summary>The last check's result per tool name.</summary>
+    public static Dictionary<string, CheckResult> Checked { get; private set; } = new();
+    private static Dictionary<string, CheckResult> _checking = new();
+    public static CheckResult? CheckedFor(Dependency d) => Checked.GetValueOrDefault(d.Name);
+
+    /// <summary>A found tool's state word for its row: "Up to date" once compared, "Installed (couldn't check)" when it failed.</summary>
+    public static string StateText(Dependency d) => d.State switch
+    {
+        DepState.UpdateAvailable => "Update available",
+        DepState.Missing => "Not installed",
+        _ => CheckedFor(d) switch
+        {
+            { Problem: not null } => "Installed (couldn't check)",
+            { Latest: not null } => "Up to date",
+            _ => d.FromBackup ? "Using Backup Tools folder" : "Installed",
+        },
+    };
+
+    /// <summary>The second line of a found tool's row: what the check found, then where the tool is.</summary>
+    public static string CheckLine(Dependency d) => CheckedFor(d) switch
+    {
+        { Problem: { } p } => "Couldn't check for updates: " + p,
+        { Info: { } i } => i,
+        { Latest: { } l } => $"Latest {l}  •  {ShortPath(d.Detail)}",
+        _ => ShortPath(d.Detail),
+    };
+
+    /// <summary>A long path cut to its end ("…\bin\ffmpeg.exe") so it fits on the row's one line.</summary>
+    private static string ShortPath(string path, int max = 70)
+    {
+        if (path.Length <= max) return path;
+        var parts = path.Split(Path.DirectorySeparatorChar);
+        var tail = parts[^1];
+        for (int i = parts.Length - 2; i > 0 && tail.Length + parts[i].Length + 3 <= max; i--) tail = parts[i] + Path.DirectorySeparatorChar + tail;
+        return "…" + Path.DirectorySeparatorChar + tail;
+    }
+
+    private static void Note(string name, string? latest, string? problem = null, string? info = null)
+    {
+        lock (_checking) _checking[name] = new(latest, problem, info);
+        if (problem == null) return;
+        AppPaths.Log($"{name} update check: {problem}");
+        lock (_failing) _failing.Add(name);
+    }
+
+    /// <summary>
+    /// The one comparison every tool goes through: records what was found and returns true when <paramref name="latest"/> is
+    /// newer. A version that can't be read is reported on the tool's row instead of passing as "up to date".
+    /// </summary>
+    private static bool Compare(string name, string? installed, string? latest)
+    {
+        if (ParseVersion(latest) == null)
+        {
+            Note(name, latest, "couldn't read the newest version" + (string.IsNullOrWhiteSpace(latest) ? "" : $" ('{latest}')"));
+            return false;
+        }
+        if (ParseVersion(installed) == null)
+        {
+            Note(name, latest, $"couldn't read the installed version (latest is {latest})");
+            return false;
+        }
+        Note(name, latest);
+        return IsNewer(latest, installed);
+    }
 
     /// <summary>One check at a time: the hourly check, Tools &amp; Updates and the start-up check share the same list.</summary>
     private static readonly SemaphoreSlim CheckGate = new(1, 1);
@@ -401,13 +468,36 @@ public static class DependencyService
         return msg;
     }
 
+    /// <summary>The updates ShinyForge can install itself (the others only say what to do, e.g. a self-built SysBot).</summary>
+    public static List<UpdateInfo> InstallableUpdates => Updates.Where(u => u.Apply != null).ToList();
+
+    /// <summary>"Install all updates": runs every update one after the other. Returns a summary for the user.</summary>
+    public static async Task<string> InstallAllUpdates(Action<string> progress)
+    {
+        var todo = InstallableUpdates;
+        var lines = new List<string>();
+        for (int i = 0; i < todo.Count; i++)
+        {
+            var u = todo[i];
+            var step = $"({i + 1}/{todo.Count})";
+            progress($"{step} Updating {u.Item}...");
+            try { lines.Add("✓ " + await ApplyUpdate(u, s => progress($"{step} {s}"))); }
+            catch (Exception e) { lines.Add($"✗ {u.Item}: {e.GetBaseException().Message}"); }
+        }
+        foreach (var u in Updates.Where(u => u.Apply == null))
+            lines.Add($"• {u.Item} needs you: {u.Message}");
+        return lines.Count == 0 ? "There are no updates to install." : string.Join(Environment.NewLine + Environment.NewLine, lines);
+    }
+
     public static async Task<List<UpdateInfo>> CheckUpdates()
     {
         await CheckGate.WaitAsync();
         try
         {
             _failing = new();
+            _checking = new();
             var list = await CheckUpdatesNow();
+            Checked = _checking;
             CheckFailures = _failing.Distinct().ToList();
             LastChecked = DateTime.Now;
             return list;
@@ -431,7 +521,7 @@ public static class DependencyService
                 {
                     d.Version ??= await ReadVersion(d);
                     var latest = await WingetLatest(d.WingetId!);
-                    if (!IsNewer(latest, d.Version)) continue;
+                    if (!Compare(d.Name, d.Version, latest)) continue;
                     var dep = d;
                     list.Add(new(d.Name, $"Installed {d.Version}, latest is {latest}.", async p =>
                     {
@@ -450,7 +540,7 @@ public static class DependencyService
             {
                 pk.Version ??= await ReadVersion(pk);
                 var latest = await LatestTag("kwsch/PKHeX");
-                if (IsNewer(latest, pk.Version))
+                if (Compare("PKHeX", pk.Version, latest))
                     list.Add(new("PKHeX", $"Installed {pk.Version}, latest is {latest}.", p => InstallPKHeX(p)));
             }
             catch (Exception e) { CheckFailed("PKHeX", e); }
@@ -463,6 +553,7 @@ public static class DependencyService
             {
                 var tag = await LatestTag(PokeldnService.Repo);
                 var have = PokeldnService.InstalledAppTag(pokeldn);
+                Note("pokeldn", tag, AppInfo.ParseTag(tag) == null ? $"couldn't read the newest version ('{tag}')" : null);
                 if (AppInfo.ParseTag(tag) is { } latest && (have == null || AppInfo.ParseTag(have) < latest))
                     list.Add(new("pokeldn", $"Installed {have ?? "unknown version"}, latest is {tag} (the board's firmware is updated from Wireless trades).",
                         p => PokeldnService.InstallAppAndFirmware(p)));
@@ -482,7 +573,7 @@ public static class DependencyService
         catch (Exception e) { CheckFailed("PKHeX library", e); }
 
         // The other tools, all at once (each check is independent and logs its own failure).
-        foreach (var found in await Task.WhenAll(CheckSysBot(), CheckEsptool(), CheckPokemonAutomation(), CheckSwitchSysBotBase(), CheckUnixPackages()))
+        foreach (var found in await Task.WhenAll(CheckSysBot(), CheckEsptool(), CheckPokemonAutomation(), Check3DSCapture(), CheckSwitchSysBotBase(), CheckUnixPackages()))
             list.AddRange(found);
 
         // Tile artwork files: re-download anything missing.
@@ -498,6 +589,14 @@ public static class DependencyService
                 }
                 return "Artwork restored.";
             }));
+        // tools whose makers publish no version to compare with: say how they're updated instead
+        if (All.FirstOrDefault(d => d.Name == "Microsoft Excel") is { Path: not null })
+            Note("Microsoft Excel", null, info: "Updated by Microsoft Office itself (in Excel: File → Account → Update Options → Update Now).");
+        // safety net: an installed tool no check above looked at is reported, never shown as fine
+        foreach (var d in All.Where(d => d.Path != null))
+            lock (_checking)
+                if (!_checking.ContainsKey(d.Name)) Note(d.Name, null, "wasn't checked for updates");
+
         // every tool with a newer version shows it in its own row (not only the winget ones)
         Updates = list;
         foreach (var d in All.Where(d => d.Path != null && list.Any(u => u.Item == d.Name))) d.State = DepState.UpdateAvailable;
@@ -575,7 +674,7 @@ public static class DependencyService
             var installed = SysBotVersion(exe);
             var latest = await LatestTag(SysBotRepo);
             var dir = Path.GetDirectoryName(exe)!;
-            var result = IsNewer(latest, installed)
+            var result = Compare("SysBot.exe", installed, latest)
                 ? new SysBotOutdatedInfo(installed ?? "unknown", latest!, dir.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 : null;
             _sysBotCheck = (DateTime.Now, result);
@@ -665,11 +764,63 @@ public static class DependencyService
         {
             var installed = ParseVersion((await RunTool(exe, "version")).Split('\n').FirstOrDefault())?.ToString();
             var latest = await LatestTag(PokeldnService.EsptoolRepo);
-            if (IsNewer(latest, installed))
+            if (Compare("esptool", installed, latest))
                 list.Add(new("esptool", $"Installed {installed}, latest is {latest}.", PokeldnService.InstallEsptool));
         }
         catch (Exception e) { CheckFailed("esptool", e); }
         return list;
+    }
+
+    private const string Capture3DSSite = "https://3dscapture.com/";
+
+    /// <summary>The newest 3DS Capture on its website ("3ds_capture.6.1.zip" → 6.1 and the zip's address), or null.</summary>
+    internal static async Task<(string Version, string Url)?> Latest3DSCapture()
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, Capture3DSSite);
+        req.Headers.Accept.ParseAdd("text/html");
+        using var resp = await Http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        var m = System.Text.RegularExpressions.Regex.Match(await resp.Content.ReadAsStringAsync(),
+            @"href=""([^""]*3ds_capture\.(\d+(?:\.\d+)+)\.zip)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? (m.Groups[2].Value, new Uri(new Uri(Capture3DSSite), m.Groups[1].Value).ToString()) : null;
+    }
+
+    /// <summary>3DS Capture (Windows): its folder's version ("3ds_capture.6.1") against the download on 3dscapture.com.</summary>
+    private static async Task<List<UpdateInfo>> Check3DSCapture()
+    {
+        var list = new List<UpdateInfo>();
+        if (!OsInfo.IsWindows || All.FirstOrDefault(d => d.Name == "3DS Capture") is not { Path: { } exe } d) return list;
+        try
+        {
+            d.Version ??= await ReadVersion(d);
+            var latest = await Latest3DSCapture();
+            if (Compare("3DS Capture", d.Version, latest?.Version))
+                list.Add(new("3DS Capture", $"Installed {d.Version}, latest is {latest!.Value.Version}.",
+                    p => Install3DSCapture(exe, latest.Value.Version, latest.Value.Url, p)));
+        }
+        catch (Exception e) { CheckFailed("3DS Capture", e); }
+        return list;
+    }
+
+    /// <summary>
+    /// Unzips the new 3DS Capture next to the old one ("…\3ds_capture.6.2\3ds_capture.exe") and uses it from then on.
+    /// The old copy stays (its driver and settings are shared), so going back is just picking it again.
+    /// </summary>
+    private static async Task<string> Install3DSCapture(string oldExe, string version, string url, Action<string> progress)
+    {
+        progress($"Downloading 3DS Capture {version}...");
+        var bytes = await Http.GetByteArrayAsync(url);
+        var oldDir = Path.GetDirectoryName(oldExe)!;
+        var parent = Path.GetFileName(oldDir).StartsWith("3ds_capture", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(oldDir)! : oldDir;
+        var dest = Path.Combine(parent, $"3ds_capture.{version}");
+        Directory.CreateDirectory(dest);
+        using (var zip = new ZipArchive(new MemoryStream(bytes)))
+            zip.ExtractToDirectory(dest, overwriteFiles: true);
+        var exe = Directory.EnumerateFiles(dest, "3ds_capture.exe", SearchOption.AllDirectories).FirstOrDefault()
+                  ?? throw new IOException($"The 3DS Capture {version} download has no 3ds_capture.exe - get it from {Capture3DSSite}");
+        AppSettings.Current.Capture3DSPath = exe;
+        AppSettings.Current.Save();
+        return $"3DS Capture {version} installed to {dest} (the old copy is kept). If 3DS Capture is open, close it - ShinyForge starts the new one.";
     }
 
     /// <summary>
@@ -684,7 +835,7 @@ public static class DependencyService
         {
             var installed = PokemonAutomation.VersionOf(cmd)?.ToString();
             var latest = await LatestTag("PokemonAutomation/ComputerControl");
-            if (IsNewer(latest, installed))
+            if (Compare("Pokémon Automation", installed, latest))
                 list.Add(new("Pokémon Automation", $"Installed {installed}, latest is {latest}.", _ =>
                 {
                     OpenUrl(PokemonAutomation.Releases);
@@ -737,7 +888,9 @@ public static class DependencyService
             {
                 var outdated = (await RunTool(brew, "outdated --quiet", 60000)).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 foreach (var (name, formula) in new[] { ("FFmpeg", "ffmpeg"), ("Python 3", "python") })
-                    if (outdated.FirstOrDefault(f => f == formula || f.StartsWith(formula + "@")) is { } hit)
+                    if (outdated.FirstOrDefault(f => f == formula || f.StartsWith(formula + "@")) is not { } hit)
+                        Note(name, null, info: "Homebrew has nothing newer.");
+                    else
                         list.Add(new(name, $"Homebrew has a newer {hit}.", async p =>
                         {
                             p($"brew upgrade {hit}...");
@@ -749,7 +902,9 @@ public static class DependencyService
             {
                 var upgradable = (await RunTool("/usr/bin/apt", "list --upgradable", 30000)).Split('\n');
                 foreach (var (name, pkg) in new[] { ("FFmpeg", "ffmpeg"), ("Python 3", "python3") })
-                    if (upgradable.Any(l => l.StartsWith(pkg + "/")))
+                    if (!upgradable.Any(l => l.StartsWith(pkg + "/")))
+                        Note(name, null, info: "The package manager (apt) has nothing newer.");
+                    else
                         list.Add(new(name, $"A newer version is available. Run in a terminal:  sudo apt install --only-upgrade {pkg}", null));
             }
         }

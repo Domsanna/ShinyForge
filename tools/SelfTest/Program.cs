@@ -2228,6 +2228,67 @@ if (tests.Contains("installall"))
     Check(title is { UseMnemonic: false }, "title shows \"Tools & Updates\" (the & isn't eaten)");
 }
 
+if (tests.Contains("audit"))
+{
+    // Every installed tool on THIS computer was really compared with its newest version (or says how it's updated) -
+    // nothing passes silently. Run it outside Claude's redirected AppData (explorer.exe <cmd>) to audit the user's real setup.
+    var found = await DependencyService.CheckUpdates();
+    await DependencyService.ReadVersions();
+    foreach (var d in DependencyService.All)
+    {
+        var r = DependencyService.CheckedFor(d);
+        Console.WriteLine($"   {d.Name,-20} {(d.Path == null ? "not installed" : d.Version ?? "?"),-18} latest={r?.Latest ?? "-",-14} {d.State,-16} " +
+                          (r?.Problem != null ? "PROBLEM: " + r.Problem : r?.Info ?? ""));
+        if (d.Path != null)
+            Check(r != null && r.Problem == null && (r.Latest != null || r.Info != null), $"{d.Name}: compared with its newest version (or how it updates is shown)");
+    }
+    foreach (var u in found) Console.WriteLine($"   UPDATE {u.Item}: {u.Message}{(u.Apply == null ? "   [needs the user]" : "")}");
+    Console.WriteLine("   summary: " + DependencyService.CheckSummary(found.Count));
+
+    // The real Tools & Updates window with these results, drawn to a picture (nothing is clicked or installed)
+    InitUi();
+    var shotDir = args.Skip(1).FirstOrDefault(a => a.StartsWith("shot=")) is { } sa ? sa[5..] : work;
+    using var tf = new ToolsForm(null) { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false, Size = new Size(880, 1500) };
+    tf.Show();
+    var until = DateTime.Now.AddSeconds(8); // the window reads the versions when shown; the check above is fresh, so no re-check
+    while (DateTime.Now < until) { Application.DoEvents(); Thread.Sleep(50); }
+    var updAll = (Control)typeof(ToolsForm).GetField("_updateAll", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(tf)!;
+    Check(updAll.Enabled == DependencyService.InstallableUpdates.Count > 0, $"'Install all updates' is {(updAll.Enabled ? "on" : "off")} ({DependencyService.InstallableUpdates.Count} installable)");
+    using (var bmp = new Bitmap(tf.Width, tf.Height)) { tf.DrawToBitmap(bmp, new Rectangle(Point.Empty, tf.Size)); bmp.Save(Path.Combine(shotDir, "_tools_updates.png")); }
+    tf.Close();
+}
+
+if (tests.Contains("updateall"))
+{
+    // "Install all updates" (offline, with stand-in updates - nothing is downloaded): every installable update runs in turn,
+    // one that fails doesn't stop the others, ones that need the user are listed, done ones leave the list.
+    var ran = new List<string>();
+    var fakes = new List<DependencyService.UpdateInfo>
+    {
+        new("Tool A", "Installed 1.0, latest is 2.0.", async p => { p("A step"); await Task.Delay(10); ran.Add("A"); return "Tool A updated to 2.0."; }),
+        new("Tool B", "Installed 1.0, latest is 3.0.", _ => throw new IOException("download failed")),
+        new("Tool C", "Installed 4.0, latest is 5.0.", async _ => { await Task.Delay(10); ran.Add("C"); return "Tool C updated to 5.0."; }),
+        new("Tool D", "Built from source: rebuild it yourself.", null),
+    };
+    var prop = typeof(DependencyService).GetProperty(nameof(DependencyService.Updates))!;
+    var keep = DependencyService.Updates;
+    prop.GetSetMethod(true)!.Invoke(null, new object[] { fakes });
+    try
+    {
+        Check(DependencyService.InstallableUpdates.Select(u => u.Item).SequenceEqual(new[] { "Tool A", "Tool B", "Tool C" }), "installable updates: A, B, C (D needs the user)");
+        var steps = new List<string>();
+        var summary = await DependencyService.InstallAllUpdates(steps.Add);
+        Console.WriteLine("   progress: " + string.Join(" | ", steps));
+        Console.WriteLine("   " + summary.Replace(Environment.NewLine + Environment.NewLine, "\n   "));
+        Check(ran.SequenceEqual(new[] { "A", "C" }), "A and C ran, in order - B's failure didn't stop C");
+        Check(summary.Contains("✓ Tool A updated") && summary.Contains("✗ Tool B: download failed") && summary.Contains("✓ Tool C updated") && summary.Contains("• Tool D needs you"),
+            "the summary says what happened to each update");
+        Check(steps.Contains("(1/3) Updating Tool A...") && steps.Contains("(1/3) A step") && steps.Contains("(3/3) Updating Tool C..."), "progress shows which update of how many");
+        Check(DependencyService.Updates.Select(u => u.Item).OrderBy(x => x).SequenceEqual(new[] { "Tool B", "Tool D" }), "done updates leave the list; the failed and the manual one stay");
+    }
+    finally { prop.GetSetMethod(true)!.Invoke(null, new object[] { keep }); }
+}
+
 if (tests.Contains("recheck"))
 {
     // A release made while ShinyForge stays open (pokeldn shipped 3 versions overnight; the window opened the evening

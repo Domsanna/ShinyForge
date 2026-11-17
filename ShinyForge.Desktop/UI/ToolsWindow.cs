@@ -33,8 +33,9 @@ public sealed class ToolsWindow : Window
         };
         var installAll = new FancyButton("Install all missing", Skin.GlyphDownload, Skin.Accent);
         installAll.Click += async (_, _) => { await InstallAll(this, _isSwitch, everything: true); Populate(); };
+        _updateAll.Click += async (_, _) => { await InstallAllUpdates(this); Populate(); _status.Text = DependencyService.CheckSummary(DependencyService.Updates.Count); };
         _status.VerticalAlignment = VerticalAlignment.Center;
-        var bottom = new Border { Background = Skin.B(Skin.Panel), Padding = new Thickness(16, 10), Child = Skin.Row(recheck, installAll, _status) };
+        var bottom = new Border { Background = Skin.B(Skin.Panel), Padding = new Thickness(16, 10), Child = Skin.Row(recheck, installAll, _updateAll, _status) };
         DockPanel.SetDock(bottom, Dock.Bottom);
         var title = Skin.Title("Tools & Updates");
         title.Margin = new Thickness(20, 14, 0, 0);
@@ -69,9 +70,31 @@ public sealed class ToolsWindow : Window
         return new Border { Background = Skin.B(bg), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 10), Child = dock };
     }
 
+    /// <summary>Installs every update ShinyForge can install itself (greyed out when there's none).</summary>
+    private readonly FancyButton _updateAll = new("Install all updates", Skin.GlyphDownload, Skin.Accent);
+
+    /// <summary>Confirms the list, then runs every update one after the other and shows what happened to each.</summary>
+    public static async Task InstallAllUpdates(Control? owner)
+    {
+        var todo = DependencyService.InstallableUpdates;
+        var manual = DependencyService.Updates.Where(u => u.Apply == null).ToList();
+        if (todo.Count == 0)
+        {
+            await Dialogs.Info(owner, manual.Count == 0 ? "There are no updates to install." :
+                "These updates need you:\n\n" + string.Join("\n\n", manual.Select(u => $"• {u.Item}: {u.Message}")));
+            return;
+        }
+        if (!await Dialogs.YesNo(owner, "Install all updates?\n\n" + string.Join("\n", todo.Select(u => $"  • {u.Item}: {u.Message}")) +
+                                        (manual.Count > 0 ? "\n\nThese need you (not installed automatically):\n" + string.Join("\n", manual.Select(u => "  • " + u.Item)) : "") +
+                                        "\n\nPrograms that are being updated should be closed.", "ShinyForge - install all updates"))
+            return;
+        await RunInstall(owner, "Installing updates...", DependencyService.InstallAllUpdates);
+    }
+
     private void Populate()
     {
         _list.Children.Clear();
+        _updateAll.IsEnabled = DependencyService.InstallableUpdates.Count > 0;
         var latest = AppUpdateService.Latest;
         var check = new FancyButton("Check now", Skin.GlyphSync, Skin.Accent) { Height = 34 };
         check.Click += async (_, _) => { if (Owner is MainWindow main) await main.CheckAppUpdate(quiet: false); Populate(); };
@@ -86,12 +109,14 @@ public sealed class ToolsWindow : Window
         {
             DependencyService.Refresh(d); // keeps "update available" for tools the last check found a newer version of
             var update = DependencyService.UpdateFor(d);
-            var (glyph, color, state) = d.State switch
+            var problem = d.State == DepState.Ok && DependencyService.CheckedFor(d)?.Problem != null;
+            var (glyph, color) = d.State switch
             {
-                DepState.Ok => (Skin.GlyphCheck, Skin.Good, d.FromBackup ? "Using Backup Tools folder" : "Installed"),
-                DepState.UpdateAvailable => (Skin.GlyphDownload, Skin.Warn, "Update available"),
-                _ => (Skin.GlyphWarn, Skin.Bad, "Not installed"),
+                DepState.Ok => problem ? (Skin.GlyphWarn, Skin.Warn) : (Skin.GlyphCheck, Skin.Good),
+                DepState.UpdateAvailable => (Skin.GlyphDownload, Skin.Warn),
+                _ => (Skin.GlyphWarn, Skin.Bad),
             };
+            var state = DependencyService.StateText(d);
             FancyButton? install = null;
             if (d.State == DepState.Missing)
             {
@@ -102,7 +127,7 @@ public sealed class ToolsWindow : Window
             else if (update?.Apply != null) install = UpdateButton(update);
             _list.Children.Add(RowPanel(update != null ? Color.FromRgb(50, 40, 12) : Skin.Panel, glyph, color,
                 $"{d.Name}{(d.Path != null && d.Version != null ? "  " + d.Version : "")}   —   {state}",
-                update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? $"\n{d.Detail}" : ""), install));
+                update != null ? update.Message : d.Purpose + (d.State == DepState.Ok ? "\n" + DependencyService.CheckLine(d) : ""), install));
         }
         // updates that aren't a tool on this computer (sys-botbase on the Switch, the PKHeX library, artwork...)
         foreach (var u in DependencyService.Updates.Where(u => DependencyService.All.All(d => d.Name != u.Item)))
