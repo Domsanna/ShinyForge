@@ -505,7 +505,7 @@ public sealed class GamePage : UserControl
             _last3dsActivity = DateTime.Now;
             start.Enabled = false; stop.Enabled = true;
             Interlocked.Increment(ref _3dsHunts);
-            Task.Run(() =>
+            _ = Task.Run(() => // the hunt runs in the background; it reports and cleans up by itself
             {
                 Exception? failure = null;
                 try
