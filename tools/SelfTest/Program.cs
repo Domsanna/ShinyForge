@@ -1387,6 +1387,56 @@ if (tests.Contains("switchfind"))
     Check(bot.TitleId() == null, "still nothing running");
 }
 
+if (tests.Contains("updatesall"))
+{
+    // Every tool: a newer version is found, shown in the tool's OWN row, kept after the window's re-check, with the right
+    // kind of update. Tools whose path can be pointed elsewhere get a fake OLDER copy (in memory only - nothing is saved);
+    // the others are checked as they are on this PC.
+    var s = AppSettings.Current;
+    var real = await DependencyService.CheckUpdates();
+    await DependencyService.ReadVersions();
+    foreach (var d in DependencyService.All) Console.WriteLine($"   {d.Name,-20} {d.Version ?? "-",-18} {d.State}");
+    foreach (var u in real) Console.WriteLine($"   found: {u.Item}: {u.Message}");
+    var extras = new[] { "sys-botbase (Switch)", "PKHeX library", "Game artwork" };
+    Check(real.All(u => DependencyService.All.Any(d => d.Name == u.Item) || extras.Contains(u.Item)),
+        "every update belongs to a tool row (or is one of: sys-botbase on the Switch, PKHeX library, artwork)");
+    Check(real.All(u => DependencyService.All.FirstOrDefault(d => d.Name == u.Item) is not { } d || d.State == DepState.UpdateAvailable),
+        "every tool with an update shows 'Update available'");
+
+    // fake older copies: a program whose version is 1.0.0.0 (SysBot.exe says that) / older folder names
+    var oldExe = Path.Combine(work, "old-tool", "Tool.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(oldExe)!);
+    File.Copy(s.SysBotPath, oldExe, true); // SysBot.exe's own version is 1.0.0.0
+    var oldPa = Path.Combine(work, "PA-SerialPrograms-Windows-x64-0.60.0-20250101", "SerialPrograms-Windows.cmd");
+    Directory.CreateDirectory(Path.GetDirectoryName(oldPa)!); File.WriteAllText(oldPa, "rem test");
+    var oldBot = Path.Combine(work, "Sys-EncounterBot.NET-2.6.0", "SysBot.Pokemon.WinForms", "bin", "Release", "SysBot.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(oldBot)!); File.WriteAllText(oldBot, "test");
+    var keep = (s.PKHeXPath, s.StreamlabsPath, s.PokemonAutomationPath, s.SysBotPath);
+    try
+    {
+        s.PKHeXPath = oldExe; s.StreamlabsPath = oldExe; s.PokemonAutomationPath = oldPa; s.SysBotPath = oldBot;
+        foreach (var d in DependencyService.All) d.Version = null; // read again from the fake copies
+        var found = await DependencyService.CheckUpdates();
+        foreach (var (name, apply) in new[] { ("PKHeX", true), ("Streamlabs Desktop", true), ("Pokémon Automation", true), ("SysBot.exe", false) })
+        {
+            var dep = DependencyService.All.First(d => d.Name == name);
+            var u = DependencyService.UpdateFor(dep);
+            Check(u != null && dep.State == DepState.UpdateAvailable, $"{name} (fake older copy): 'Update available' in its own row - {u?.Message}");
+            DependencyService.Refresh(dep);
+            Check(dep.State == DepState.UpdateAvailable, $"{name}: still 'Update available' after the window re-checks it");
+            Check((u?.Apply != null) == apply, $"{name}: {(apply ? "has an Update button" : "report only (built from source)")}");
+        }
+    }
+    finally
+    {
+        (s.PKHeXPath, s.StreamlabsPath, s.PokemonAutomationPath, s.SysBotPath) = keep;
+        DependencyService.ForgetSysBotCheck();
+        foreach (var d in DependencyService.All) d.Version = null;
+        var back = await DependencyService.CheckUpdates();
+        Check(back.Select(u => u.Item).OrderBy(x => x).SequenceEqual(real.Select(u => u.Item).OrderBy(x => x)), "real tools restored: the same updates as before");
+    }
+}
+
 if (tests.Contains("toolupdate"))
 {
     // REAL download: every tool with a newer release is marked in its own row, stays marked after a re-check, and the

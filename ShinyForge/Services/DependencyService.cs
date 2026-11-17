@@ -375,46 +375,39 @@ public static class DependencyService
         Updates = new();
         foreach (var d in All) Refresh(d);
 
-        // winget-managed tools (Windows).
+        // winget tools (Windows): the version the program REALLY has against the newest one winget offers. ("winget upgrade"
+        // only knows programs winget installed - not Python from python.org - and goes by its own records, which miss
+        // Streamlabs' self-updates.)
         if (OsInfo.IsWindows)
-        try
-        {
-            // Plain listing ("winget upgrade" with no install flags): a table of Name / Id / Version / Available.
-            var outp = await RunWinget("upgrade", install: false);
-            var hasTable = outp.Contains("Available", StringComparison.OrdinalIgnoreCase);
-            foreach (var d in All.Where(d => d.WingetId != null && d.State == DepState.Ok))
+            foreach (var d in All.Where(d => d.WingetId != null && d.Path != null))
             {
-                var line = !hasTable ? null : outp.Split('\n').FirstOrDefault(l =>
-                    System.Text.RegularExpressions.Regex.IsMatch(l, $@"\s{System.Text.RegularExpressions.Regex.Escape(d.WingetId!)}\s+\S+\s+\S+"));
-                if (line != null)
+                try
                 {
-                    d.State = DepState.UpdateAvailable;
+                    d.Version ??= await ReadVersion(d);
+                    var latest = await WingetLatest(d.WingetId!);
+                    if (!IsNewer(latest, d.Version)) continue;
                     var dep = d;
-                    list.Add(new(d.Name, "A newer version is available.", async p =>
+                    list.Add(new(d.Name, $"Installed {d.Version}, latest is {latest}.", async p =>
                     {
-                        var o = await RunWinget($"upgrade --id {dep.WingetId} --exact", p);
+                        // "install" on an installed program upgrades it - also when winget didn't install it (python.org)
+                        var o = await RunWinget($"install --id {dep.WingetId} --exact", p);
                         Refresh(dep);
                         return $"{dep.Name}: {LastLine(o)}";
                     }));
                 }
+                catch (Exception e) { AppPaths.Log($"{d.Name} update check (winget) failed: " + e.Message); }
             }
-        }
-        catch (Exception e) { AppPaths.Log("winget upgrade check failed: " + e.Message); }
 
-        // PKHeX app vs. latest release tag (Windows).
-        if (OsInfo.IsWindows)
-        try
-        {
-            var latest = (await Http.GetFromJsonAsync<JsonObject>("https://api.github.com/repos/kwsch/PKHeX/releases/latest"))?["tag_name"]?.ToString();
-            var pkhex = PathOf("PKHeX");
-            if (latest != null && pkhex != null)
+        // PKHeX app vs. its latest release tag (Windows).
+        if (OsInfo.IsWindows && All.FirstOrDefault(x => x.Name == "PKHeX") is { Path: not null } pk)
+            try
             {
-                var installed = FileVersionInfo.GetVersionInfo(pkhex).FileVersion ?? "";
-                if (!VersionsMatch(installed, latest))
-                    list.Add(new("PKHeX", $"Installed {installed}, latest is {latest}.", p => InstallPKHeX(p)));
+                pk.Version ??= await ReadVersion(pk);
+                var latest = await LatestTag("kwsch/PKHeX");
+                if (IsNewer(latest, pk.Version))
+                    list.Add(new("PKHeX", $"Installed {pk.Version}, latest is {latest}.", p => InstallPKHeX(p)));
             }
-        }
-        catch (Exception e) { AppPaths.Log("PKHeX update check failed: " + e.Message); }
+            catch (Exception e) { AppPaths.Log("PKHeX update check failed: " + e.Message); }
 
         // pokeldn (only once the wireless-trades feature was set up).
         if (AppSettings.Current.PokeldnSetupDone && PokeldnService.FindApp() is { } pokeldn)
@@ -436,7 +429,7 @@ public static class DependencyService
             var idx = await Http.GetFromJsonAsync<JsonObject>("https://api.nuget.org/v3-flatcontainer/pkhex.core/index.json");
             var newest = (idx?["versions"] as JsonArray)?.LastOrDefault()?.ToString();
             var bundled = typeof(PKHeX.Core.SaveFile).Assembly.GetName().Version;
-            if (newest != null && bundled != null && !VersionsMatch(bundled.ToString(), newest))
+            if (newest != null && bundled != null && IsNewer(newest, bundled.ToString()))
                 list.Add(new("PKHeX library", $"ShinyForge uses PKHeX.Core {bundled.ToString(3)}; {newest} is available (needed only for brand-new games).", null));
         }
         catch (Exception e) { AppPaths.Log("PKHeX.Core check failed: " + e.Message); }
@@ -465,6 +458,14 @@ public static class DependencyService
     }
 
     // ------------------------------------------------------------------ the other tools
+    /// <summary>The newest version winget offers for a package ("Version: 9.0.2" in "winget show"), or null.</summary>
+    private static async Task<string?> WingetLatest(string id)
+    {
+        var o = await RunWinget($"show --id {id} --exact", install: false);
+        var m = System.Text.RegularExpressions.Regex.Match(o, @"^\s*Vers\w*\s*:\s*(\S+)", System.Text.RegularExpressions.RegexOptions.Multiline);
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
     private static async Task<string?> LatestTag(string repo) =>
         (await Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{repo}/releases/latest"))?["tag_name"]?.ToString();
 
@@ -701,20 +702,13 @@ public static class DependencyService
             else if (File.Exists("/usr/bin/apt"))
             {
                 var upgradable = (await RunTool("/usr/bin/apt", "list --upgradable", 30000)).Split('\n');
-                var pkgs = new[] { "ffmpeg", "python3" }.Where(p => upgradable.Any(l => l.StartsWith(p + "/"))).ToList();
-                if (pkgs.Count > 0)
-                    list.Add(new(string.Join(" + ", pkgs), $"Newer versions are available. Run in a terminal:  sudo apt install --only-upgrade {string.Join(' ', pkgs)}", null));
+                foreach (var (name, pkg) in new[] { ("FFmpeg", "ffmpeg"), ("Python 3", "python3") })
+                    if (upgradable.Any(l => l.StartsWith(pkg + "/")))
+                        list.Add(new(name, $"A newer version is available. Run in a terminal:  sudo apt install --only-upgrade {pkg}", null));
             }
         }
         catch (Exception e) { AppPaths.Log("Package update check failed: " + e.Message); }
         return list;
     }
 
-    private static bool VersionsMatch(string installed, string latest)
-    {
-        static int[] Parts(string v) => v.Split('.', '-', ' ').Select(x => int.TryParse(x, out var n) ? n % 100 : -1).Where(n => n >= 0).Take(3).ToArray();
-        var a = Parts(installed);
-        var b = Parts(latest);
-        return a.Length >= 3 && b.Length >= 3 && !b.Zip(a).Select(t => t.First.CompareTo(t.Second)).SkipWhile(c => c == 0).Take(1).Any(c => c > 0);
-    }
 }
