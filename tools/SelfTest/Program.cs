@@ -2298,7 +2298,8 @@ if (tests.Contains("recheck"))
     MainForm? main = null;
     try
     {
-        s.PokeldnPath = fakeExe; s.PokeldnSetupDone = true; s.CheckUpdatesOnStart = true;
+        // like the real PC: pokeldn installed with "Install all missing", the wireless-trades setup never done
+        s.PokeldnPath = fakeExe; s.PokeldnSetupDone = false; s.CheckUpdatesOnStart = true;
         File.WriteAllText(marker, latest); // evening: the newest pokeldn is installed
 
         main = new MainForm { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };

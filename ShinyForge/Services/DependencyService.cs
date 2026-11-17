@@ -455,8 +455,9 @@ public static class DependencyService
             }
             catch (Exception e) { CheckFailed("PKHeX", e); }
 
-        // pokeldn (only once the wireless-trades feature was set up).
-        if (AppSettings.Current.PokeldnSetupDone && PokeldnService.FindApp() is { } pokeldn)
+        // pokeldn: whenever it's installed. (It used to wait for the wireless-trades setup, so a pokeldn installed with
+        // "Install all missing" showed "Installed" in Tools & Updates but was never checked.)
+        if (PokeldnService.FindApp() is { } pokeldn)
         {
             try
             {
@@ -655,11 +656,11 @@ public static class DependencyService
         return key?.GetValue("VersionToReport") as string;
     }
 
-    /// <summary>esptool (only once the ESP32-S3 / pokeldn feature was set up): asks the program itself for its version.</summary>
+    /// <summary>esptool (whenever it is installed): asks the program itself for its version.</summary>
     private static async Task<List<UpdateInfo>> CheckEsptool()
     {
         var list = new List<UpdateInfo>();
-        if (!AppSettings.Current.PokeldnSetupDone || PokeldnService.FindEsptool() is not { } exe) return list;
+        if (PokeldnService.FindEsptool() is not { } exe) return list; // whenever it's installed, setup done or not
         try
         {
             var installed = ParseVersion((await RunTool(exe, "version")).Split('\n').FirstOrDefault())?.ToString();
