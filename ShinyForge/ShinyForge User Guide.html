@@ -328,24 +328,38 @@
   <h2><span class="num">6</span> Hunt options</h2>
   <p>Open <b>Hunt options</b> from the Shiny Hunt card. The 3DS calls this <b>Stop rules</b>. Your choices are saved and given to the bot the next time it starts. If a hunt is already running, it uses the new options after you restart it (<b>Stop</b>, then <b>Start hunting</b>).</p>
 
+  <h3 id="stop-targets">Stop targets</h3>
+  <p>Each game has its own list of <b>stop targets</b>: "stop when THIS Pokémon shows up". Pick any Pokémon you can get in that game (type its name or number), then:</p>
+  <ul>
+    <li><b>Form</b>: any form, or one (Alolan, Galarian, an Unown letter...).</li>
+    <li><b>Gender</b>: any, male or female.</li>
+    <li><b>Shiny</b>: shiny or not, shiny only, not shiny; in Sword/Shield also star or square shiny.</li>
+  </ul>
+  <p>The list only offers Pokémon you can really get in that game (from PKHeX's game data; event gifts aren't counted, since a bot can't hunt them). If you ask for one that can't exist, ShinyForge says so and doesn't add it, e.g. a <b>male Chansey</b> (always female), a female Magnemite (genderless), or a shiny Zacian in Sword (shiny-locked). The bot still stops on <b>every</b> shiny on top of your targets.</p>
+  <ul>
+    <li><b>FireRed / LeafGreen (Python hunter)</b> and <b>3DS games</b>: all targets are checked. Open <b>Hunt options</b> / <b>Stop rules</b>.</li>
+    <li><b>SysBot.exe games</b> (Let's Go, Sword/Shield, BD/SP): <b>Stop targets</b> on the Shiny Hunt card. SysBot holds one target, so it uses the first in the list. Gender needs the <i>TargetGender</i> condition added to the self-built Sys-EncounterBot.</li>
+  </ul>
+
   <h3 id="stop-rules">Stop on more than shinies</h3>
   <p>The bot always stops on a shiny. It can also stop on any of these:</p>
   <ul>
-    <li><b>Species</b>: a comma-separated list, e.g. <code>Pikachu, Abra</code>.</li>
+    <li><b>Stop targets</b> (above).</li>
     <li><b>Natures</b>: tick the ones you want, e.g. Adamant or Timid.</li>
     <li><b>Minimum IV total</b> (out of 186), and/or <b>minimum IVs per stat</b>.</li>
     <li><b>Require all</b>: when ticked, every rule you set must match. When it's off, any one rule is enough.</li>
   </ul>
 
   <h3 id="auto-catch">Auto-catch <span class="badge off">off by default</span></h3>
-  <p>When it finds a shiny (or a stop-rule match), the bot can throw balls for you. It goes FIGHT → BAG → Poké Balls → your chosen slot.</p>
+  <p>When it finds a shiny (or a stop-rule match), the bot can throw balls for you (FireRed/LeafGreen Python hunter).</p>
   <ul>
     <li><b>Off</b>: the bot stops and leaves the battle to you.</li>
     <li><b>Non-legendary only</b> or <b>Everything</b>.</li>
-    <li><b>Ball slot</b>: the position in your Poké Balls pocket. Slot 1 is the top of the list.</li>
-    <li><b>Max balls</b>: stops trying after this many throws.</li>
+    <li><b>Ball to throw</b>: pick the ball by name (Master, Ultra, Great, Poké, Net, Nest, Repeat, Timer, Luxury, Premier, Dive, Safari).</li>
+    <li><b>Max balls</b>: stops trying after this many throws (or when that ball runs out).</li>
   </ul>
-  <div class="callout warn"><strong>Check your ball slot</strong>If a Master Ball is at the top of your Poké Balls pocket, slot 1 will throw it. After a successful catch, the bot stops and reminds you to <b>save the game yourself</b>. It never saves for you.</div>
+  <p>The hunter reads your Poké Balls pocket from the game to find where the ball is, then picks it in the battle bag one step at a time, checking every step on a screenshot. If a step doesn't work (a lost button press), it throws <b>nothing</b> and leaves the battle to you. If the ball isn't in your bag, it warns you when the hunt starts.</p>
+  <div class="callout warn"><strong>Save after a catch</strong>After a successful catch, the bot stops and reminds you to <b>save the game yourself</b>. It never saves during a hunt.</div>
 
   <h3 id="rng">Shiny RNG manipulation <span class="badge off">off by default</span></h3>
   <p>FireRed/LeafGreen on the Switch only. Instead of resetting over and over, the hunter reads the game's random number generator live and times its A press so the Pokémon <i>should</i> be shiny.</p>
@@ -581,7 +595,8 @@
 <!-- ============================================================ 15 -->
 <section id="tools">
   <h2><span class="num">16</span> Tools &amp; updates</h2>
-  <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, and where.</p>
+  <p><b>Tools &amp; Updates</b> lists every helper program, whether it was found, where, and <b>which version you have</b> (shown next to its name a moment after the window opens).</p>
+  <div class="callout warn"><strong>SysBot must be up to date</strong>Before a hunt or a tool starts (recording, sys-botbase, Pokémon Automation, PKHeX, wireless trades, the Checkpoint save reader), ShinyForge checks that SysBot.exe is on its latest release. If it isn't, it asks you to update first: <b>Yes</b> updates it (or, for a copy you built yourself, opens the download page to rebuild), <b>No</b> carries on this time, <b>Cancel</b> stops.</div>
   <ul>
     <li><b>Install</b> or <b>Install all missing</b> downloads programs from their official sources where that's allowed. PKHeX is only offered on Project Pokémon's site, so that page opens for you instead.</li>
     <li><b>Check for updates</b> compares your versions with the latest ones. It runs at every start too (turn that on or off in <b>Settings → Updates</b>). What it checks:
