@@ -133,6 +133,49 @@ public static class HuntService
     // ------------------------------------------------------------------ pause / remote / status
     public static string? BotDir => _lastPython?.BotDir ?? AppPaths.FindPythonBotFolder(AppSettings.Current.PythonBotFolder);
 
+    // ------------------------------------------------------------------ the hunter's display inside ShinyForge (Windows)
+    private const string ConsoleLog = "hunt_console.log", WaitingFlag = "hunt_waiting.flag", AnswerFile = "hunt_answer.txt", PreviewFile = "hunt_preview.jpg";
+
+    /// <summary>Goes up when a hunt starts a new log, so the Hunter output card starts over.</summary>
+    public static int ConsoleRun { get; private set; }
+    public static string? ConsoleLogPath => BotDir is { } d ? Path.Combine(d, ConsoleLog) : null;
+    public static string? PreviewPath => BotDir is { } d ? Path.Combine(d, PreviewFile) : null;
+
+    /// <summary>The hunter found something and waits for Keep hunting / Stop hunter.</summary>
+    public static bool IsWaitingForAnswer => BotDir is { } d && File.Exists(Path.Combine(d, WaitingFlag));
+
+    public static void AnswerHunter(bool keepHunting)
+    {
+        if (BotDir is { } d) File.WriteAllText(Path.Combine(d, AnswerFile), keepHunting ? "keep" : "stop");
+    }
+
+    /// <summary>A bot folder chosen in Settings can hold an older copy of the bot, which still needs its console to be answered.</summary>
+    private static bool ShowsOutputInApp(string botDir)
+    {
+        try { return File.ReadAllText(Path.Combine(botDir, "shinybot", "extras.py")).Contains("SHINYFORGE_EMBEDDED"); }
+        catch (IOException) { return false; }
+    }
+
+    private static void ClearHunterFiles(string botDir)
+    {
+        foreach (var name in new[] { WaitingFlag, AnswerFile, PreviewFile })
+            try { File.Delete(Path.Combine(botDir, name)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { AppPaths.Log($"Removing {name}: {e.Message}"); }
+    }
+
+    /// <summary>Each hunt gets a new log; the one before it is kept as hunt_console.previous.log.</summary>
+    private static void StartConsoleLog(string botDir, Game game)
+    {
+        var log = Path.Combine(botDir, ConsoleLog);
+        try
+        {
+            if (File.Exists(log)) File.Move(log, Path.Combine(botDir, "hunt_console.previous.log"), overwrite: true);
+            File.WriteAllText(log, $"==== {DateTime.Now:yyyy-MM-dd HH:mm:ss} Pokémon {game.Title} hunt started by ShinyForge ===={Environment.NewLine}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { AppPaths.Log("Starting the hunter's log: " + e.Message); }
+        ConsoleRun++;
+    }
+
     public static bool IsPaused => BotDir is { } d && File.Exists(Path.Combine(d, "pause.flag"));
 
     public static void SetPaused(bool paused)
@@ -260,13 +303,28 @@ public static class HuntService
                 PythonHunt.BeginErrorReadLine();
                 return;
             }
-            var psi = new ProcessStartInfo("cmd.exe", $"/c \"{bat}\"") { WorkingDirectory = botDir, UseShellExecute = true };
+            ProcessStartInfo psi;
+            if (ShowsOutputInApp(botDir))
+            {
+                // No window: the output goes to a file the Hunter output card shows. A file (not a pipe) keeps the hunt alive
+                // when ShinyForge closes or updates, and the card picks it up again afterwards.
+                ClearHunterFiles(botDir);
+                StartConsoleLog(botDir, game);
+                psi = new ProcessStartInfo("cmd.exe", $"/d /c python -u -m shinybot hunt >> {ConsoleLog} 2>&1")
+                {
+                    WorkingDirectory = botDir, UseShellExecute = false, CreateNoWindow = true,
+                };
+                psi.Environment["SHINYFORGE_EMBEDDED"] = "1";
+                psi.Environment["PYTHONUTF8"] = "1";          // the log is UTF-8 whatever the PC's language is
+                psi.Environment["PYTHONIOENCODING"] = "utf-8";
+            }
+            else psi = new ProcessStartInfo("cmd.exe", $"/c \"{bat}\"") { WorkingDirectory = botDir, UseShellExecute = true };
             var python = DependencyService.PathOf("Python 3");
             if (python != null && AppPaths.IsInBackupTools(python))
             {
                 // Python from the Backup Tools folder isn't on PATH: put it first so the bot's "python" finds it.
                 var dir = Path.GetDirectoryName(python)!;
-                psi.UseShellExecute = false; // needed to pass the environment (a console window still opens)
+                psi.UseShellExecute = false; // needed to pass the environment
                 psi.Environment["PATH"] = $"{dir};{Path.Combine(dir, "Scripts")};{Environment.GetEnvironmentVariable("PATH")}";
             }
             PythonHunt = Process.Start(psi);
@@ -308,8 +366,8 @@ public static class HuntService
 
     public static bool IsPythonHuntRunning() =>
         PythonProcesses().Any(p => CommandLineContains(p, "shinybot"))
-        // PythonHunt is the console window: it stays open on "Press any key" after the bot ended (to show why), so it only
-        // counts while the bot is still starting - it used to block every new start with "already running"
+        // PythonHunt is cmd.exe around the bot (an older bot's console stays open on "Press any key" after the bot ended), so it
+        // only counts while the bot is still starting - it used to block every new start with "already running"
         || (PythonHunt is { HasExited: false } && DateTime.Now - _startedAt < TimeSpan.FromSeconds(20));
 
     /// <summary>python / python3 / python3.12 ... processes.</summary>
@@ -322,13 +380,13 @@ public static class HuntService
     /// - shows the bot's own warnings (bot_warnings.log: same Pokémon repeating, reset not working...)
     /// - the same Pokémon logged 3x in a row in encounters.csv = stuck: restarts the hunt automatically
     /// - no new encounter for 5 minutes: checks the Switch is reachable (else asks for its new IP)
-    /// - the hunter window closed without Stop being pressed: tells the user (shiny found? error?)
+    /// - the hunter ended without Stop being pressed: tells the user (shiny found? error?)
     /// </summary>
     private static IEnumerable<HealthItem> CheckPythonHunt()
     {
         if (_lastPython is not { } h) yield break;
         const string F = "Python hunter";
-        // The bot itself (the console window stays open on "Press any key" after it ends, so don't look at cmd.exe).
+        // The bot itself (an older bot's console stays open on "Press any key" after it ends, so don't look at cmd.exe).
         var running = Process.GetProcessesByName("python").Any(p => CommandLineContains(p, "shinybot"));
 
         var warnLog = Path.Combine(h.BotDir, "bot_warnings.log");
@@ -348,14 +406,15 @@ public static class HuntService
 
         if (!running)
         {
+            ClearHunterFiles(h.BotDir); // nothing is left to answer the question or update the picture
             if (!_stopRequested && (DateTime.Now - _startedAt).TotalSeconds > 30)
             {
                 _stopRequested = true; // report once
                 // the bot's own last warning says why (e.g. "the save isn't loaded") - it used to be replaced by this generic text
                 yield return HealthMonitor.Warn(F, _lastBotWarning is { } why
                     ? $"The Python hunter has stopped: {why}"
-                    : "The Python hunter has stopped. If it found a shiny its window says so; " +
-                      "otherwise it stopped because of a problem (see its window) - start it again from the Shiny Hunt card.");
+                    : "The Python hunter has stopped. If it found a shiny, the Hunter output card says so; " +
+                      "otherwise it stopped because of a problem (see Hunter output) - start it again from the Shiny Hunt card.");
             }
             yield break;
         }
@@ -392,7 +451,7 @@ public static class HuntService
                     yield return HealthMonitor.Error(F, $"Can't reach the Switch at {s.SwitchIP} - its IP address may have changed.");
                 }
                 else
-                    yield return HealthMonitor.Warn(F, $"No new encounter for {(int)idle.TotalMinutes} minutes - check the hunter window and the game.");
+                    yield return HealthMonitor.Warn(F, $"No new encounter for {(int)idle.TotalMinutes} minutes - check Hunter output and the game.");
             }
         }
     }
@@ -436,6 +495,7 @@ public static class HuntService
         foreach (var p in PythonProcesses().Where(p => CommandLineContains(p, "shinybot")))
             try { p.Kill(entireProcessTree: true); } catch { }
         try { PythonHunt?.Kill(entireProcessTree: true); } catch { }
+        if (BotDir is { } d) ClearHunterFiles(d);
         MarkStopped();
     }
 

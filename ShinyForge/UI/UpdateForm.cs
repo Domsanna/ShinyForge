@@ -55,7 +55,7 @@ public sealed class UpdateForm : Form
         install.Click += async (_, _) =>
         {
             if (HuntService.IsPythonHuntRunning() &&
-                MessageBox.Show(this, "A hunt is running. Updating closes ShinyForge (the Python hunter keeps running in its own window). Continue?",
+                MessageBox.Show(this, "A hunt is running. Updating closes ShinyForge (the Python hunter keeps running, and its output is back on the game page afterwards). Continue?",
                     "ShinyForge update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             foreach (var b in new[] { install, skip, later }) b.Enabled = false;
             _bar.Visible = true;

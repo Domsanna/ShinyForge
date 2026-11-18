@@ -113,10 +113,10 @@ public static class ErrorDoctor
                     },
                     "Test the connection to the Switch", () => Task.Run(() => TestPort("Switch", s.SwitchIP, 6000)));
             if (m.Contains("has stopped"))
-                return new("The Python hunter closed (it crashed, found a shiny, or its window was closed).",
+                return new("The Python hunter closed (it crashed or found a shiny).",
                     new[]
                     {
-                        "If the hunter window says it found a shiny, it stopped on purpose - catch it!",
+                        "If Hunter output on the game page says it found a shiny, it stopped on purpose - catch it!",
                         "Otherwise, restart the hunt. If it keeps stopping, check that the game is in the right spot for the hunt.",
                     },
                     "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
@@ -131,14 +131,14 @@ public static class ErrorDoctor
                     "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
             if (m.Contains("No new encounter"))
                 return new("The hunt is running but no new Pokémon has been logged for a while - the game may be stuck on a menu.",
-                    new[] { "Look at the Switch screen and the hunter window.", "Restart the hunt if the game is stuck." },
+                    new[] { "Look at the Switch screen and Hunter output on the game page.", "Restart the hunt if the game is stuck." },
                     "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
             if (f.StartsWith("Collection tracker"))
                 return new("Live collection monitoring can't read the game from the Switch.",
                     new[] { "Make sure the Switch is on and sys-botbase runs, then check its IP address in Settings." },
                     "Test the connection to the Switch", () => Task.Run(() => TestPort("Switch", s.SwitchIP, 6000)));
             return new("The Python hunter reported something unusual.",
-                new[] { "Look at the hunter window for details; it usually fixes these itself and keeps going." });
+                new[] { "Look at Hunter output on the game page for details; it usually fixes these itself and keeps going." });
         }
 
         if (f.StartsWith("3DS hunt"))

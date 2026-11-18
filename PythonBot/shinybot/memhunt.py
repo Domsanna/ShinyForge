@@ -49,7 +49,8 @@ def load_recent_pids(n=500):
     return out
 
 
-from .extras import OVERRIDES, check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused, write_status
+from .extras import (OVERRIDES, ask_keep_hunting, check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused,
+                     write_status)
 from .memory import (BALL_NAMES, BATTLE_MENU, GBA_ANCHOR, IN_BATTLE, INITIAL_SEED, LEGENDARY_OR_MYTHICAL, ROAMERS, STATIC_SPOTS,
                      GameMemory, current_seed_offset)
 from . import rng
@@ -376,9 +377,8 @@ class MemoryHunter:
 
     def wait_for_user(self) -> bool:
         alert_shiny(self.cfg["on_shiny"].get("beep", True))
-        ans = input("\nType 'c' + Enter to keep hunting (static mode RESETS the game!), "
-                    "or just Enter to quit: ").strip().lower()
-        return ans == "c"
+        return ask_keep_hunting("\nType 'c' + Enter to keep hunting (static mode RESETS the game!), "
+                                "or just Enter to quit: ")
 
     # ---------------------------------------------------------------- modes
     def game_was_reset(self, timeout=4.0) -> bool:

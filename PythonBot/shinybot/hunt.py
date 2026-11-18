@@ -13,11 +13,29 @@ from .capture import make_source
 from .config import ROOT, STATS_PATH, load_calibration, load_ref, sprite_path
 from .controllers import make_controller
 from .detector import ShinyDetector, match_in_region
+from .extras import EMBEDDED, PREVIEW, ask_keep_hunting, remove_file
 
 
 class Preview:
     def __init__(self, enabled):
         self.enabled = enabled
+        self.next_publish = 0.0
+
+    def publish(self, view, force=False):
+        """Inside ShinyForge: the picture goes to a file its Hunter output card shows (4 times a second is plenty)."""
+        now = time.time()
+        if not force and now < self.next_publish:
+            return
+        self.next_publish = now + 0.25
+        ok, jpg = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            return
+        try:
+            tmp = PREVIEW.with_suffix(".tmp")
+            tmp.write_bytes(jpg.tobytes())
+            tmp.replace(PREVIEW)
+        except OSError:
+            pass  # ShinyForge is reading the last picture: the next one replaces it
 
     def show(self, img, status=""):
         if not self.enabled:
@@ -28,6 +46,9 @@ class Preview:
         if status:
             cv2.putText(view, status, (10, view.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
             cv2.putText(view, status, (10, view.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        if EMBEDDED:
+            self.publish(view, force=status.startswith("STOPPED"))
+            return
         cv2.imshow("Deoxys shiny bot (Ctrl+C in the console to stop)", view)
         cv2.waitKey(1)
 
@@ -272,9 +293,8 @@ class Hunter:
                     print("*" * 60)
                 self.preview.show(self.det.annotate(frame, r), "STOPPED - waiting for you")
                 alert_shiny(self.cfg["on_shiny"].get("beep", True))
-                ans = input("\nType 'c' + Enter to keep hunting (this RESETS the game!), "
-                            "or just Enter to quit: ").strip().lower()
-                if ans != "c":
+                if not ask_keep_hunting("\nType 'c' + Enter to keep hunting (this RESETS the game!), "
+                                        "or just Enter to quit: "):
                     break
         except KeyboardInterrupt:
             print("\nStopped by user.")
@@ -284,4 +304,7 @@ class Hunter:
                 self.memory.close()
             self.ctrl.close()
             self.src.close()
-            cv2.destroyAllWindows()
+            if EMBEDDED:
+                remove_file(PREVIEW)
+            else:
+                cv2.destroyAllWindows()

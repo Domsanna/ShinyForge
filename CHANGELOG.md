@@ -2,6 +2,11 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.8
+
+### Changed
+- **The Python hunter runs inside ShinyForge on Windows.** No console or preview window opens any more: the new **Hunter output** card on the FireRed / LeafGreen page shows its live output (and the picture it sees in vision mode). After a find, **Keep hunting** and **Stop hunter** buttons replace typing an answer. A hunt keeps running if ShinyForge closes, and its output comes back when ShinyForge opens again.
+
 ## 1.2.7
 
 Fixes from a live test of the Switch features on a real Switch (FireRed / LeafGreen).

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
 import urllib.request
@@ -21,6 +22,12 @@ from .config import ROOT
 OVERRIDES = ROOT / "shinyforge.json"
 PAUSE_FLAG = ROOT / "pause.flag"
 STATUS = ROOT / "bot_status.json"
+
+# Started by ShinyForge, which shows the bot's output on the game page: no console to type in, no OpenCV window.
+EMBEDDED = bool(os.environ.get("SHINYFORGE_EMBEDDED"))
+WAITING_FLAG = ROOT / "hunt_waiting.flag"  # the bot waits for the Keep hunting / Stop hunter buttons
+ANSWER = ROOT / "hunt_answer.txt"          # ShinyForge writes "keep" or "stop" here
+PREVIEW = ROOT / "hunt_preview.jpg"        # vision mode: the picture the bot sees
 
 
 def apply_overrides(cfg: dict) -> dict:
@@ -63,6 +70,34 @@ def wait_while_paused(on_pause=None):
         time.sleep(1)
     print("  Resumed.")
     return True
+
+
+def remove_file(path):
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def ask_keep_hunting(prompt: str) -> bool:
+    """After a find: True = keep hunting. Asked in the console, or with ShinyForge's buttons when it runs the bot."""
+    if not EMBEDDED:
+        return input(prompt).strip().lower() == "c"
+    remove_file(ANSWER)
+    WAITING_FLAG.write_text(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+    print("\nWaiting for you: press Keep hunting or Stop hunter in ShinyForge.")
+    try:
+        while True:
+            try:
+                answer = ANSWER.read_text(encoding="utf-8").strip().lower()
+            except OSError:
+                answer = ""
+            if answer:
+                return answer == "keep"
+            time.sleep(0.5)
+    finally:
+        remove_file(ANSWER)
+        remove_file(WAITING_FLAG)
 
 
 # ---------------------------------------------------------------------------- stop rules

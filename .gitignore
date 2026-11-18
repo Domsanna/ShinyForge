@@ -22,6 +22,12 @@ PythonBot/bot_status.json
 PythonBot/bot_warnings.log
 PythonBot/shinyforge.json
 PythonBot/pause.flag
+PythonBot/hunt_console.log
+PythonBot/hunt_console.previous.log
+PythonBot/hunt_waiting.flag
+PythonBot/hunt_answer.txt
+PythonBot/hunt_preview.jpg
+PythonBot/hunt_preview.tmp
 PythonBot/references/
 PythonBot/shinies/
 PythonBot/unknown/

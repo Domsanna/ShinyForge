@@ -50,19 +50,29 @@ public sealed class GamePage : UserControl
         Controls.Add(header);
         Controls.Add(info);
 
+        // the Python hunter (FireRed / LeafGreen) shows what it's doing right under the hunt controls
+        var hunterOutput = game.Bot == BotKind.FrlgSwitch;
         var grid = new TableLayoutPanel
         {
-            Location = new Point(18, 214), Size = new Size(1230, 1100), ColumnCount = 2, RowCount = 2, BackColor = Theme.Bg,
+            Location = new Point(18, 214), Size = new Size(1230, hunterOutput ? 1450 : 1100), ColumnCount = 2, RowCount = hunterOutput ? 3 : 2, BackColor = Theme.Bg,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
         };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 500));
+        if (hunterOutput) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 350));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 590));
         grid.Controls.Add(BuildHuntCard(), 0, 0);
         grid.Controls.Add(BuildRecordCard(), 1, 0);
-        grid.Controls.Add(BuildTrackerCard(), 0, 1);
-        grid.Controls.Add(BuildSaveCard(), 1, 1);
+        if (hunterOutput)
+        {
+            var output = BuildHunterOutputCard();
+            grid.Controls.Add(output, 0, 1);
+            grid.SetColumnSpan(output, 2);
+        }
+        var lastRow = hunterOutput ? 2 : 1;
+        grid.Controls.Add(BuildTrackerCard(), 0, lastRow);
+        grid.Controls.Add(BuildSaveCard(), 1, lastRow);
         Controls.Add(grid);
         Resize += (_, _) => grid.Width = Math.Max(900, ClientSize.Width - 40);
 
@@ -468,6 +478,16 @@ public sealed class GamePage : UserControl
         }
         _huntStatus = Info("", Theme.Good);
         card.Body.Controls.Add(_huntStatus);
+        return card;
+    }
+
+    private static Card BuildHunterOutputCard()
+    {
+        var card = new Card(Theme.GlyphInfo, "Hunter output") { Dock = DockStyle.Fill, Margin = new Padding(8) };
+        var output = new HuntConsolePanel { Margin = Padding.Empty };
+        card.Body.AutoScroll = false;
+        card.Body.Controls.Add(output);
+        card.Body.Resize += (_, _) => output.Size = card.Body.ClientSize;
         return card;
     }
 
@@ -1627,7 +1647,7 @@ public sealed class GamePage : UserControl
             AppSettings.Current.Save();
             HuntService.ResetAutoFixes();
             HuntService.Start(_game, key);
-            Status(key == "python" ? "Python hunter started in its own window." : "SysBot.exe opened with the routine pre-selected - press Start All there.");
+            Status(key == "python" ? "Python hunter started." : "SysBot.exe opened with the routine pre-selected - press Start All there.");
             if (key == "python" && HuntService.IsPythonHuntRunning()) StartClipBuffer();
         }
         catch (Exception ex) { MessageBox.Show(FindForm(), ex.Message, "Shiny Hunt", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
