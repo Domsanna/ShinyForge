@@ -32,6 +32,7 @@ public sealed class ShinyClipService
         if (ff == null || string.IsNullOrWhiteSpace(source)) { LastError = "no FFmpeg or capture source"; return; }
         _dir = Path.Combine(AppPaths.DataDir, "ClipBuffer", gameId);
         _outFolder = string.IsNullOrWhiteSpace(outFolder) ? DefaultFolder : outFolder;
+        StopLeftover(_dir);
         try { if (Directory.Exists(_dir)) Directory.Delete(_dir, true); } catch { }
         Directory.CreateDirectory(_dir);
         var seconds = Math.Clamp(AppSettings.Current.ShinyClipSeconds, 20, 300);
@@ -47,11 +48,35 @@ public sealed class ShinyClipService
             _ff = Process.Start(new ProcessStartInfo(ff, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true })!;
             _ff.ErrorDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) { LastError = e.Data; AppPaths.Log("clip buffer ffmpeg: " + e.Data); } };
             _ff.BeginErrorReadLine();
+            try { File.WriteAllText(Path.Combine(_dir, PidFile), _ff.Id.ToString()); } catch { }
             _wanted = true;
             LastError = null;
             AppPaths.Log($"Shiny clip buffer started ({seconds}s) from {source}");
         }
         catch (Exception e) { LastError = e.Message; }
+    }
+
+    private const string PidFile = "ffmpeg.pid";
+
+    /// <summary>
+    /// The buffer FFmpeg of an earlier ShinyForge that was closed without stopping it (killed, crashed) still writes into
+    /// <paramref name="dir"/>: stops exactly that process (its id is in the folder's ffmpeg.pid; checked to be an FFmpeg
+    /// started before the file was written, so a reused id is never touched).
+    /// </summary>
+    private static void StopLeftover(string dir)
+    {
+        var pidFile = Path.Combine(dir, PidFile);
+        try
+        {
+            if (!File.Exists(pidFile) || !int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid)) return;
+            using var p = Process.GetProcessById(pid);
+            if (!p.ProcessName.Equals("ffmpeg", StringComparison.OrdinalIgnoreCase) || p.StartTime > File.GetLastWriteTime(pidFile).AddSeconds(5)) return;
+            p.Kill();
+            p.WaitForExit(5000);
+            AppPaths.Log($"Stopped a leftover shiny-clip buffer FFmpeg (pid {pid})");
+        }
+        catch (ArgumentException) { } // already gone
+        catch (Exception e) { AppPaths.Log("Leftover clip buffer: " + e.Message); }
     }
 
     public void Stop()

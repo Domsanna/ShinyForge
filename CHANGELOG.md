@@ -2,6 +2,12 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.3.2
+
+### Fixed
+- **The shiny-clip buffer comes back after ShinyForge reopens.** A hunt keeps running while ShinyForge is closed, but its clip buffer used to stay off until a hunt was started again. Now the game page starts it again as soon as it sees the hunt running.
+- A clip-buffer FFmpeg left running by a ShinyForge that was closed without stopping it (crash, ended from Task Manager) is stopped before the new buffer starts, so two never write into the same buffer.
+
 ## 1.3.1
 
 ### Added

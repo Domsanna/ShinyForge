@@ -683,6 +683,8 @@ public sealed class GamePage : UserControl
             Ui(() => _huntStatus.Text = (running ? (HuntService.IsPaused ? "⏸ Python hunter is PAUSED" : "● Python hunter is running") : "") +
                                         (extras.Count > 0 ? $"{(running ? "  •  " : "")}{string.Join(", ", extras)}" : ""));
             if (!running && _clips.Running && !IsHunting3DS) Ui(() => _clips.Stop());
+            // a hunt that kept running while ShinyForge was closed gets its shiny-clip buffer back
+            if (running && !_clips.Running && _clips.Problem() == null) Ui(StartClipBuffer);
         });
     }
 
