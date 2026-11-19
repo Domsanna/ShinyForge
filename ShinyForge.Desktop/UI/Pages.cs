@@ -43,8 +43,9 @@ public sealed class GamesPage : UserControl
     {
         var root = new StackPanel { Margin = new Thickness(28, 18, 20, 30), Spacing = 4 };
         root.Children.Add(Skin.Title(isSwitch ? "Choose your Switch game" : "Choose your game"));
-        root.Children.Add(Skin.MutedText("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export."));
-        foreach (var grp in (isSwitch ? GameCatalog.ForSwitch : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel))
+        root.Children.Add(Skin.MutedText("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export" +
+                                         (isSwitch ? " (Pokémon HOME: Pokémon Automation only)." : ".")));
+        foreach (var grp in (isSwitch ? GameCatalog.SwitchTiles : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel))
         {
             var header = Skin.T(grp.Key.ToUpperInvariant(), 14, Skin.Gold, FontWeight.SemiBold);
             header.Margin = new Thickness(6, 22, 0, 4);

@@ -45,13 +45,20 @@ public sealed class GamePage : UserControl, IDisposable
         _gs = AppSettings.Current.For(game.Id);
         _healthKey = "game-" + game.Id;
 
-        var info = Skin.T($"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
-                           (HuntService.OptionsFor(game).Count > 0 || Games3DS.All.Any(p => p.ShinyForgeId == game.Id) ? "★ Automatic shiny hunting available.\n" : "") +
-                           "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date, back up every Pokémon " +
-                           "from your save into a 'Pokemon Home' folder and get a Game Info report.", 13, Skin.Muted);
+        var info = Skin.T(game.AutomationOnly
+                ? $"{game.PlatformLabel}\n\nSort your Pokémon HOME boxes automatically with Pokémon Automation's programs."
+                : $"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
+                  (HuntService.OptionsFor(game).Count > 0 || Games3DS.All.Any(p => p.ShinyForgeId == game.Id) ? "★ Automatic shiny hunting available.\n" : "") +
+                  "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date, back up every Pokémon " +
+                  "from your save into a 'Pokemon Home' folder and get a Game Info report.", 13, Skin.Muted);
         info.Margin = new Thickness(20, 24, 20, 0);
         info.MaxWidth = 640;
         var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 4, 0, 0), Children = { new GameTile(game, large: true), info } };
+        if (game.AutomationOnly)
+        {
+            Content = new ScrollViewer { Content = new StackPanel { Children = { header, BuildAutomationCard() } } };
+            return;
+        }
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), RowDefinitions = new RowDefinitions("500,610"), Margin = new Thickness(10, 6, 10, 20) };
         void Put(Control c, int col, int row) { Grid.SetColumn(c, col); Grid.SetRow(c, row); grid.Children.Add(c); }
@@ -137,6 +144,17 @@ public sealed class GamePage : UserControl, IDisposable
         card.Body.Children.Add(Skin.Wrap(sbb, pa));
     }
 
+    /// <summary>The whole page of an app like Pokémon HOME: only Pokémon Automation.</summary>
+    private Card BuildAutomationCard()
+    {
+        var card = new Card(Skin.GlyphPlay, "Pokémon Automation") { Margin = new Thickness(20, 12, 20, 20), MaxWidth = 600, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
+        card.Body.Children.Add(Info($"Programs for Pokémon HOME: {PokemonAutomation.ProgramsSummary(_game)}. Open Pokémon HOME on the Switch first."));
+        var pa = new FancyButton("Pokémon Automation", Skin.GlyphPlay, Skin.Accent);
+        pa.Click += async (_, _) => await PokemonAutomationMenu();
+        card.Body.Children.Add(Skin.Wrap(pa));
+        return card;
+    }
+
     /// <summary>Shows which sys-botbase the Switch runs and offers to install / update Pokémon Automation's sys-botbase-cpp.</summary>
     private async Task SysBotBaseMenu()
     {
@@ -205,7 +223,7 @@ public sealed class GamePage : UserControl, IDisposable
         var found = PokemonAutomation.Find() != null;
         var start = found ? "Start it + programs" : "Download + setup guide";
         var r = await Dialogs.Show(this,
-            "Pokémon Automation's Computer Control has tested programs for this game (shiny hunts, eggs, raids, saving...). It runs on an " +
+            $"Pokémon Automation's Computer Control has tested programs for this game ({PokemonAutomation.ProgramsSummary(_game)}). It runs on an " +
             "UNMODDED Switch through a microcontroller (e.g. an ESP32-S3 with their firmware - not at the same time as pokeldn) plus a capture " +
             "card, or on a modded Switch through sys-botbase. It's their program, for personal, non-profit use." +
             (found ? "" : "\n\nIt isn't on this computer yet: download it from their GitHub and unzip it (not into OneDrive)."),

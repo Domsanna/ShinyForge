@@ -42,13 +42,21 @@ public sealed class GamePage : UserControl
         var info = new Label
         {
             Location = new Point(560, 30), Size = new Size(640, 150), ForeColor = Theme.Muted, Font = Theme.Body, BackColor = Theme.Bg,
-            Text = $"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
-                   (game.Bot != BotKind.None ? "★ Automatic shiny hunting available.\n" : "") +
-                   "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date automatically, " +
-                   "back up every Pokémon from your save into a 'Pokemon Home' folder and get a Game Info report.",
+            Text = game.AutomationOnly
+                ? $"{game.PlatformLabel}\n\nSort your Pokémon HOME boxes automatically with Pokémon Automation's programs."
+                : $"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
+                  (game.Bot != BotKind.None ? "★ Automatic shiny hunting available.\n" : "") +
+                  "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date automatically, " +
+                  "back up every Pokémon from your save into a 'Pokemon Home' folder and get a Game Info report.",
         };
         Controls.Add(header);
         Controls.Add(info);
+        _healthKey = "game-" + game.Id;
+        if (game.AutomationOnly)
+        {
+            Controls.Add(BuildAutomationCard());
+            return;
+        }
 
         // the Python hunter (FireRed / LeafGreen) shows what it's doing right under the hunt controls
         var hunterOutput = game.Bot == BotKind.FrlgSwitch;
@@ -83,7 +91,6 @@ public sealed class GamePage : UserControl
             Ui(() => _autoMonitor.Checked = true);
 
         // Safety checks for this game's features, run every minute by the HealthMonitor.
-        _healthKey = "game-" + game.Id;
         HealthMonitor.Register(_healthKey, CheckHealth);
         if (game.Bot == BotKind.FrlgSwitch) HuntService.Found += OnFound;
         Disposed += (_, _) =>
@@ -246,6 +253,17 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(sbb, pa));
     }
 
+    /// <summary>The whole page of an app like Pokémon HOME: only Pokémon Automation.</summary>
+    private Card BuildAutomationCard()
+    {
+        var card = new Card(Theme.GlyphPlay, "Pokémon Automation") { Location = new Point(26, 222), Size = new Size(600, 210), Margin = new Padding(8) };
+        card.Body.Controls.Add(Info($"Programs for Pokémon HOME: {PokemonAutomation.ProgramsSummary(_game)}. Open Pokémon HOME on the Switch first."));
+        var pa = new FancyButton("Pokémon Automation", Theme.GlyphPlay, Theme.Accent);
+        pa.Click += async (_, _) => { if (await SysBotCurrent()) PokemonAutomationMenu(); };
+        card.Body.Controls.Add(Row(pa));
+        return card;
+    }
+
     /// <summary>Shows what runs on the Switch and offers: install / update sys-botbase-cpp, switch WiFi ↔ USB.</summary>
     private async Task SysBotBaseMenu()
     {
@@ -362,7 +380,7 @@ public sealed class GamePage : UserControl
     {
         var found = PokemonAutomation.Find() != null;
         var r = MessageBox.Show(FindForm(),
-            "Pokémon Automation's Computer Control has tested programs for this game (shiny hunts, eggs, raids, saving...). It runs on an " +
+            $"Pokémon Automation's Computer Control has tested programs for this game ({PokemonAutomation.ProgramsSummary(_game)}). It runs on an " +
             "UNMODDED Switch through a microcontroller - e.g. your ESP32-S3 with their firmware (it can't run pokeldn at the same time) - " +
             "plus the capture card, or on this modded Switch through sys-botbase. It's their program, for personal, non-profit use.\n\n" +
             (found ? "Yes = start Computer Control and show this game's programs\nNo = only show this game's programs"

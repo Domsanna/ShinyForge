@@ -18,8 +18,11 @@ public enum BotKind
 public sealed record Game(
     string Id, string Title, Platform Platform, int Gen, ushort Mascot,
     Color Color1, Color Color2, string Spreadsheet, GameVersion[] Versions,
-    BotKind Bot = BotKind.None, string[]? SwitchTitleIds = null)
+    BotKind Bot = BotKind.None, string[]? SwitchTitleIds = null, bool AutomationOnly = false)
 {
+    /// <summary>The console + generation line on the game's tile (an app like Pokémon HOME has no generation).</summary>
+    public string Badge => AutomationOnly ? PlatformLabel.ToUpperInvariant() : $"{PlatformLabel.ToUpperInvariant()}  •  GEN {Gen}";
+
     public string PlatformLabel => Platform switch
     {
         Platform.GB => "Game Boy",
@@ -94,6 +97,14 @@ public static class GameCatalog
     /// <summary>Games offered after choosing "Nintendo 3DS": everything from Game Boy up to 3DS.</summary>
     public static IEnumerable<Game> ForHandheld => All.Where(g => !g.IsSwitch);
     public static IEnumerable<Game> ForSwitch => All.Where(g => g.IsSwitch);
+
+    /// <summary>
+    /// Pokémon HOME: only Pokémon Automation's programs. Not in <see cref="All"/>, which is the games with saves, Pokédexes and trackers.
+    /// </summary>
+    public static readonly Game Home = new("sw_home", "HOME", Platform.Switch, 0, 151, C("#14B8A6"), C("#0B3B4A"), "", Array.Empty<GameVersion>(), AutomationOnly: true);
+
+    /// <summary>The tiles on the Switch page: every Switch game, then Pokémon HOME.</summary>
+    public static IEnumerable<Game> SwitchTiles => ForSwitch.Append(Home);
 
     public static Game Get(string id) => All.First(g => g.Id == id);
 }

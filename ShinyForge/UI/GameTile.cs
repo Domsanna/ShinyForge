@@ -115,7 +115,7 @@ public sealed class GameTile : Control
         }
 
         // Badge: console + generation
-        var badge = $"{Game.PlatformLabel.ToUpperInvariant()}  •  GEN {Game.Gen}";
+        var badge = Game.Badge;
         using var bf = new Font("Segoe UI Semibold", Large ? 9f : 7.5f);
         var bs = g.MeasureString(badge, bf);
         var br = new RectangleF(r.Left + 14, r.Top + 12, bs.Width + 14, bs.Height + 4);

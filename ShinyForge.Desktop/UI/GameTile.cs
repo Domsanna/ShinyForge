@@ -114,7 +114,7 @@ public sealed class GameTile : Control
         else DrawLogoText(g, textArea, c1);
 
         // badge: console + generation
-        var badge = Text($"{Game.PlatformLabel.ToUpperInvariant()}  •  GEN {Game.Gen}", Semi, Large ? 12 : 10, Brushes.White);
+        var badge = Text(Game.Badge, Semi, Large ? 12 : 10, Brushes.White);
         var br = new Rect(r.Left + 14, r.Top + 12, badge.Width + 14, badge.Height + 4);
         g.DrawRectangle(Skin.B(120, Colors.Black), null, br, br.Height / 2, br.Height / 2);
         g.DrawText(badge, new Point(br.Left + 7, br.Top + 2));

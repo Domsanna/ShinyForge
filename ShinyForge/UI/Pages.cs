@@ -118,11 +118,12 @@ public sealed class GamesPage : UserControl
         BackColor = Theme.Bg;
         Dock = DockStyle.Fill;
         _title = Theme.Label(isSwitch ? "Choose your Switch game" : "Choose your game", Theme.Title);
-        _sub = Theme.Label("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export.",
+        _sub = Theme.Label("Tiles marked BOT have an automatic shiny-hunting bot. Every game supports recording, collection tracking and save export" +
+                           (isSwitch ? " (Pokémon HOME: Pokémon Automation only)." : "."),
             Theme.Body, Theme.Muted);
         _content.Controls.Add(_title);
         _content.Controls.Add(_sub);
-        foreach (var grp in (isSwitch ? GameCatalog.ForSwitch : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel))
+        foreach (var grp in (isSwitch ? GameCatalog.SwitchTiles : GameCatalog.ForHandheld).GroupBy(g => g.PlatformLabel))
         {
             var header = Theme.Label(grp.Key.ToUpperInvariant(), new Font("Segoe UI Semibold", 11f), Theme.Gold);
             var tiles = new FlowLayoutPanel { AutoSize = false, WrapContents = true, BackColor = Theme.Bg, Margin = Padding.Empty, Padding = Padding.Empty };

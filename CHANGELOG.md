@@ -2,6 +2,11 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.2.9
+
+### Added
+- **Pokémon HOME on the Switch page.** A new tile after the Switch games opens a page with only **Pokémon Automation**, which starts Computer Control and shows its Pokémon HOME programs (Box Sorter, Box Sorter Living Dex and Page Swap).
+
 ## 1.2.8
 
 ### Changed

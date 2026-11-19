@@ -20,6 +20,7 @@ public static class PokemonAutomation
     /// <summary>Its program list for this game (or the general Switch programs).</summary>
     public static string ProgramsUrl(Game game) => Site + "Programs/index.html#" + (game.Id switch
     {
+        "sw_home" => "pokemon-home",
         "sw_lgp" or "sw_lge" => "pokemon-lets-go-pikachueevee-lgpe",
         "sw_sword" or "sw_shield" => "pokemon-swordshield",
         "sw_bd" or "sw_sp" => "pokemon-brilliant-diamondshining-pearl",
@@ -29,6 +30,10 @@ public static class PokemonAutomation
         "sw_frlg_fr" or "sw_frlg_lg" => "pokemon-firered-and-leafgreen-nintendo-switch",
         _ => "general-nintendo-switch-programs",
     });
+
+    /// <summary>What its programs do for this game, for the question before it's started.</summary>
+    public static string ProgramsSummary(Game game) =>
+        game.AutomationOnly ? "Box Sorter, Box Sorter Living Dex, Page Swap" : "shiny hunts, eggs, raids, saving...";
 
     /// <summary>
     /// SerialPrograms-Windows.cmd: the path in Settings, the Backup Tools folder, or the NEWEST "PA-SerialPrograms-*" folder in
