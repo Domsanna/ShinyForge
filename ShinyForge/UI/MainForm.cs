@@ -83,6 +83,7 @@ public sealed class MainForm : Form
 
         Controls.Add(_content);
         Controls.Add(_banner);
+        _banner.Resize += (_, _) => _bannerLayout?.Invoke();
         Controls.Add(footer);
         Controls.Add(header);
 
@@ -387,26 +388,35 @@ public sealed class MainForm : Form
         var icon = Theme.Label(Theme.GlyphWarn, Theme.Icons, Theme.Warn);
         icon.Location = new Point(16, 11);
         var label = Theme.Label(text, Theme.Body, Theme.Text, autoSize: false);
-        label.Location = new Point(46, 12);
-        label.Size = new Size(Math.Max(200, _banner.Width - 420), 22);
         label.AutoEllipsis = true;
-        label.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        var review = new FancyButton(health ? "Details" : "Review", health ? Theme.GlyphInfo : Theme.GlyphTools, Theme.Accent) { Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        review.Location = new Point(_banner.Width - review.Width - 50, 6);
+        var review = new FancyButton(health ? "Details" : "Review", health ? Theme.GlyphInfo : Theme.GlyphTools, Theme.Accent) { Height = 32 };
         review.Click += (_, _) =>
         {
             if (health) { using var h = new HealthForm(); h.ShowDialog(this); UpdateHealthLabel(); return; }
             using var f = new ToolsForm(_isSwitch); f.ShowDialog(this);
         };
-        var installAll = new FancyButton("Install all", Theme.GlyphDownload, Theme.PanelHi) { Height = 32, Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        installAll.Location = new Point(review.Left - installAll.Width - 10, 6);
+        var installAll = new FancyButton("Install all", Theme.GlyphDownload, Theme.PanelHi) { Height = 32 };
         installAll.Click += (_, _) => ToolsForm.InstallAll(this, _isSwitch, everything: false);
         installAll.Visible = !health && DependencyService.All.Any(d => d.State == DepState.Missing && d.Wanted);
         var close = Theme.Label("✕", Theme.H2, Theme.Muted);
         close.Cursor = Cursors.Hand;
-        close.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        close.Location = new Point(_banner.Width - 34, 10);
         close.Click += (_, _) => _banner.Height = 0;
-        _banner.Controls.AddRange(new Control[] { icon, label, installAll, review, close });
+        // Buttons first = on top of the text. Positions come from the banner's CURRENT width on every resize: the hourly
+        // check can show the banner while the window is hidden in the tray (width ~0), and fixed positions + anchors then
+        // stretched the text over the Review button once the window came back.
+        _banner.Controls.AddRange(new Control[] { close, review, installAll, icon, label });
+        _bannerLayout = () =>
+        {
+            int w = _banner.ClientSize.Width;
+            int bh = _banner.Height > 0 ? _banner.Height : 44;
+            close.Location = new Point(w - close.Width - 14, (bh - close.Height) / 2);
+            review.Location = new Point(close.Left - review.Width - 14, (bh - review.Height) / 2);
+            installAll.Location = new Point(review.Left - installAll.Width - 10, review.Top);
+            int textRight = (installAll.Visible ? installAll.Left : review.Left) - 12;
+            label.Bounds = new Rectangle(46, (bh - 22) / 2, Math.Max(0, textRight - 46), 22);
+        };
+        _bannerLayout();
     }
+
+    private Action? _bannerLayout;
 }

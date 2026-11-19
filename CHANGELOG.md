@@ -2,6 +2,11 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.3.3
+
+### Fixed
+- **The update banner no longer covers its Review button.** When the hourly update check showed the banner while ShinyForge was hidden in the tray, the message stretched over the Review button once the window came back. The banner now lays itself out again whenever its size changes, and its buttons always stay on top.
+
 ## 1.3.2
 
 ### Fixed
