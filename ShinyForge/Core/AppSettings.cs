@@ -11,8 +11,8 @@ public sealed class GameSettings
     public int SegmentMinutes { get; set; } = 10;
     public string VideoSource { get; set; } = "";
     public string AudioDevice { get; set; } = "";
-    /// <summary>Console frame drawn around the recording (ConsoleFrames key, "" = none).</summary>
-    public string Overlay { get; set; } = "";
+    /// <summary>Console frame drawn around the recording: "auto" (or "") = the game's console, "none", or a ConsoleFrames key.</summary>
+    public string Overlay { get; set; } = "auto";
     /// <summary>3DS Capture windows: cut off the black border around DS / Game Boy pictures.</summary>
     public bool CropToGame { get; set; } = true;
     public string SpreadsheetPath { get; set; } = "";  // auto-detected if empty

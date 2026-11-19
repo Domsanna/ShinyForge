@@ -502,10 +502,16 @@ public sealed class GamePage : UserControl, IDisposable
         card.Body.Children.Add(sourceRow);
         card.Body.Children.Add(audioRow);
         var frames = ConsoleFrames.For(_game.Platform).ToList();
-        _overlayKeys = frames.Select(f => f.Key).ToList();
-        var overlayNames = new List<string> { "No frame" };
-        overlayNames.AddRange(frames.Select(f => f.Label + " frame" + (ConsoleFrames.Exists(f) ? "" : " (picture missing)")));
-        _overlay = Skin.Combo(overlayNames, overlayNames[frames.FindIndex(f => f.Key == _gs.Overlay) + 1], 420);
+        // automatically the game's console (Switch games: Switch 1 or Switch 2 from the capture card)
+        string FrameName(ConsoleFrame f) => f.Label + " frame" + (ConsoleFrames.Exists(f) ? "" : " (picture missing)");
+        _overlayKeys = new List<string> { ConsoleFrames.Auto };
+        _overlayKeys.AddRange(frames.Select(f => f.Key));
+        _overlayKeys.Add(ConsoleFrames.None);
+        var overlayNames = new List<string> { _game.IsSwitch ? "Automatic: Switch 1 or Switch 2 frame (from the capture card)"
+            : "Automatic: " + (ConsoleFrames.Pick(ConsoleFrames.Auto, _game.Platform, "") is { } auto ? FrameName(auto) : "no frame") };
+        overlayNames.AddRange(frames.Select(FrameName));
+        overlayNames.Add("No frame");
+        _overlay = Skin.Combo(overlayNames, overlayNames[Math.Max(0, _overlayKeys.IndexOf(_gs.Overlay))], 420);
         card.Body.Children.Add(Skin.Row(Skin.T("Frame", 13, Skin.Text, wrap: false), _overlay));
         _crop = new CheckBox { Content = "Cut the black border around DS / Game Boy pictures", IsChecked = _gs.CropToGame };
         if (!_game.IsSwitch && _game.Platform != Platform.N3DS) card.Body.Children.Add(_crop);
@@ -541,7 +547,7 @@ public sealed class GamePage : UserControl, IDisposable
             var sources = new List<string>();
             if (OsInfo.IsWindows && !_game.IsSwitch) sources.Add(RecordingService.HasTwoScreens(_game.Platform) ? RecordingService.Both3DS : RecordingService.Top3DS);
             sources.AddRange(OsInfo.IsWindows ? video.Select(v => RecordingService.DevicePrefix + v) : video);
-            if (OsInfo.IsWindows && _game.IsSwitch) sources.Add(RecordingService.WindowPrefix + "Streamlabs Desktop");
+            if (OsInfo.IsWindows && _game.IsSwitch) sources.Add(RecordingService.StreamlabsWindow);
             if (sources.Count == 0) sources.Add("(no capture device found - install FFmpeg and plug in the capture card)");
             var def = !string.IsNullOrEmpty(_gs.VideoSource) && sources.Contains(_gs.VideoSource) ? _gs.VideoSource
                 : sources.FirstOrDefault(s => s.Contains("Capture", StringComparison.OrdinalIgnoreCase) && !s.Contains("screen", StringComparison.OrdinalIgnoreCase)) ?? sources[0];
@@ -566,7 +572,7 @@ public sealed class GamePage : UserControl, IDisposable
     /// <summary>What the Record card is set to: source, sound, console frame.</summary>
     private RecordingService.CaptureSpec CaptureSpec(string source)
     {
-        var overlay = _overlay == null ? _gs.Overlay : _overlay.SelectedIndex > 0 ? _overlayKeys[_overlay.SelectedIndex - 1] : ConsoleFrames.None;
+        var overlay = _overlay == null ? _gs.Overlay : _overlayKeys[Math.Max(0, _overlay.SelectedIndex)];
         return new RecordingService.CaptureSpec(source, Sel(_audio) ?? RecordingService.NoAudio, _game.Platform, overlay, _crop?.IsChecked ?? _gs.CropToGame);
     }
 
@@ -642,9 +648,7 @@ public sealed class GamePage : UserControl, IDisposable
             if (await Dialogs.PickFolder(this, "Choose the folder for the recordings (files are numbered automatically)", _recFolder.Text) is not { } f) return;
             _recFolder.Text = f;
         }
-        _recButton.IsEnabled = false;
-        try { if (!await EnsureGameForRecording()) return; }
-        finally { _recButton.IsEnabled = true; }
+        // Recording is the user's own: it never checks, opens or presses anything on the console (hunts do that).
         var source = Sel(_source) ?? "";
         if (source.Contains("3DS Capture")) { await Launch3DSCapture(); await Task.Delay(1500); }
         else if (source.StartsWith(RecordingService.DevicePrefix))
@@ -1234,32 +1238,6 @@ public sealed class GamePage : UserControl, IDisposable
             (_game.Bot == BotKind.FrlgSwitch ? "" : " - then get into the game where the bot should start") + "\n" +
             "No = start the hunt anyway", "Shiny Hunt");
         return r == Dialogs.No || (r == Dialogs.Yes && await OpenGameOnSwitch(Status));
-    }
-
-    /// <summary>
-    /// Before recording a Switch game: is this game the one on the Switch's screen? Nothing / the FTP app open → it's opened.
-    /// Running but behind the HOME menu → brought back. Another game open:
-    ///   - a Pokémon game ShinyForge can save → asks "save it first?" (Yes = save + close, No = close), then opens this one,
-    ///   - a Pokémon game it can't save → the user saves it, then ShinyForge closes it,
-    ///   - any other game → the user saves and closes it themselves (ShinyForge never closes games it doesn't know).
-    /// Switch not reachable (no IP, offline) → record anyway. False = don't record.
-    /// </summary>
-    private async Task<bool> EnsureGameForRecording()
-    {
-        var s = AppSettings.Current;
-        if (SwitchGameLauncher.TitleIds(_game).Length == 0 || string.IsNullOrWhiteSpace(s.SwitchIP) || HuntService.IsPythonHuntRunning()) return true;
-        Status("Checking which game is on the Switch...");
-        (string? TitleId, bool Homebrew) running;
-        try { running = await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort)); }
-        catch (Exception ex) { Status("Couldn't reach the Switch - recording without checking the game."); AppPaths.Log("Recording: Switch check failed: " + ex.Message); return true; }
-        var mode = SwitchGameLauncher.OtherGame.Refuse;
-        if (running.TitleId is { } id && !running.Homebrew && !SwitchGameLauncher.TitleIds(_game).Contains(id))
-        {
-            var how = await AskAboutOtherGame(id, $"start Pokémon {_game.Title} and record", "Record Gameplay");
-            if (how == null) return false;
-            mode = how.Value;
-        }
-        return await OpenGameOnSwitch(Status, mode);
     }
 
     /// <summary>

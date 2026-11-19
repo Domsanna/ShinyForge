@@ -141,6 +141,9 @@ public sealed class RecordingService
     /// <summary>The sound 3DS Capture plays (it receives the 3DS audio over the USB cable and plays it on the speakers).</summary>
     public const string AppAudio3DS = "3DS Capture sound (from the USB cable)";
     public const string Capture3DSProcess = "3ds_capture";
+    /// <summary>Recording Streamlabs Desktop's window (Switch games): Streamlabs shows the console scene with its own frame.</summary>
+    public const string StreamlabsWindow = WindowPrefix + "Streamlabs Desktop";
+    public static bool IsStreamlabs(string source) => source.StartsWith(StreamlabsWindow);
 
     /// <summary>Everything that decides what a recording looks and sounds like.</summary>
     public sealed record CaptureSpec(string Source, string Audio, Platform Platform = Platform.Switch, string Overlay = "", bool CropToGame = true);
@@ -219,7 +222,8 @@ public sealed class RecordingService
             return $"[{idx}:v]" + (crop != null ? crop + "," : "");
         }
 
-        var frame = ConsoleFrames.Get(s.Overlay);
+        // the console the game belongs to; Streamlabs' window already shows its own console scene, so no second frame
+        var frame = IsStreamlabs(s.Source) ? null : ConsoleFrames.Pick(s.Overlay, s.Platform, s.Source);
         string graph, what;
         if (frame != null && ConsoleFrames.Exists(frame))
         {
@@ -262,7 +266,10 @@ public sealed class RecordingService
             what = "one screen";
         }
         if (frame != null && !ConsoleFrames.Exists(frame))
+        {
             AppPaths.Log($"Console frame {ConsoleFrames.PathOf(frame)} not found - recording without it");
+            what += $", NO {frame.Label} frame ({frame.File} missing in {ConsoleFrames.Folder})";
+        }
         var args = $"{string.Join(" ", inputs)} -filter_complex \"{graph}\" -map \"[v]\" {audioMap}".Trim();
         return new CaptureCommand(args, hasAudio, appAudio, what + (hasAudio ? $", sound: {s.Audio}" : ", no sound"));
     }
@@ -317,8 +324,8 @@ public sealed class RecordingService
         var dev = source.StartsWith(DevicePrefix) ? source[DevicePrefix.Length..] : source;
         return audios.FirstOrDefault(a => a == dev + " Audio")
             ?? audios.FirstOrDefault(a => dev.Length > 0 && a.StartsWith(dev, StringComparison.OrdinalIgnoreCase))
+            ?? (dev.Contains("USB Video") ? audios.FirstOrDefault(a => a.Contains("USB Digital Audio")) : null)   // Switch 2 card (MS2109)
             ?? audios.FirstOrDefault(a => a.Contains("Capture", StringComparison.OrdinalIgnoreCase) && a.EndsWith("Audio"))
-            ?? (dev.Contains("USB Video") ? audios.FirstOrDefault(a => a.Contains("USB Digital Audio")) : null)
             ?? NoAudio;
     }
 
@@ -350,6 +357,7 @@ public sealed class RecordingService
         int start = NextNumber(folder);
 
         var cmd = BuildCapture(spec, bigBuffers: true);
+        LastError = null;
         _appAudio?.Dispose();
         _appAudio = cmd.AppAudio;
         _appAudio?.Start();
@@ -375,7 +383,10 @@ public sealed class RecordingService
             if (e.Data.Contains("Opening '"))
                 Status?.Invoke("Writing " + Path.GetFileName(Regex.Match(e.Data, "'([^']+)'").Groups[1].Value));
             else if (e.Data.Contains("Error", StringComparison.OrdinalIgnoreCase) || e.Data.Contains("Could not", StringComparison.OrdinalIgnoreCase))
-                Status?.Invoke(e.Data.Trim());
+            {
+                LastError = e.Data.Trim();
+                Status?.Invoke(LastError);
+            }
             AppPaths.Log("ffmpeg: " + e.Data);
         };
         _ffmpeg.BeginErrorReadLine();
@@ -388,9 +399,24 @@ public sealed class RecordingService
 
     private ProcessAudioCapture? _appAudio;
 
+    /// <summary>The last error line FFmpeg printed in this recording (null = none).</summary>
+    public string? LastError { get; private set; }
+
+    /// <summary>
+    /// A few seconds after Start: is the recording really being written? (ffmpeg alive and the newest file growing past 0 bytes.)
+    /// Returns that file, or null with <see cref="LastError"/> telling why.
+    /// </summary>
+    public FileInfo? WrittenFile()
+    {
+        if (_last is not { } l || !Directory.Exists(l.Folder)) return null;
+        var newest = new DirectoryInfo(l.Folder).EnumerateFiles("Recording_*.mp4").OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
+        return IsRecording && newest is { Length: > 0 } && (DateTime.Now - newest.LastWriteTime).TotalSeconds < 30 ? newest : null;
+    }
+
     // ------------------------------------------------------------------ health check (used by HealthMonitor)
     private (CaptureSpec Spec, string Folder, int Minutes, int Seconds)? _last;
     private bool _wanted;          // the user wants a recording running (Start called, Stop not)
+    public bool Wanted => _wanted;
     private int _restarts;
     private long _lastSize = -1;
     private DateTime _lastGrowth = DateTime.Now;

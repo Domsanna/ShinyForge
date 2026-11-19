@@ -393,20 +393,15 @@
         <li>Switch games (Gen 8–9, Let's Go and the Switch FireRed/LeafGreen): your capture card (e.g. "Game Capture") or the Streamlabs Desktop window.</li>
       </ul></li>
     <li><b>Audio</b> is picked for you: 3DS games record the sound 3DS Capture plays (it arrives over the USB cable), Switch games the capture card's own audio device. You can still choose another device or <i>no audio</i>.</li>
-    <li><b>Frame</b>: puts the recording inside a picture of the console (Game Boy, Game Boy Color, Game Boy Advance, DS, 3DS; Switch games can use the Switch 1 or Switch 2 picture) so it looks like a real console. The game picture is fitted exactly into the console's screen(s). The PNGs live in <code>Desktop\Console Frames</code> (change the folder in Settings); a <code>screen_positions.json</code> there tells ShinyForge where each screen is.</li>
+    <li><b>Frame</b>: puts the recording (and shiny clips) inside a picture of the console so it looks like a real console. <b>Automatic</b> (the default) always uses the console the game belongs to: Game Boy, Game Boy Color, Game Boy Advance, DS or 3DS, and for Switch games the Switch 2 picture when the video comes from the Switch 2 capture card ("USB Video") and the Switch 1 picture otherwise. You can also pick a frame yourself or choose <b>No frame</b>. The game picture is fitted exactly into the console's screen(s). If you record the <b>Streamlabs Desktop</b> window instead, ShinyForge opens Streamlabs, switches it to the console's scene (made with the <b>Streamlabs scenes</b> button) and adds no second frame. The PNGs live in <code>Desktop\Console Frames</code> (change the folder in Settings); a <code>screen_positions.json</code> there tells ShinyForge where each screen is.</li>
     <li><b>Cut the black border</b> (DS and Game Boy games): 3DS Capture shows these games with black bars inside the 3DS screen; this keeps only the game picture.</li>
     <li>3DS Capture's screen windows must not be minimized (a minimized window shows nothing). ShinyForge brings them back by itself when a recording starts.</li>
     <li><b>Streamlabs scenes</b>: with Streamlabs Desktop open (ShinyForge offers to start it), this button makes one scene per console — Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, 3DS, Switch 1 and Switch 2 — with the game fitted into the console picture, the same way as the recordings. Scenes that already have a console's name are updated instead of copied, your existing capture sources are reused, and the Switch capture devices are chosen in the window. With Dual Output, the vertical canvas is laid out too.</li>
     <li><b>Segment length</b>: 5–30 minutes per file.</li>
     <li><b>Folder</b>: where the files go. A new recording carries on the numbering.</li>
     <li>On 3DS game pages, <b>Open 3DS Capture</b> launches the capture program.</li>
-    <li><b>Switch games: the right game first.</b> Before a Switch recording starts, ShinyForge checks which game runs on the Switch (over WiFi, if you set the Switch's IP). If nothing or the FTP app is open, it starts your game. If your game is waiting behind the HOME menu, it brings it back. If another game is open:
-      <ul>
-        <li><b>FireRed / LeafGreen</b>: ShinyForge asks whether to save it first. <i>Yes</i> saves it in the game (START → SAVE), closes it and starts your game. <i>No</i> closes it without saving.</li>
-        <li><b>Other Pokémon games</b>: save it yourself, press OK, and ShinyForge closes it and starts your game.</li>
-        <li><b>Any other game</b>: save and close it yourself (HOME, X, Close), then press OK. ShinyForge never closes a game it doesn't know.</li>
-      </ul>
-      If the Switch can't be reached, the recording starts without the check.</li>
+    <li><b>You stay in control.</b> Recording never touches your console: it doesn't open, close or press anything in the game. You play, ShinyForge records.</li>
+    <li><b>Start recording</b> opens Streamlabs Desktop (if it isn't open yet) and switches it to the game's console scene, then records. A few seconds later the card shows the file being written (<i>● Recording into Recording_0001.mp4</i>). If nothing is written, ShinyForge stops and tells you why.</li>
   </ul>
   <h3>Shiny clips <span class="badge on">on by default</span></h3>
   <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code> (a stop target that isn't shiny: <code>Found_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>). The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>

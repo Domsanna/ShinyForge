@@ -2,6 +2,17 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.3.0
+
+### Changed
+- **Recording is yours alone.** Start recording no longer checks, opens or loads the game on the Switch (it used to press A through the title screen, which could start a new game). It never controls the console; it only records.
+- **Start recording opens Streamlabs Desktop** (if it isn't open) and switches it to the game's console scene, then records. A few seconds in, the Record card confirms the file is being written; if nothing is written, the recording stops and says why.
+- **Recordings use the right console frame automatically.** The Record card's Frame now starts on **Automatic**, which uses the console the selected game belongs to (Game Boy, Game Boy Color, Game Boy Advance, DS, 3DS, Switch 1 or Switch 2), with the game fitted exactly into the console's screen(s). Switch games get the Switch 2 frame from the Switch 2 capture card ("USB Video") and the Switch 1 frame otherwise. Shiny clips get the same frame. A saved frame from another console is replaced by the right one, and a missing frame picture is named in the recording status.
+- **Recording the Streamlabs window** adds no second frame on top of Streamlabs' own console scene.
+
+### Fixed
+- Choosing the Switch 2 capture card ("USB Video") now picks its own sound ("USB Digital Audio") instead of the Switch 1 card's.
+
 ## 1.2.9
 
 ### Added

@@ -729,7 +729,7 @@ public sealed class GamePage : UserControl
             sources.Add(RecordingService.HasTwoScreens(_game.Platform) ? RecordingService.Both3DS : RecordingService.Top3DS);
         sources.AddRange(video.Select(v => RecordingService.DevicePrefix + v));
         if (_game.IsSwitch)
-            sources.Add(RecordingService.WindowPrefix + "Streamlabs Desktop");
+            sources.Add(RecordingService.StreamlabsWindow);
         var defaultSource = sources.Contains(_gs.VideoSource) ? _gs.VideoSource
             : sources.FirstOrDefault(s => _game.IsSwitch ? s.Contains("Game Capture") : s.StartsWith(RecordingService.WindowPrefix + "3DS Capture")) ?? sources.FirstOrDefault();
         _source = Combo(420, sources, defaultSource);
@@ -743,13 +743,16 @@ public sealed class GamePage : UserControl
         _source.SelectedIndexChanged += (_, _) => _audio.SelectedItem = RecordingService.DefaultAudio(_source.SelectedItem as string ?? "", audios);
         _segments = Combo(120, new[] { "5", "10", "15", "20", "30" }, _gs.SegmentMinutes.ToString());
 
-        // console frame around the recording (Switch games: Switch 1 or Switch 2)
+        // console frame around the recording: automatically the game's console (Switch games: Switch 1 or Switch 2 from the capture card)
         var frames = ConsoleFrames.For(_game.Platform).ToList();
-        var overlayNames = new List<string> { "No frame" };
-        overlayNames.AddRange(frames.Select(f => f.Label + " frame" + (ConsoleFrames.Exists(f) ? "" : " (picture missing)")));
-        var current = frames.FindIndex(f => f.Key == _gs.Overlay);
-        _overlay = Combo(420, overlayNames, overlayNames[current + 1]);
-        _overlayKeys = frames.Select(f => f.Key).ToList();
+        _overlayKeys = new List<string> { ConsoleFrames.Auto };
+        _overlayKeys.AddRange(frames.Select(f => f.Key));
+        _overlayKeys.Add(ConsoleFrames.None);
+        var overlayNames = new List<string> { AutoFrameName(defaultSource ?? "") };
+        overlayNames.AddRange(frames.Select(FrameName));
+        overlayNames.Add("No frame");
+        _overlay = Combo(420, overlayNames, overlayNames[Math.Max(0, _overlayKeys.IndexOf(_gs.Overlay))]);
+        _source.SelectedIndexChanged += (_, _) => _overlay.Items[0] = AutoFrameName(_source.SelectedItem as string ?? "");
         _crop = new CheckBox { Text = "Cut the black border around DS / Game Boy pictures", Checked = _gs.CropToGame, AutoSize = true, ForeColor = Theme.Text, Visible = !_game.IsSwitch && _game.Platform != Platform.N3DS };
 
         _recFolder = new TextBox { Width = 330, Text = _gs.RecordingFolder };
@@ -761,7 +764,7 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(Theme.Label("Audio   ", Theme.Body, Theme.Text), _audio));
         card.Body.Controls.Add(Row(Theme.Label("Frame   ", Theme.Body, Theme.Text), _overlay));
         if (_crop.Visible) card.Body.Controls.Add(Row(_crop));
-        card.Body.Controls.Add(Info(frames.Any(ConsoleFrames.Exists) ? "The game picture is fitted exactly into the console's screen(s)."
+        card.Body.Controls.Add(Info(frames.Any(ConsoleFrames.Exists) ? "The game picture is fitted exactly into the console's screen(s), in recordings and shiny clips."
             : $"Console frame pictures go in {ConsoleFrames.Folder} (Settings can point somewhere else).", Theme.Muted));
         card.Body.Controls.Add(Row(Theme.Label("Segment length (minutes)  ", Theme.Body, Theme.Text), _segments));
         card.Body.Controls.Add(Row(Theme.Label("Folder  ", Theme.Body, Theme.Text), _recFolder, browse));
@@ -793,10 +796,75 @@ public sealed class GamePage : UserControl
         return card;
     }
 
+    private static string FrameName(ConsoleFrame f) => f.Label + " frame" + (ConsoleFrames.Exists(f) ? "" : " (picture missing)");
+
+    /// <summary>The "Automatic" choice, with the frame it means for this game and video source.</summary>
+    private string AutoFrameName(string source)
+    {
+        var f = ConsoleFrames.Pick(ConsoleFrames.Auto, _game.Platform, source);
+        if (RecordingService.IsStreamlabs(source)) return $"Automatic: Streamlabs' {(f?.Label ?? "console")} scene";
+        return f == null ? "Automatic" : "Automatic: " + FrameName(f);
+    }
+
+    /// <summary>
+    /// Start recording: opens Streamlabs Desktop (if it isn't open) and shows the scene of the game's console. ShinyForge's
+    /// own recording carries the console frame itself, so a missing scene only matters when the Streamlabs window is what's
+    /// recorded. Never touches the console or the game. False = the user cancelled.
+    /// </summary>
+    private async Task<bool> PrepareStreamlabs(RecordingService.CaptureSpec spec)
+    {
+        bool recordsStreamlabs = RecordingService.IsStreamlabs(spec.Source);
+        var exe = DependencyService.PathOf("Streamlabs Desktop");
+        if (!StreamlabsService.IsOpen && exe != null)
+        {
+            _recStatus.Text = "Opening Streamlabs Desktop...";
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
+            for (int i = 0; i < 90 && !StreamlabsService.IsOpen; i++) await Task.Delay(1000);
+            if (StreamlabsService.IsOpen) await Task.Delay(3000); // its scenes finish loading after the API pipe appears
+        }
+        var frame = ConsoleFrames.Pick(spec.Overlay, spec.Platform, spec.Source);
+        string? scene = null;
+        if (StreamlabsService.IsOpen && frame != null)
+            try { scene = await Task.Run(() => { using var sl = StreamlabsService.Connect(); return sl.ShowConsoleScene(frame.Key); }); }
+            catch (Exception e) { AppPaths.Log("Streamlabs scene: " + e.Message); }
+        _streamlabsNote = scene != null ? $"Streamlabs shows the {scene} scene."
+            : !StreamlabsService.IsOpen ? "Streamlabs Desktop didn't open."
+            : frame == null ? "" : $"Streamlabs has no {frame.Label} scene (\"Streamlabs scenes\" button makes it).";
+        if (scene != null || !recordsStreamlabs) return true;
+        return MessageBox.Show(FindForm(), _streamlabsNote + " The Streamlabs window is the video source, so the recording won't have the console frame.\n\nRecord anyway?",
+            "Record Gameplay", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+    }
+
+    private string _streamlabsNote = "";
+
+    /// <summary>After Start: checks the file is really being written and says so (or why not) on the Record card.</summary>
+    private async Task ConfirmRecording()
+    {
+        FileInfo? file = null;
+        for (int i = 0; i < 20 && file == null && _recorder.IsRecording; i++)
+        {
+            await Task.Delay(1000);
+            file = _recorder.WrittenFile();
+        }
+        if (file != null)
+        {
+            _recStatus.Text = $"● Recording into {file.Name} ({file.Length / 1024:N0} KB so far). {_streamlabsNote}".Trim();
+            return;
+        }
+        if (!_recorder.Wanted) return; // the user pressed Stop meanwhile
+        _recorder.Stop();
+        _recButton.Text = "Start recording";
+        _recButton.Invalidate();
+        var why = _recorder.LastError ?? "FFmpeg didn't write any video.";
+        _recStatus.Text = "Not recording: " + why;
+        MessageBox.Show(FindForm(), "The recording didn't start:\n\n" + why + "\n\nCheck that the capture card is plugged in and the console is on, " +
+            "then press Start recording again. (ShinyForge's log has FFmpeg's full output.)", "Record Gameplay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
     /// <summary>What the Record card is set to: source, sound, console frame.</summary>
     private RecordingService.CaptureSpec CaptureSpec(string? source = null)
     {
-        var overlay = _overlay?.SelectedIndex > 0 ? _overlayKeys[_overlay.SelectedIndex - 1] : _overlay == null ? _gs.Overlay : ConsoleFrames.None;
+        var overlay = _overlay == null ? _gs.Overlay : _overlayKeys[Math.Max(0, _overlay.SelectedIndex)];
         return new RecordingService.CaptureSpec(source ?? _source?.SelectedItem as string ?? _gs.VideoSource,
             _audio?.SelectedItem as string ?? RecordingService.NoAudio, _game.Platform, overlay, _crop?.Checked ?? _gs.CropToGame);
     }
@@ -867,7 +935,7 @@ public sealed class GamePage : UserControl
             _recButton.Invalidate();
             return;
         }
-        if (!await SysBotCurrent()) return;
+        // Recording is the user's own: it never checks, opens or presses anything on the console (hunts do that).
         if (!EnsureDependency("FFmpeg")) return;
         if (_game.IsSwitch && !EnsureDependency("Streamlabs Desktop")) return;
         if (string.IsNullOrWhiteSpace(_recFolder.Text) || !Directory.Exists(_recFolder.Text))
@@ -876,9 +944,6 @@ public sealed class GamePage : UserControl
             if (f == null) return;
             _recFolder.Text = f;
         }
-        _recButton.Enabled = false;
-        try { if (!await EnsureGameForRecording()) return; }
-        finally { _recButton.Enabled = true; }
         var source = _source.SelectedItem as string ?? "";
         if (source.Contains("3DS Capture"))
         {
@@ -899,11 +964,15 @@ public sealed class GamePage : UserControl
         _gs.Overlay = spec.Overlay;
         _gs.CropToGame = spec.CropToGame;
         AppSettings.Current.Save();
+        _recButton.Enabled = false;
+        try { if (!await PrepareStreamlabs(spec)) return; }
+        finally { _recButton.Enabled = true; }
         try
         {
             _recorder.Start(spec, _gs.RecordingFolder, _gs.SegmentMinutes);
             _recButton.Text = "Stop recording";
             _recButton.Invalidate();
+            _ = ConfirmRecording();
         }
         catch (Exception ex) { MessageBox.Show(FindForm(), ex.Message, "Recording", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
@@ -1567,32 +1636,6 @@ public sealed class GamePage : UserControl
             "No = start the hunt anyway",
             "Shiny Hunt", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
         return r == DialogResult.No || (r == DialogResult.Yes && await OpenGameOnSwitch(Status));
-    }
-
-    /// <summary>
-    /// Before recording a Switch game: is this game the one on the Switch's screen? Nothing / the FTP app open → it's opened.
-    /// Running but behind the HOME menu → brought back. Another game open:
-    ///   - a Pokémon game ShinyForge can save → asks "save it first?" (Yes = save + close, No = close), then opens this one,
-    ///   - a Pokémon game it can't save → the user saves it, then ShinyForge closes it,
-    ///   - any other game → the user saves and closes it themselves (ShinyForge never closes games it doesn't know).
-    /// Switch not reachable (no IP, offline) → record anyway. False = don't record.
-    /// </summary>
-    private async Task<bool> EnsureGameForRecording()
-    {
-        var s = AppSettings.Current;
-        if (SwitchGameLauncher.TitleIds(_game).Length == 0 || string.IsNullOrWhiteSpace(s.SwitchIP) || HuntService.IsPythonHuntRunning()) return true;
-        Status("Checking which game is on the Switch...");
-        (string? TitleId, bool Homebrew) running;
-        try { running = await Task.Run(() => SwitchGameLauncher.Running(s.SwitchIP, s.SwitchPort)); }
-        catch (Exception ex) { Status("Couldn't reach the Switch - recording without checking the game."); AppPaths.Log("Recording: Switch check failed: " + ex.Message); return true; }
-        var mode = SwitchGameLauncher.OtherGame.Refuse;
-        if (running.TitleId is { } id && !running.Homebrew && !SwitchGameLauncher.TitleIds(_game).Contains(id))
-        {
-            var how = await AskAboutOtherGame(id, $"start Pokémon {_game.Title} and record", "Record Gameplay");
-            if (how == null) return false;
-            mode = how.Value;
-        }
-        return await OpenGameOnSwitch(Status, mode);
     }
 
     /// <summary>

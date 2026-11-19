@@ -15,7 +15,10 @@ public sealed record ConsoleFrame(string Key, string Label, string File, int Wid
 /// </summary>
 public static class ConsoleFrames
 {
-    public const string None = "";
+    /// <summary>The frame of the game's own console (Switch games: Switch 1 or Switch 2 from the capture card). Also what "" means.</summary>
+    public const string Auto = "auto";
+    /// <summary>No frame.</summary>
+    public const string None = "none";
 
     private static readonly ConsoleFrame[] BuiltIn =
     {
@@ -58,6 +61,22 @@ public static class ConsoleFrames
     }
 
     public static ConsoleFrame? Get(string key) => string.IsNullOrEmpty(key) ? null : All.FirstOrDefault(f => f.Key == key);
+
+    /// <summary>
+    /// The frame a recording of a <paramref name="platform"/> game from <paramref name="source"/> gets for the user's choice:
+    /// "auto" / "" (and any frame of another console) = the game's own console; Switch games use the Switch 2 frame when the
+    /// capture device is the Switch 2's ("USB Video", MS2109 card), otherwise the Switch 1 frame. Null = no frame.
+    /// </summary>
+    public static ConsoleFrame? Pick(string choice, Platform platform, string source)
+    {
+        if (choice == None) return null;
+        var suits = For(platform).ToList();
+        if (suits.FirstOrDefault(f => f.Key == choice) is { } chosen) return chosen;
+        if (platform is Platform.GB or Platform.GBC or Platform.GBA or Platform.NDS or Platform.N3DS) return suits.FirstOrDefault();
+        bool switch2 = source.Contains("USB Video", StringComparison.OrdinalIgnoreCase) || source.Contains("MS2109", StringComparison.OrdinalIgnoreCase)
+                       || source.Contains("Switch 2", StringComparison.OrdinalIgnoreCase);
+        return Get(switch2 ? "switch2" : "switch1");
+    }
 
     public static string PathOf(ConsoleFrame f) => Path.Combine(Folder, f.File);
 

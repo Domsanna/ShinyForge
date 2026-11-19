@@ -80,6 +80,21 @@ public sealed class StreamlabsService : IDisposable
     };
 
     /// <summary>
+    /// Shows the console scene for a frame key ("switch1", "gba", ...) in Streamlabs. Returns the scene's name, or null when
+    /// that scene doesn't exist yet ("Streamlabs scenes" button makes it).
+    /// </summary>
+    public string? ShowConsoleScene(string frameKey)
+    {
+        if (Scenes.FirstOrDefault(c => c.FrameKey == frameKey) is not { } c) return null;
+        var names = new[] { c.Name }.Concat(c.Aliases).ToArray();
+        var scene = Call("ScenesService", "getScenes")!.AsArray().Select(n => n!)
+            .FirstOrDefault(s => names.Any(n => string.Equals(((string?)s["name"])?.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+        if (scene == null) return null;
+        Call("ScenesService", "makeSceneActive", (string)scene["id"]!);
+        return (string?)scene["name"];
+    }
+
+    /// <summary>
     /// Creates / updates the console scenes. <paramref name="switch1Device"/> / <paramref name="switch2Device"/>: the capture
     /// device (DirectShow name) for each Switch, or null to skip that scene when it doesn't exist yet. Returns a report.
     /// </summary>

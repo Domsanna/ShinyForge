@@ -164,6 +164,41 @@ if (tests.Contains("record"))
     Check(RecordingService.NextNumber(dir) == files.Count + 1, "next recording continues the numbering");
 }
 
+if (tests.Contains("framedcard"))
+{
+    // real capture card, Switch game, automatic frame: a few seconds, then one picture of the result
+    var (video, _) = RecordingService.ListDevices();
+    var card = video.FirstOrDefault(v => v.Contains("Game Capture")) ?? video.FirstOrDefault();
+    Check(card != null, "capture card found: " + card);
+    if (StreamlabsService.IsOpen)
+    {
+        // Streamlabs open at the same time (it shows the same card in its Switch 1 scene)
+        using var sl = StreamlabsService.Connect();
+        var scene = sl.ShowConsoleScene("switch1");
+        Check(scene != null, "Streamlabs switched to its Switch 1 scene: " + scene);
+    }
+    if (card != null)
+    {
+        var rec = new RecordingService();
+        var dir = Path.Combine(work, "framedcard");
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        rec.Status += s => Console.WriteLine("   rec: " + s);
+        rec.Start(new RecordingService.CaptureSpec(RecordingService.DevicePrefix + card, RecordingService.NoAudio, Platform.Switch, ConsoleFrames.Auto), dir, 1, 60);
+        Thread.Sleep(8000);
+        rec.Stop();
+        var file = Directory.EnumerateFiles(dir, "Recording_*.mp4").FirstOrDefault();
+        Check(file != null, "recording written: " + file);
+        if (file != null)
+        {
+            var png = Path.Combine(dir, "still.png");
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(RecordingService.FindFfmpeg()!, $"-hide_banner -loglevel error -y -ss 3 -i \"{file}\" -frames:v 1 \"{png}\"") { UseShellExecute = false, CreateNoWindow = true })!;
+            p.WaitForExit();
+            using var bmp = new System.Drawing.Bitmap(png);
+            Check(bmp.Width == 1920 && bmp.Height == 818, $"recording is the Switch frame's size ({bmp.Width}x{bmp.Height}): {png}");
+        }
+    }
+}
+
 if (tests.Contains("frames"))
 {
     // every console frame: the screens are replaced by solid red test inputs; the red must fill each hole exactly
@@ -175,8 +210,23 @@ if (tests.Contains("frames"))
         (Platform.GB, RecordingService.Top3DS, "gb"), (Platform.GBC, RecordingService.Top3DS, "gbc"), (Platform.GBA, RecordingService.Top3DS, "gba"),
         (Platform.NDS, RecordingService.Both3DS, "nds"), (Platform.N3DS, RecordingService.Both3DS, "3ds"),
         (Platform.Switch, RecordingService.DevicePrefix + "Test card", "switch1"), (Platform.Switch, RecordingService.DevicePrefix + "Test card", "switch2"),
-        (Platform.N3DS, RecordingService.Both3DS, ""), (Platform.NDS, RecordingService.Both3DS, ""),
+        (Platform.N3DS, RecordingService.Both3DS, "none"), (Platform.NDS, RecordingService.Both3DS, "none"),
+        // automatic: the game's console; a frame of another console is replaced by the right one
+        (Platform.GB, RecordingService.Top3DS, "auto"), (Platform.GBC, RecordingService.Top3DS, ""), (Platform.GBA, RecordingService.Top3DS, "switch1"),
+        (Platform.NDS, RecordingService.Both3DS, "auto"), (Platform.N3DS, RecordingService.Both3DS, "gba"),
+        (Platform.Switch, RecordingService.DevicePrefix + "Game Capture 4K60 Pro MK.2", "auto"), (Platform.Switch, RecordingService.DevicePrefix + "USB Video", "auto"),
     };
+    var expectedKey = new Dictionary<string, string> { ["GB_auto"] = "gb", ["GBC_"] = "gbc", ["GBA_switch1"] = "gba", ["NDS_auto"] = "nds", ["N3DS_gba"] = "3ds" };
+    Check(ConsoleFrames.Pick("auto", Platform.Switch, RecordingService.DevicePrefix + "Game Capture 4K60 Pro MK.2")?.Key == "switch1", "auto frame: Switch game on the Game Capture card -> Switch 1");
+    Check(ConsoleFrames.Pick("auto", Platform.Switch, RecordingService.DevicePrefix + "USB Video")?.Key == "switch2", "auto frame: Switch game on the USB Video (MS2109) card -> Switch 2");
+    Check(ConsoleFrames.Pick("switch2", Platform.Switch, RecordingService.DevicePrefix + "Game Capture 4K60 Pro MK.2")?.Key == "switch2", "chosen Switch 2 frame is kept");
+    Check(RecordingService.BuildCapture(new RecordingService.CaptureSpec(RecordingService.StreamlabsWindow, RecordingService.NoAudio, Platform.Switch, "auto"), false).Description.StartsWith("one screen"),
+        "Streamlabs window: no second frame on top of Streamlabs' own scene");
+    foreach (var (k, v) in expectedKey)
+    {
+        var parts = k.Split('_');
+        Check(ConsoleFrames.Pick(parts[1], Enum.Parse<Platform>(parts[0]), "")?.Key == v, $"auto frame: {parts[0]} game with choice '{parts[1]}' -> {v}");
+    }
     foreach (var (p, source, overlay) in cases)
         foreach (var pattern in new[] { "color=c=red", "testsrc2=rate=30" })
         {
@@ -184,15 +234,16 @@ if (tests.Contains("frames"))
             var args2 = System.Text.RegularExpressions.Regex.Replace(cmd.Args, "-f gdigrab .*?-i title=\"3DS Capture - (Top|Bottom)\"",
                 m => $"-f lavfi -i {pattern}:s={(m.Groups[1].Value == "Top" ? "400x240" : "320x240")}:r=30");
             args2 = System.Text.RegularExpressions.Regex.Replace(args2, "-f dshow .*?-i video=\"[^\"]+\"", $"-f lavfi -i {pattern}:s=1920x1080:r=30");
-            var name = $"{p}_{(overlay == "" ? "noframe" : overlay)}_{(pattern.StartsWith("color") ? "red" : "pattern")}.png";
+            var frameOf = ConsoleFrames.Pick(overlay, p, source);
+            var name = $"{p}_{(overlay == "" ? "blank" : overlay)}_{source.Split(' ').Last()}_{(pattern.StartsWith("color") ? "red" : "pattern")}.png";
             var outPng = Path.Combine(dir, name);
             using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ff, $"-hide_banner -loglevel error -y {args2} -frames:v 1 \"{outPng}\"")
             { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true })!;
             var err = proc.StandardError.ReadToEnd();
             proc.WaitForExit();
             if (!File.Exists(outPng)) { Check(false, $"{name}: ffmpeg failed: {err.Trim()}"); continue; }
-            if (!pattern.StartsWith("color") || overlay == "") { if (overlay == "") Check(true, $"{name} rendered ({cmd.Description})"); continue; }
-            var frame = ConsoleFrames.Get(overlay)!;
+            if (!pattern.StartsWith("color") || frameOf == null) { if (frameOf == null) Check(true, $"{name} rendered ({cmd.Description})"); continue; }
+            var frame = frameOf;
             using var bmp = new System.Drawing.Bitmap(outPng);
             double sx = (double)bmp.Width / frame.Width, sy = (double)bmp.Height / frame.Height;
             bool Red(int x, int y) { var c = bmp.GetPixel(x, y); return c.R > 180 && c.G < 90 && c.B < 90; }
