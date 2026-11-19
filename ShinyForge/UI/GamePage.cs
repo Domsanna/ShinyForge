@@ -723,6 +723,7 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Info("Records continuously, split into numbered files with no gap between them.", Theme.Muted));
 
         var (video, audio) = RecordingService.ListDevices();
+        _videoDevices = video;
         var sources = new List<string>();
         if (!_game.IsSwitch)
             // DS / 3DS games (Gen 4-7): both screens stacked; Game Boy games only have the top screen
@@ -765,7 +766,7 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(Theme.Label("Frame   ", Theme.Body, Theme.Text), _overlay));
         if (_crop.Visible) card.Body.Controls.Add(Row(_crop));
         card.Body.Controls.Add(Info(frames.Any(ConsoleFrames.Exists) ? "The game picture is fitted exactly into the console's screen(s), in recordings and shiny clips."
-            : $"Console frame pictures go in {ConsoleFrames.Folder} (Settings can point somewhere else).", Theme.Muted));
+            : $"The console frame pictures are downloaded from ShinyForge's GitHub page into {ConsoleFrames.Folder} when you start recording.", Theme.Muted));
         card.Body.Controls.Add(Row(Theme.Label("Segment length (minutes)  ", Theme.Body, Theme.Text), _segments));
         card.Body.Controls.Add(Row(Theme.Label("Folder  ", Theme.Body, Theme.Text), _recFolder, browse));
 
@@ -825,7 +826,20 @@ public sealed class GamePage : UserControl
         var frame = ConsoleFrames.Pick(spec.Overlay, spec.Platform, spec.Source);
         string? scene = null;
         if (StreamlabsService.IsOpen && frame != null)
-            try { scene = await Task.Run(() => { using var sl = StreamlabsService.Connect(); return sl.ShowConsoleScene(frame.Key); }); }
+            try
+            {
+                scene = await Task.Run(() =>
+                {
+                    using var sl = StreamlabsService.Connect();
+                    if (sl.ShowConsoleScene(frame.Key) is { } shown) return shown;
+                    // no scene for this console yet: make the console scenes (frames fitted and checked), then show it
+                    if (!ConsoleFrames.Exists(frame)) return null;
+                    Ui(() => _recStatus.Text = $"Making the Streamlabs {frame.Label} scene and checking it fits...");
+                    var (d1, d2) = StreamlabsService.GuessDevices(_videoDevices);
+                    AppPaths.Log("Streamlabs scenes (automatic): " + string.Join(" | ", sl.SetUpAndVerify(d1, d2)));
+                    return sl.ShowConsoleScene(frame.Key);
+                });
+            }
             catch (Exception e) { AppPaths.Log("Streamlabs scene: " + e.Message); }
         _streamlabsNote = scene != null ? $"Streamlabs shows the {scene} scene."
             : !StreamlabsService.IsOpen ? "Streamlabs Desktop didn't open."
@@ -836,6 +850,7 @@ public sealed class GamePage : UserControl
     }
 
     private string _streamlabsNote = "";
+    private IReadOnlyList<string> _videoDevices = Array.Empty<string>();
 
     /// <summary>After Start: checks the file is really being written and says so (or why not) on the Record card.</summary>
     private async Task ConfirmRecording()
@@ -965,7 +980,14 @@ public sealed class GamePage : UserControl
         _gs.CropToGame = spec.CropToGame;
         AppSettings.Current.Save();
         _recButton.Enabled = false;
-        try { if (!await PrepareStreamlabs(spec)) return; }
+        try
+        {
+            // a missing console picture is downloaded first, so the recording (and Streamlabs) get their frame
+            if (ConsoleFrames.Pick(spec.Overlay, spec.Platform, spec.Source) is { } want && !ConsoleFrames.Exists(want))
+                try { await FramesDownloadService.EnsureAsync(s => Ui(() => _recStatus.Text = s)); }
+                catch (Exception e) { AppPaths.Log("Console frames download: " + e.Message); _recStatus.Text = "Couldn't download the console frame pictures: " + e.Message; }
+            if (!await PrepareStreamlabs(spec)) return;
+        }
         finally { _recButton.Enabled = true; }
         try
         {
@@ -1043,11 +1065,70 @@ public sealed class GamePage : UserControl
         card.Body.Controls.Add(Row(sync, _autoMonitor));
         card.Body.Controls.Add(Info("Marks 'In Box', 'OT' (caught by you) and 'Shiny' as Y for every Pokémon in your party and boxes. " +
                                     "Only N → Y changes are made; your own marks are never removed.", Theme.Muted));
+        _resetTracker = new FancyButton("Start over (reset tracker)", Theme.GlyphWarn, Color.FromArgb(150, 45, 55));
+        _resetTracker.Click += async (_, _) => await ResetTracker();
+        card.Body.Controls.Add(Row(_resetTracker));
         _trackLog = new TextBox { Multiline = true, ReadOnly = true, Width = 520, Height = 120, ScrollBars = ScrollBars.Vertical, Font = Theme.Mono };
         Theme.StyleInput(_trackLog);
         _trackLog.Font = Theme.Mono;
         card.Body.Controls.Add(_trackLog);
         return card;
+    }
+
+    private FancyButton _resetTracker = null!;
+
+    /// <summary>
+    /// Starting the game over: stops monitoring, forgets the save chosen for the tracker and sets every 'In Box', 'OT' and
+    /// 'Shiny' mark in the game's tracker spreadsheet(s) back to N - after a backup copy of each (Backups window restores it).
+    /// </summary>
+    private async Task ResetTracker()
+    {
+        if (_syncing) { Log("A sync is running - try again when it's done."); return; }
+        var books = SpreadsheetService.AllWorkbooks(_game);
+        var what = books.Count == 0 ? "(no tracker spreadsheet found for this game - only the tracking settings are reset)"
+            : "set every 'In Box', 'OT' and 'Shiny' mark back to N in:\n" + string.Join("\n", books.Select(b => "      " + b));
+        if (MessageBox.Show(FindForm(),
+                $"Start over on Pokémon {_game.Title}?\n\nThis will:\n" +
+                "  • turn off automatic monitoring for this game\n" +
+                "  • forget the save file chosen for the tracker (the newest save is picked automatically again)\n" +
+                $"  • {what}\n\n" +
+                "A backup copy of each spreadsheet is made first (Backups can restore it). 'N/A' cells and other columns aren't touched.",
+                "Start over - reset Pokédex tracking", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+        if (books.Count > 0 && !EnsureDependency("Microsoft Excel")) return;
+
+        _syncing = true;
+        _resetTracker.Enabled = false;
+        try
+        {
+            _autoMonitor.Checked = false; // stops the watcher / live timer
+            _gs.SaveFilePath = "";
+            AppSettings.Current.Save();
+            if (_dexForm is { IsDisposed: false }) _dexForm.Close();
+            foreach (var wb in books)
+            {
+                if (await Task.Run(() => BackupService.Backup(wb, spreadsheet: true)) is { } b)
+                    Log("Backup made: " + Path.GetFileName(Path.GetDirectoryName(b)) + "\\" + Path.GetFileName(b));
+                var cleared = await RunSta(() => SpreadsheetService.Reset(wb, Log));
+                Log($"Cleared {cleared} mark(s) in {Path.GetFileName(wb)}.");
+            }
+            _trackError = null;
+            Log("Tracker reset - ready to start over.");
+            Status($"Pokédex tracking reset for {_game.Title}");
+        }
+        catch (Exception ex)
+        {
+            Log("Reset failed: " + ex.Message);
+            MessageBox.Show(FindForm(), "Couldn't reset the tracker: " + ex.Message + "\n\nThe backup copy made before is in the Backups window.",
+                "Start over", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _syncing = false;
+            _resetTracker.Enabled = true;
+            UpdateTrackerSaveLabel();
+            RefreshSheetLabel();
+        }
     }
 
     private void Log(string s) => Ui(() => _trackLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {s}{Environment.NewLine}"));

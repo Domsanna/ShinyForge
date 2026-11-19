@@ -26,7 +26,7 @@ public sealed class StreamlabsSetupForm : Form
         title.Location = new Point(20, 16);
         var help = Theme.Label("Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, 3DS, Switch 1 and Switch 2 - each with the\n" +
                                "game fitted into the console picture. Scenes that already exist are updated, not duplicated,\n" +
-                               "and the capture sources you already have are reused. 3DS games use the 3DS Capture windows.", Theme.Small, Theme.Muted);
+                               "and the capture sources you already have are reused. Afterwards every window is checked to fit its frame.", Theme.Small, Theme.Muted);
         help.Location = new Point(22, 52);
 
         var devices = new List<string> { Skip };
@@ -41,8 +41,9 @@ public sealed class StreamlabsSetupForm : Form
             Controls.AddRange(new Control[] { l, c });
             return c;
         }
-        var sw1 = Pick(128, "Switch 1 capture device", videoDevices.FirstOrDefault(d => d.Contains("Game Capture", StringComparison.OrdinalIgnoreCase) || d.Contains("Elgato", StringComparison.OrdinalIgnoreCase)));
-        var sw2 = Pick(196, "Switch 2 capture device", videoDevices.FirstOrDefault(d => d.Contains("USB Video", StringComparison.OrdinalIgnoreCase)));
+        var (guess1, guess2) = StreamlabsService.GuessDevices(videoDevices);
+        var sw1 = Pick(128, "Switch 1 capture device", guess1);
+        var sw2 = Pick(196, "Switch 2 capture device", guess2);
         var note = Theme.Label("A Switch scene that already shows a capture card keeps it.", Theme.Small, Theme.Muted);
         note.Location = new Point(22, 262);
 
@@ -60,7 +61,11 @@ public sealed class StreamlabsSetupForm : Form
             log.Text = "Working...";
             try
             {
-                var report = await Task.Run(() => { using var sl = StreamlabsService.Connect(); return sl.SetUpConsoleScenes(d1, d2); });
+                // the console pictures come from ShinyForge's GitHub page when this PC doesn't have them yet
+                var got = await FramesDownloadService.EnsureAsync(s => BeginInvoke(() => log.Text = s));
+                log.Text = (got != null ? got + Environment.NewLine : "") + "Setting up the scenes and checking every window fits...";
+                var report = await Task.Run(() => { using var sl = StreamlabsService.Connect(); return sl.SetUpAndVerify(d1, d2); });
+                if (got != null) report.Insert(0, got);
                 log.Text = string.Join(Environment.NewLine, report) + Environment.NewLine + "Done - the scenes are in Streamlabs now.";
                 AppPaths.Log("Streamlabs scenes: " + string.Join(" | ", report));
             }
@@ -68,8 +73,8 @@ public sealed class StreamlabsSetupForm : Form
             finally { go.Enabled = true; }
         };
         Controls.AddRange(new Control[] { title, help, note, log, go, close });
-        if (!ConsoleFrames.All.Any(ConsoleFrames.Exists))
-            log.Text = $"The console pictures weren't found in {ConsoleFrames.Folder} - set the folder in Settings first.";
+        if (!ConsoleFrames.AllPresent)
+            log.Text = $"Some console pictures aren't in {ConsoleFrames.Folder} yet - \"Create scenes\" downloads them from ShinyForge's GitHub page first.";
     }
 
     /// <summary>Streamlabs must be running for its API; offers to start it and waits until it answers.</summary>

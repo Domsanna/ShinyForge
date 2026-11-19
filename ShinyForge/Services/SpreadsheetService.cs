@@ -29,6 +29,17 @@ public static class SpreadsheetService
         return FindIn(game, root) ?? FindIn(game, BundledRoot) ?? FindIn(game, Path.Combine(AppPaths.AppDir, "Spreadsheets"));
     }
 
+    /// <summary>Every copy of the game's tracker ShinyForge could use: the one you chose, your spreadsheet folder's, the bundled ones.</summary>
+    public static List<string> AllWorkbooks(Game game)
+    {
+        var found = new List<string?>
+        {
+            AppSettings.Current.For(game.Id).SpreadsheetPath is { Length: > 0 } c && File.Exists(c) ? c : null,
+            FindIn(game, AppSettings.Current.SpreadsheetRoot), FindIn(game, BundledRoot), FindIn(game, Path.Combine(AppPaths.AppDir, "Spreadsheets")),
+        };
+        return found.OfType<string>().Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>Text for the UI: where the tracker came from.</summary>
     public static string Describe(Game game, string? wb)
     {
@@ -104,24 +115,9 @@ public static class SpreadsheetService
                 object raw = used.Value2;
                 if (raw is not object[,] values)
                     continue;
-                int rows = values.GetLength(0), cols = values.GetLength(1);
+                int rows = values.GetLength(0);
 
-                // Header row: within the first 10 rows, contains "Name" and "In Box".
-                int header = -1, cName = -1, cBox = -1, cOT = -1, cShiny = -1;
-                for (int r = 1; r <= Math.Min(rows, 10) && header < 0; r++)
-                {
-                    int n = -1, b = -1, o = -1, s = -1;
-                    for (int c = 1; c <= cols; c++)
-                    {
-                        var h = (values[r, c] as string)?.Trim().ToLowerInvariant();
-                        if (h == "name") n = c;
-                        else if (h == "in box") b = c;
-                        else if (h == "ot") o = c;
-                        else if (h == "shiny") s = c;
-                    }
-                    if (n > 0 && b > 0)
-                        (header, cName, cBox, cOT, cShiny) = (r, n, b, o, s);
-                }
+                var (header, cName, cBox, cOT, cShiny) = FindHeader(values);
                 if (header < 0)
                     continue;
                 sheets++;
@@ -144,6 +140,93 @@ public static class SpreadsheetService
             wb.Save();
             notes.Add($"Updated {Path.GetFileName(workbookPath)}");
             return new Result(inBox, ot, shiny, sheets, notes);
+        }
+        finally
+        {
+            try { wb?.Close(false); } catch { }
+            try { app?.Quit(); } catch { }
+            if (wb != null) Marshal.ReleaseComObject(wb);
+            if (app != null) Marshal.ReleaseComObject(app);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+    }
+
+    /// <summary>Header row: within the first 10 rows, contains "Name" and "In Box". Returns its row and the columns (-1 = none).</summary>
+    private static (int Header, int Name, int Box, int OT, int Shiny) FindHeader(object[,] values)
+    {
+        int rows = values.GetLength(0), cols = values.GetLength(1);
+        for (int r = 1; r <= Math.Min(rows, 10); r++)
+        {
+            int n = -1, b = -1, o = -1, s = -1;
+            for (int c = 1; c <= cols; c++)
+            {
+                var h = (values[r, c] as string)?.Trim().ToLowerInvariant();
+                if (h == "name") n = c;
+                else if (h == "in box") b = c;
+                else if (h == "ot") o = c;
+                else if (h == "shiny") s = c;
+            }
+            if (n > 0 && b > 0)
+                return (r, n, b, o, s);
+        }
+        return (-1, -1, -1, -1, -1);
+    }
+
+    /// <summary>
+    /// "Start over": sets every 'In Box', 'OT' and 'Shiny' mark that is Y back to N (N/A and every other column are left
+    /// alone), through Excel like <see cref="Update"/>. Returns how many cells were cleared.
+    /// </summary>
+    public static int Reset(string workbookPath, Action<string> progress)
+    {
+        if (!CanUpdate)
+            throw new PlatformNotSupportedException("Clearing a Pokédex tracker uses Microsoft Excel on Windows.");
+        var type = Type.GetTypeFromProgID("Excel.Application")
+                   ?? throw new InvalidOperationException("Microsoft Excel is not installed - it's needed to change the .xlsm trackers safely.");
+        int cleared = 0;
+        dynamic? app = null, wb = null;
+        try
+        {
+            progress("Starting Excel...");
+            app = Activator.CreateInstance(type)!;
+            app.Visible = false;
+            app.DisplayAlerts = false;
+            app.ScreenUpdating = false;
+            app.AskToUpdateLinks = false;
+            app.AutomationSecurity = 3; // never run the workbook's macros
+
+            progress($"Opening {Path.GetFileName(workbookPath)} (large trackers can take a while)...");
+            wb = app.Workbooks.Open(workbookPath, 0, false);
+            if ((bool)wb.ReadOnly)
+                throw new IOException("The tracker is open somewhere else (read-only). Close it in Excel and try again.");
+
+            foreach (dynamic ws in wb.Worksheets)
+            {
+                dynamic used = ws.UsedRange;
+                int firstRow = used.Row, firstCol = used.Column;
+                object raw = used.Value2;
+                Marshal.ReleaseComObject(used);
+                if (raw is not object[,] values)
+                    continue;
+                var (header, cName, cBox, cOT, cShiny) = FindHeader(values);
+                if (header < 0)
+                    continue;
+                progress($"Clearing sheet '{(string)ws.Name}'...");
+                for (int r = header + 1; r <= values.GetLength(0); r++)
+                {
+                    if (values[r, cName] is not string name || name.Length == 0)
+                        continue;
+                    foreach (var c in new[] { cBox, cOT, cShiny }.Where(c => c > 0))
+                        if ((values[r, c] as string)?.Trim().ToUpperInvariant() == "Y")
+                        {
+                            ws.Cells[firstRow + r - 1, firstCol + c - 1].Value2 = "N";
+                            cleared++;
+                        }
+                }
+            }
+            progress("Saving the tracker...");
+            wb.Save();
+            return cleared;
         }
         finally
         {

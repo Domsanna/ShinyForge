@@ -118,8 +118,6 @@ public sealed class StreamlabsService : IDisposable
         // ---- capture sources (found or made once, shared by all scenes)
         var top = WindowSource(sources, "3DS Capture - Top", "3DS Top", report);
         var bottom = WindowSource(sources, "3DS Capture - Bottom", "3DS Bottom", report);
-        var topSize = RecordingService.FindWindow("3DS Capture - Top") is { } t && t.Width > 0 ? (t.Width, t.Height) : (400, 240);
-        var bottomSize = RecordingService.FindWindow("3DS Capture - Bottom") is { } b && b.Width > 0 ? (b.Width, b.Height) : (320, 240);
 
         foreach (var c in Scenes)
         {
@@ -133,20 +131,19 @@ public sealed class StreamlabsService : IDisposable
             for (int k = 0; k < c.Screens.Length; k++)
             {
                 var sc = c.Screens[k];
-                JsonNode? src; int w, h;
+                JsonNode? src;
                 switch (sc.Kind)
                 {
-                    case "top": src = top; (w, h) = topSize; break;
-                    case "bottom": src = bottom; (w, h) = bottomSize; break;
+                    case "top": src = top; break;
+                    case "bottom": src = bottom; break;
                     default:
                         var device = sc.Kind == "switch1" ? switch1Device : switch2Device;
                         // a scene that already shows a capture card keeps it; otherwise the chosen device
                         src = SceneDeviceSource(scene, sources) ?? DeviceSource(sources, device, sc.Kind == "switch1" ? "Switch 1 Capture" : "Switch 2 Capture", report);
-                        w = (int?)src?["width"] is int sw and > 0 ? sw : 1920;
-                        h = (int?)src?["height"] is int sh and > 0 ? sh : 1080;
                         break;
                 }
                 if (src == null) { missing = true; break; }
+                var (w, h) = SourceSize(src, sc.Kind);
                 // the border is measured on a 400x240 screen: scale it to the window's real size
                 var crop = (sc.Border.L * w / 400, sc.Border.T * h / 240, sc.Border.R * w / 400, sc.Border.B * h / 240);
                 holes.Add((src, w, h, crop, frame.Screens[k]));
@@ -223,6 +220,124 @@ public sealed class StreamlabsService : IDisposable
         return report;
     }
 
+    /// <summary>
+    /// The picture size of a capture source: what Streamlabs captures right now, else the 3DS Capture window's size,
+    /// else the console's normal size (3DS top 400x240, bottom 320x240, capture card 1920x1080).
+    /// </summary>
+    private static (int W, int H) SourceSize(JsonNode src, string kind)
+    {
+        if ((int?)src["width"] is int sw and > 0 && (int?)src["height"] is int sh and > 0) return (sw, sh);
+        return kind switch
+        {
+            "top" => RecordingService.FindWindow("3DS Capture - Top") is { Width: > 0 } t ? (t.Width, t.Height) : (400, 240),
+            "bottom" => RecordingService.FindWindow("3DS Capture - Bottom") is { Width: > 0 } b ? (b.Width, b.Height) : (320, 240),
+            _ => (1920, 1080),
+        };
+    }
+
+    /// <summary>The Switch capture devices ShinyForge picks by itself: Elgato / Game Capture for Switch 1, "USB Video" (MS2109) for Switch 2.</summary>
+    public static (string? Switch1, string? Switch2) GuessDevices(IEnumerable<string> videoDevices)
+    {
+        var list = videoDevices.ToList();
+        return (list.FirstOrDefault(d => d.Contains("Game Capture", StringComparison.OrdinalIgnoreCase) || d.Contains("Elgato", StringComparison.OrdinalIgnoreCase)),
+                list.FirstOrDefault(d => d.Contains("USB Video", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// Creates / updates the console scenes, then checks every game window fits its console frame; a scene that doesn't
+    /// fit is laid out once more and checked again. Returns the report (setup lines, then one fit line per scene).
+    /// </summary>
+    public List<string> SetUpAndVerify(string? switch1Device, string? switch2Device)
+    {
+        var report = SetUpConsoleScenes(switch1Device, switch2Device);
+        var check = VerifyConsoleScenes();
+        if (check.Any(r => r.Fits == false))
+        {
+            report.Add("Some windows didn't fit - laying them out again...");
+            SetUpConsoleScenes(switch1Device, switch2Device);
+            check = VerifyConsoleScenes();
+        }
+        report.AddRange(check.Select(r => r.Message));
+        return report;
+    }
+
+    /// <summary>One console scene's fit check. Fits: true = every screen fills its hole, false = something is off, null = not checked.</summary>
+    public sealed record FitResult(string Scene, bool? Fits, string Message);
+
+    /// <summary>
+    /// Checks each console scene in Streamlabs: the frame is centred on the canvas at the right size, and every game window
+    /// (crop and scale included) covers exactly its screen hole in the frame, visible and below the frame.
+    /// </summary>
+    public List<FitResult> VerifyConsoleScenes()
+    {
+        var results = new List<FitResult>();
+        int cw = CanvasFallbackW, ch = CanvasFallbackH;
+        try
+        {
+            if (Call("VideoSettingsService", "baseResolutions")?["horizontal"] is { } r) (cw, ch) = ((int?)r["baseWidth"] ?? cw, (int?)r["baseHeight"] ?? ch);
+        }
+        catch
+        {
+            var res = Call("VideoSettingsService", "baseResolution");
+            (cw, ch) = ((int?)res?["baseWidth"] ?? cw, (int?)res?["baseHeight"] ?? ch);
+        }
+        var sources = Call("SourcesService", "getSources")!.AsArray().Select(n => n!).ToList();
+        var scenes = Call("ScenesService", "getScenes")!.AsArray().Select(n => n!).ToList();
+        var top = FindWindowSource(sources, "3DS Capture - Top");
+        var bottom = FindWindowSource(sources, "3DS Capture - Bottom");
+
+        foreach (var c in Scenes)
+        {
+            var frame = ConsoleFrames.Get(c.FrameKey)!;
+            var scene = scenes.FirstOrDefault(s => new[] { c.Name }.Concat(c.Aliases).Any(n => string.Equals(((string?)s["name"])?.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+            if (scene == null) { results.Add(new(c.Name, null, $"{c.Name}: no scene in Streamlabs - not checked")); continue; }
+            var name = (string?)scene["name"] ?? c.Name;
+            var sceneRes = $"Scene[\"{(string)scene["id"]!}\"]";
+            var items = Items(sceneRes).Where(i => Display(i) == "horizontal").ToList();
+            var problems = new List<string>();
+
+            double s = Math.Min((double)cw / frame.Width, (double)ch / frame.Height);
+            double fx = (cw - frame.Width * s) / 2, fy = (ch - frame.Height * s) / 2;
+            var frameSrc = FrameSource(sources, ConsoleFrames.PathOf(frame));
+            var frameItem = frameSrc == null ? null : items.FirstOrDefault(i => (string?)i["sourceId"] == (string)frameSrc["sourceId"]!);
+            if (frameItem == null) problems.Add("the frame picture isn't in the scene");
+            else
+            {
+                var t = frameItem["transform"]!;
+                if (Math.Abs((double)t["position"]!["x"]! - fx) > 2 || Math.Abs((double)t["position"]!["y"]! - fy) > 2
+                    || Math.Abs((double)t["scale"]!["x"]! - s) > 0.002 || Math.Abs((double)t["scale"]!["y"]! - s) > 0.002)
+                    problems.Add("the frame isn't centred at the right size");
+                if (frameItem["visible"]?.GetValue<bool>() == false) problems.Add("the frame is hidden");
+            }
+
+            var order = Call(sceneRes, "getNodes")!.AsArray().Select(n => (string)n!["id"]!).ToList();
+            for (int k = 0; k < c.Screens.Length; k++)
+            {
+                var kind = c.Screens[k].Kind;
+                var label = kind switch { "top" => c.Screens.Length > 1 ? "top screen" : "screen", "bottom" => "bottom screen", _ => "capture card" };
+                var src = kind switch { "top" => top, "bottom" => bottom, _ => SceneDeviceSource(scene, sources) };
+                var item = src == null ? null : items.FirstOrDefault(i => (string?)i["sourceId"] == (string)src["sourceId"]!);
+                if (item == null) { problems.Add($"the {label} isn't in the scene"); continue; }
+                var (w, h) = SourceSize(src!, kind);
+                var t = item["transform"]!;
+                double x = (double)t["position"]!["x"]!, y = (double)t["position"]!["y"]!;
+                double vw = (w - (double)t["crop"]!["left"]! - (double)t["crop"]!["right"]!) * (double)t["scale"]!["x"]!;
+                double vh = (h - (double)t["crop"]!["top"]! - (double)t["crop"]!["bottom"]!) * (double)t["scale"]!["y"]!;
+                var hole = frame.Screens[k];
+                double hx = fx + hole.X * s - 1, hy = fy + hole.Y * s - 1, hw = hole.Width * s + 2, hh = hole.Height * s + 2;
+                if (Math.Abs(x - hx) > 2 || Math.Abs(y - hy) > 2 || Math.Abs(vw - hw) > 3 || Math.Abs(vh - hh) > 3)
+                    problems.Add($"the {label} is {vw:0}x{vh:0} at ({x:0},{y:0}) - the frame's hole is {hw:0}x{hh:0} at ({hx:0},{hy:0})");
+                if (item["visible"]?.GetValue<bool>() == false) problems.Add($"the {label} is hidden");
+                if (frameItem != null && order.IndexOf((string)item["sceneItemId"]!) < order.IndexOf((string)frameItem["sceneItemId"]!))
+                    problems.Add($"the {label} is above the frame");
+            }
+            results.Add(problems.Count == 0
+                ? new(name, true, $"✓ {name}: every window fits the {frame.Label} frame")
+                : new(name, false, $"✗ {name}: " + string.Join("; ", problems)));
+        }
+        return results;
+    }
+
     private static string Display(JsonNode item) => (string?)item["display"] ?? "horizontal";
 
     /// <summary>An image source that already shows <paramref name="path"/>.</summary>
@@ -243,12 +358,7 @@ public sealed class StreamlabsService : IDisposable
     /// <summary>A Window Capture of a 3DS Capture window: an existing one, or a new one for the window as it is now.</summary>
     private JsonNode? WindowSource(List<JsonNode> sources, string window, string name, List<string> report)
     {
-        foreach (var src in sources.Where(x => (string?)x["type"] == "window_capture"))
-        {
-            var settings = Call($"Source[\"{(string)src["sourceId"]!}\"]", "getSettings");
-            var w = Regex.Replace((string?)settings?["window"] ?? "", "#3A", ":");
-            if (w.StartsWith(window + ":") || w.StartsWith(window + " ")) return src;
-        }
+        if (FindWindowSource(sources, window) is { } found) return found;
         // the title as 3DS Capture shows it right now (with a 3DS plugged in it ends with the board id); ':' is written #3A
         var title = RecordingService.WindowTitle(window).Replace(":", "#3A");
         var made = Call("SourcesService", "createSource", name, "window_capture",
@@ -256,6 +366,18 @@ public sealed class StreamlabsService : IDisposable
         sources.Add(made);
         report.Add($"Window Capture \"{name}\" created");
         return made;
+    }
+
+    /// <summary>An existing Window Capture of a 3DS Capture window (null = none yet).</summary>
+    private JsonNode? FindWindowSource(List<JsonNode> sources, string window)
+    {
+        foreach (var src in sources.Where(x => (string?)x["type"] == "window_capture"))
+        {
+            var settings = Call($"Source[\"{(string)src["sourceId"]!}\"]", "getSettings");
+            var w = Regex.Replace((string?)settings?["window"] ?? "", "#3A", ":");
+            if (w.StartsWith(window + ":") || w.StartsWith(window + " ")) return src;
+        }
+        return null;
     }
 
     /// <summary>The capture-card source already in a scene (when updating a scene that has one).</summary>

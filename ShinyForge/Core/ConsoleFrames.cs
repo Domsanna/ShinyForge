@@ -33,7 +33,20 @@ public static class ConsoleFrames
 
     public static string DefaultFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Console Frames");
 
-    public static string Folder => Directory.Exists(AppSettings.Current.ConsoleFramesFolder) ? AppSettings.Current.ConsoleFramesFolder : DefaultFolder;
+    /// <summary>
+    /// Where ShinyForge puts the frame pictures it downloads from its GitHub page: portable = next to ShinyForge.exe,
+    /// installed = Documents\ShinyForge\Console Frames.
+    /// </summary>
+    public static string DownloadFolder => AppPaths.IsPortable
+        ? Path.Combine(AppPaths.LaunchDir, "Console Frames")
+        : Path.Combine(OsInfo.DocumentsDir, "ShinyForge", "Console Frames");
+
+    /// <summary>The folder chosen in Settings, else Desktop\Console Frames if it exists, else the download folder.</summary>
+    public static string Folder => Directory.Exists(AppSettings.Current.ConsoleFramesFolder) ? AppSettings.Current.ConsoleFramesFolder
+        : Directory.Exists(DefaultFolder) ? DefaultFolder : DownloadFolder;
+
+    /// <summary>Are all seven frame pictures there?</summary>
+    public static bool AllPresent => All.All(Exists);
 
     /// <summary>All frames, with the hole positions from the folder's screen_positions.json when it has them.</summary>
     public static IReadOnlyList<ConsoleFrame> All

@@ -2500,5 +2500,72 @@ if (tests.Contains("recheck"))
     }
 }
 
+if (tests.Contains("framesdl"))
+{
+    // console frames from the GitHub release into an empty folder; a second run downloads nothing; existing files are kept
+    var dir = Path.Combine(work, "framesdl");
+    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    var said = await FramesDownloadService.EnsureAsync(s => Console.WriteLine("   " + s), dir);
+    Check(said != null, "download reported: " + said);
+    var desk = ConsoleFrames.DefaultFolder;
+    foreach (var f in ConsoleFrames.All.Select(f => f.File).Append("screen_positions.json"))
+    {
+        var got = Path.Combine(dir, f);
+        var orig = Path.Combine(desk, f);
+        Check(File.Exists(got) && (!File.Exists(orig) || new FileInfo(got).Length == new FileInfo(orig).Length), $"{f} downloaded ({(File.Exists(got) ? new FileInfo(got).Length : 0)} bytes)");
+    }
+    Check(await FramesDownloadService.EnsureAsync(_ => { }, dir) == null, "second run: nothing to download");
+    File.Delete(Path.Combine(dir, "gameboy_frame.png"));
+    File.WriteAllText(Path.Combine(dir, "3DS_frame.png"), "mine");
+    await FramesDownloadService.EnsureAsync(_ => { }, dir);
+    Check(File.Exists(Path.Combine(dir, "gameboy_frame.png")), "a missing picture is downloaded again");
+    Check(File.ReadAllText(Path.Combine(dir, "3DS_frame.png")) == "mine", "a picture the user already has is never replaced");
+}
+
+if (tests.Contains("sheetreset"))
+{
+    // on a COPY of a real tracker: mark a few Pokemon, then "start over" clears them; a second reset finds nothing
+    var src = Environment.GetEnvironmentVariable("SHEET") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        "Bot Spreadsheets", "Gen 1", "(1) Red", "Red Pokedex Tracker.xlsm");
+    var copy = Path.Combine(work, "reset_" + Path.GetFileName(src));
+    File.Copy(src, copy, true);
+    var owned = new Collection();
+    foreach (var n in new[] { "Bulbasaur", "Charmander", "Squirtle", "Pikachu" })
+        owned.BySpecies[Collection.Normalize(n)] = new Collection.Entry { Name = n, Owned = true, OwnOT = true, Shiny = true };
+    var t = new Thread(() =>
+    {
+        try
+        {
+            var up = SpreadsheetService.Update(copy, owned, _ => { });
+            Console.WriteLine($"   marked: {up.MarkedInBox} in box, {up.MarkedOT} OT, {up.MarkedShiny} shiny");
+            var cleared = SpreadsheetService.Reset(copy, s => Console.WriteLine("   " + s));
+            Check(cleared >= up.MarkedInBox + up.MarkedOT + up.MarkedShiny && cleared > 0, $"reset cleared {cleared} mark(s)");
+            Check(SpreadsheetService.Reset(copy, _ => { }) == 0, "after the reset no Y marks are left");
+            var again = SpreadsheetService.Update(copy, owned, _ => { });
+            Check(again.MarkedInBox == up.MarkedInBox, "the cleared cells are N again (a sync marks them again)");
+        }
+        catch (Exception e) { Check(false, "sheet reset: " + e.Message); }
+    });
+    t.SetApartmentState(ApartmentState.STA);
+    t.Start();
+    t.Join();
+    File.Delete(copy);
+}
+
+if (tests.Contains("slverify"))
+{
+    // read-only: does every console scene in the running Streamlabs fit its frame?
+    Check(StreamlabsService.IsOpen, "Streamlabs Desktop is open");
+    if (StreamlabsService.IsOpen)
+    {
+        using var sl = StreamlabsService.Connect();
+        foreach (var r in sl.VerifyConsoleScenes())
+        {
+            Console.WriteLine("   " + r.Message);
+            Check(r.Fits != false, "fits: " + r.Scene);
+        }
+    }
+}
+
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
 return failures;

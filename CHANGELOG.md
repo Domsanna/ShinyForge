@@ -2,6 +2,16 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.3.1
+
+### Added
+- **Start over (reset tracker)** on the Collection Tracker card: for starting a game over. It turns off monitoring for the game, forgets the save chosen for the tracker and sets every 'In Box', 'OT' and 'Shiny' mark back to N in the game's tracker spreadsheet(s), after a backup copy of each.
+- **Console frame pictures download by themselves.** They are published on ShinyForge's GitHub page (release `console-frames-1`); when pictures are missing, starting a recording or making the Streamlabs scenes downloads and unpacks them (installed: Documents\ShinyForge\Console Frames). Pictures you already have are never replaced.
+- **Streamlabs scenes are checked.** After the scenes are made, every game window is checked to fill its console screen exactly; a scene that doesn't fit is laid out again, and the result is listed per scene. Starting a recording makes the console's scene when Streamlabs doesn't have it yet.
+
+### Changed
+- Streamlabs scenes are sized from the picture Streamlabs really captures (the 3DS Capture window size is only the fallback).
+
 ## 1.3.0
 
 ### Changed
