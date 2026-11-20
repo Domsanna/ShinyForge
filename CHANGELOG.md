@@ -2,6 +2,15 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.4.1
+
+### Added
+- **Shiny failsafe.** A find stays held until you press **Keep hunting** yourself. If the Switch falls asleep while a shiny waits and you reconnect with its IP address, ShinyForge no longer restarts the hunter (a restart reset the game and lost the shiny). A hunter started while a find is held presses nothing until you answer, the phone remote won't start it, and **Start hunting** asks first because starting resets the game.
+- **Shiny clips** button on the Shiny Hunt card: opens the folder the shiny clips are saved in.
+
+### Changed
+- The same Pokémon coming back (same PID) is fixed quietly: no more "already found earlier in this hunt" warnings, beeps or banners. The hunter still retries the reset / adds random timing by itself, and you're only told when it can't be fixed.
+
 ## 1.4.0
 
 ### Changed

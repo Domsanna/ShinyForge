@@ -156,7 +156,10 @@ public sealed class MainForm : Form
         _askingSwitchIp = true;
         try
         {
-            if (IpPrompt.AskSwitch(this, why + " Its IP address may have changed.") != null && HuntService.RestartPythonHunt())
+            if (IpPrompt.AskSwitch(this, why + " Its IP address may have changed.") == null) return;
+            if (HuntService.HeldFind is { } held)   // shiny failsafe: reconnecting never restarts (= resets) the game
+                SetStatus($"Switch IP set to {AppSettings.Current.SwitchIP}. {held} is held - the hunter waits for you (Keep hunting / Start hunting).");
+            else if (HuntService.RestartPythonHunt())
                 SetStatus($"Switch IP set to {AppSettings.Current.SwitchIP} - the Python hunter was restarted.");
         }
         finally { _askingSwitchIp = false; }

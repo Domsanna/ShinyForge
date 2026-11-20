@@ -30,6 +30,10 @@ EMBEDDED = bool(os.environ.get("SHINYFORGE_EMBEDDED"))
 WAITING_FLAG = ROOT / "hunt_waiting.flag"  # the bot waits for the Keep hunting / Stop hunter buttons
 ANSWER = ROOT / "hunt_answer.txt"          # ShinyForge writes "keep" or "stop" here
 PREVIEW = ROOT / "hunt_preview.jpg"        # vision mode: the picture the bot sees
+# Shiny failsafe: written the moment something is found, removed only when the user chooses "keep hunting" (or presses
+# Start hunting in ShinyForge). While it exists, a hunter that gets started again (ShinyForge reconnecting after the Switch
+# went to sleep, start_hunt.bat ...) presses NOTHING until the user answers - the found Pokemon stays in the game.
+HOLD_FLAG = ROOT / "shiny_hold.flag"
 
 
 def apply_overrides(cfg: dict) -> dict:
@@ -81,8 +85,48 @@ def remove_file(path):
         pass
 
 
-def ask_keep_hunting(prompt: str) -> bool:
-    """After a find: True = keep hunting. Asked in the console, or with ShinyForge's buttons when it runs the bot."""
+def ask_keep_hunting(prompt: str, found: str = "") -> bool:
+    """After a find: True = keep hunting. Asked in the console, or with ShinyForge's buttons when it runs the bot.
+    The find is held (shiny_hold.flag) until the answer is "keep hunting"."""
+    if not HOLD_FLAG.exists():
+        try:
+            HOLD_FLAG.write_text(f"{datetime.now():%Y-%m-%d %H:%M:%S}\t{found or 'Something was found'}", encoding="utf-8")
+        except OSError:
+            pass
+    keep = _ask_keep_hunting(prompt)
+    if keep:
+        remove_file(HOLD_FLAG)
+    return keep
+
+
+def held_find() -> str | None:
+    """What the failsafe is holding ("SHINY Deoxys (PID ...)"), or None."""
+    try:
+        text = HOLD_FLAG.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return (text.split("\t", 1)[1] if "\t" in text else text) or "Something was found"
+
+
+def respect_shiny_hold():
+    """Called before a hunter touches the Switch: if a find is still held, wait for the user instead of resetting the game.
+    Raises SystemExit when the user chooses to stop."""
+    what = held_find()
+    if what is None:
+        return
+    print("\n" + "*" * 60)
+    print(f"  FAILSAFE: {what} was found and the hunt was never told to go on.")
+    print("  It may still be in the game, so NO button is pressed (no reset) until you answer.")
+    print("  Catch it and save first - keep hunting RESETS the game.")
+    print("*" * 60)
+    write_status(state="shiny-held", last=None)
+    if not ask_keep_hunting("\nType 'c' + Enter to keep hunting (this RESETS the game!), or just Enter to quit: ", what):
+        write_status(state="stopped", last=None)
+        raise SystemExit("Stopped: the found Pokemon is kept - nothing was pressed.")
+    print("  Going on with the hunt (you chose keep hunting).\n")
+
+
+def _ask_keep_hunting(prompt: str) -> bool:
     if not EMBEDDED:
         return input(prompt).strip().lower() == "c"
     remove_file(ANSWER)

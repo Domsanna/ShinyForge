@@ -119,7 +119,7 @@ public static class ErrorDoctor
                         "If Hunter output on the game page says it found a shiny, it stopped on purpose - catch it!",
                         "Otherwise, restart the hunt. If it keeps stopping, check that the game is in the right spot for the hunt.",
                     },
-                    "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
+                    "Restart the hunt", () => Task.Run(HuntService.RestartFromDoctor));
             if (m.Contains("The same") || m.Contains("came back"))
                 return new("The game isn't resetting between encounters, so the same Pokémon appears again and again.",
                     new[]
@@ -128,11 +128,11 @@ public static class ErrorDoctor
                         "Make sure no controller is holding a button and that sys-botbase is up to date.",
                         "Restart the hunt from the right spot in the game.",
                     },
-                    "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
+                    "Restart the hunt", () => Task.Run(HuntService.RestartFromDoctor));
             if (m.Contains("No new encounter"))
                 return new("The hunt is running but no new Pokémon has been logged for a while - the game may be stuck on a menu.",
                     new[] { "Look at the Switch screen and Hunter output on the game page.", "Restart the hunt if the game is stuck." },
-                    "Restart the hunt", () => Task.Run(() => HuntService.RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page."));
+                    "Restart the hunt", () => Task.Run(HuntService.RestartFromDoctor));
             if (f.StartsWith("Collection tracker"))
                 return new("Live collection monitoring can't read the game from the Switch.",
                     new[] { "Make sure the Switch is on and sys-botbase runs, then check its IP address in Settings." },

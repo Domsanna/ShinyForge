@@ -266,6 +266,8 @@ public sealed class GamePage : UserControl, IDisposable
         var stop = new FancyButton("Stop Python hunter", Skin.GlyphStop, Skin.StopRed);
         start.Click += async (_, _) =>
         {
+            // Shiny failsafe first - opening / loading the game below presses buttons too
+            if (!await ConfirmHeldFind()) return;
             var key = radios.First(r => r.IsChecked == true).Tag as string ?? "";
             if (key == "python" && !await EnsureDependency("Python 3")) return;
             if (key == "python" && !await EnsurePythonPackages()) return;
@@ -274,10 +276,11 @@ public sealed class GamePage : UserControl, IDisposable
             // The game must be open (FireRed / LeafGreen: with the save loaded - the hunter decides its mode from where you stand).
             // SysBot.exe too: started without the game it stops at once ("Title ID ... Disconnecting").
             if ((key == "python" || key == "sysbot") && !await EnsureGameOpen()) return;
-            await StartHuntNow(key);
+            await StartHuntNow(key, heldFindConfirmed: true);
         };
         stop.Click += (_, _) => { HuntService.StopPythonHunt(); _clips.Stop(); RefreshHuntStatus(); Status("Python hunter stopped."); };
-        card.Body.Children.Add(options.Any(o => o.Key == "python") ? Skin.Wrap(start, stop) : Skin.Wrap(start));
+        var clipsButton = ShinyClipsButton();
+        card.Body.Children.Add(options.Any(o => o.Key == "python") ? Skin.Wrap(start, stop, clipsButton) : Skin.Wrap(start, clipsButton));
         if (_game.Bot == BotKind.FrlgSwitch)
         {
             var pause = new FancyButton("Pause / Resume", Skin.GlyphStop, Skin.PanelHi);
@@ -408,7 +411,7 @@ public sealed class GamePage : UserControl, IDisposable
         }
         start.Click += async (_, _) => await StartHunt();
         stop.Click += (_, _) => { _hunt3ds?.Cancel(); Say("Stopping..."); };
-        card.Body.Children.Add(Skin.Wrap(start, stop, test));
+        card.Body.Children.Add(Skin.Wrap(start, stop, test, ShinyClipsButton()));
         var rules = new FancyButton("Stop rules", Skin.GlyphSettings, Skin.PanelHi);
         rules.Click += async (_, _) => await new HuntOptionsWindow(_game, rngAvailable: false).ShowDialog(Dialogs.Owner(this)!);
         var stats = new FancyButton("Statistics", Skin.GlyphInfo, Skin.PanelHi);
@@ -465,13 +468,34 @@ public sealed class GamePage : UserControl, IDisposable
     }
 
     /// <summary>Starts the rolling clip buffer from this game's capture source (Record card) - unless already recording.</summary>
+    /// <summary>Where this game's shiny clips are saved: "Shiny Clips" in its recording folder, else ShinyForge's default clips folder.</summary>
+    private string ShinyClipsFolder =>
+        Directory.Exists(_gs.RecordingFolder) ? Path.Combine(_gs.RecordingFolder, "Shiny Clips") : ShinyClipService.DefaultFolder;
+
+    /// <summary>Shiny Hunt card: opens the folder the shiny clips are saved in (made first if no clip was saved yet).</summary>
+    private FancyButton ShinyClipsButton()
+    {
+        var b = new FancyButton("Shiny clips", Skin.GlyphFolder, Skin.PanelHi);
+        b.Click += async (_, _) =>
+        {
+            var folder = ShinyClipsFolder;
+            try
+            {
+                Directory.CreateDirectory(folder);
+                OsInfo.OpenFolder(folder);
+                Status("Shiny clips folder: " + folder);
+            }
+            catch (Exception ex) { await Dialogs.Info(this, $"Couldn't open {folder}:\n\n{ex.Message}", "Shiny clips"); }
+        };
+        return b;
+    }
+
     private void StartClipBuffer()
     {
         if (!AppSettings.Current.ShinyClips || _recorder.IsRecording || _clips.Running) return;
         var source = Sel(_source) ?? _gs.VideoSource;
         if (string.IsNullOrWhiteSpace(source) || source.StartsWith("(")) return;
-        _clips.Start(CaptureSpec(source), _game.Id,
-            Directory.Exists(_gs.RecordingFolder) ? Path.Combine(_gs.RecordingFolder, "Shiny Clips") : ShinyClipService.DefaultFolder);
+        _clips.Start(CaptureSpec(source), _game.Id, ShinyClipsFolder);
         if (_clips.Running) Status("Shiny clip buffer running - the last " + AppSettings.Current.ShinyClipSeconds + " s are saved when a shiny appears.");
     }
 
@@ -1295,11 +1319,18 @@ public sealed class GamePage : UserControl, IDisposable
         }
     }
 
+    /// <summary>Shiny failsafe: a find is still held (the hunt was never told to go on) - starting resets the game, so ask first.</summary>
+    private async Task<bool> ConfirmHeldFind() =>
+        HuntService.HeldFind is not { } held ||
+        await Dialogs.Show(this, HuntService.HeldFindQuestion(held), "Shiny Hunt - a find is held", "Start hunting", Dialogs.Cancel) == "Start hunting";
+
     /// <summary>Starts the chosen hunt bot (and, for the Python hunter, the rolling shiny-clip buffer).</summary>
-    private async Task StartHuntNow(string key)
+    private async Task StartHuntNow(string key, bool heldFindConfirmed = false)
     {
+        if (!heldFindConfirmed && !await ConfirmHeldFind()) return;
         try
         {
+            HuntService.ReleaseShinyHold(); // the user chose to hunt again
             _gs.HuntBot = key;
             AppSettings.Current.Save();
             HuntService.ResetAutoFixes();

@@ -49,8 +49,8 @@ def load_recent_pids(n=500):
     return out
 
 
-from .extras import (OVERRIDES, ask_keep_hunting, check_rules, notify, save_screenshot, switch_screenshot, wait_while_paused,
-                     write_status)
+from .extras import (OVERRIDES, ask_keep_hunting, check_rules, notify, respect_shiny_hold, save_screenshot, switch_screenshot,
+                     wait_while_paused, write_status)
 from .memory import (BALL_NAMES, BATTLE_MENU, GBA_ANCHOR, IN_BATTLE, INITIAL_SEED, LEGENDARY_OR_MYTHICAL, ROAMERS, STATIC_SPOTS,
                      GameMemory, current_seed_offset)
 from . import rng
@@ -134,11 +134,10 @@ class MemoryHunter:
     def is_repeat(self, p) -> bool:
         """True if `p` must NOT be counted. Handles both ways the same Pokemon can come back:
         1. exactly the last one again  -> the game didn't really reset / old battle data -> fix the reset
-        2. one seen earlier in the hunt -> two resets landed on the same RNG frame -> widen the timing randomness"""
+        2. one seen earlier in the hunt -> two resets landed on the same RNG frame -> widen the timing randomness
+        Both are fixed silently (no warning, no beep, no phone message) - only a repeat that survives every fix stops the hunt."""
         if p.pid == self.last_pid:
             self.stale_in_a_row += 1
-            self.warn(f"The same {p.species_name} (PID {p.pid:08X}) came back {self.stale_in_a_row}x in a row - the game "
-                      "did not reset. Fixing: checking the reset and retrying it with a longer hold.")
             if self.mode == "static":
                 self.t["reset_hold"] = float(self.t.get("reset_hold", 1.5)) + 0.5
                 self.ctrl.connect()  # re-attach the virtual controller
@@ -147,9 +146,7 @@ class MemoryHunter:
             return True
         self.stale_in_a_row = 0
         if p.pid in self.recent and self.mode == "static":
-            self.extra_jitter = min(self.extra_jitter + 0.5, 4.0)
-            self.warn(f"{p.species_name} PID {p.pid:08X} was already found earlier in this hunt (same RNG frame). "
-                      f"Fixed automatically: up to {self.extra_jitter:.1f}s of extra random timing per reset.")
+            self.extra_jitter = min(self.extra_jitter + 0.5, 4.0)   # silently: more random timing per reset
         self.recent.append(p.pid)
         return False
 
@@ -242,7 +239,7 @@ class MemoryHunter:
             notify(self.cfg, f"Caught {p.species_name}!", "Auto-catch caught it. SAVE THE GAME before you continue hunting!",
                    important=True)
             print("\n  CAUGHT! Save the game in the START menu before continuing to hunt (a reset would lose it).")
-        return self.wait_for_user()
+        return self.wait_for_user(("SHINY " if p.is_shiny else "") + f"{p.species_name} (PID {p.pid:08X})")
 
     # ---------------------------------------------------------------- optional auto-catch
     def auto_catch(self, p) -> bool:
@@ -375,10 +372,10 @@ class MemoryHunter:
                 return False
         return True
 
-    def wait_for_user(self) -> bool:
+    def wait_for_user(self, found: str = "") -> bool:
         alert_shiny(self.cfg["on_shiny"].get("beep", True))
         return ask_keep_hunting("\nType 'c' + Enter to keep hunting (static mode RESETS the game!), "
-                                "or just Enter to quit: ")
+                                "or just Enter to quit: ", found)
 
     # ---------------------------------------------------------------- modes
     def game_was_reset(self, timeout=4.0) -> bool:
@@ -423,7 +420,7 @@ class MemoryHunter:
         # different RNG frames. Random timing is only added after the same-Pokemon guard has seen a repeat.
         if self.extra_jitter > 0:
             delay = random.uniform(0, self.extra_jitter)
-            print(f"  title screen: extra random delay {delay:.2f}s (a repeat was seen earlier)")
+            print(f"  title screen: random delay {delay:.2f}s")
             time.sleep(delay)
         t0 = time.time()
         warned = False
@@ -435,11 +432,10 @@ class MemoryHunter:
                 if p and p.pid != self.last_pid:
                     return p
                 if p and not warned:
-                    # Same Pokemon as last time = still the old data, never a new encounter.
-                    print("  (same Pokemon as before - waiting for the new encounter)")
+                    # Same Pokemon as last time = still the old data, never a new encounter (waited for silently).
                     warned = time.time()
                 elif p and time.time() - warned > 8:
-                    return p  # still the old one after 8 s: let the same-Pokemon guard warn and fix it
+                    return p  # still the old one after 8 s: the same-Pokemon guard fixes it (silently)
             # A little randomness in the mashing too: the RNG keeps advancing every frame until the battle.
             self.tap("A", a_interval * random.uniform(0.85, 1.2))
         return None
@@ -561,6 +557,7 @@ class MemoryHunter:
         return "wild"
 
     def run(self):
+        respect_shiny_hold()   # a find from before is still held: press nothing until the user answers
         print("Connecting controller (sysbotbase)...")
         self.ctrl.connect()
         if not self.game.locate():

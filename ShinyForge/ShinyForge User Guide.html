@@ -268,6 +268,8 @@
     <li><b>The game doesn't have to be open.</b> If it isn't, ShinyForge offers to open it when you click <b>Start hunting</b>. The same happens if the FTP app or Homebrew Menu is still open. ShinyForge closes the FTP app, then finds FireRed / LeafGreen and starts it. It presses A through the title screen until your save is loaded, and the hunt starts from there. See <a href="#switch-open-game">how ShinyForge finds and opens the game</a>. It never closes a game you're playing.</li>
     <li>Use <b>Pause / Resume</b> to stop after the current attempt and carry on later. <b>Stop Python hunter</b> ends the hunt.</li>
     <li><b>Hunter output</b>, under the Shiny Hunt card, shows what the Python hunter is doing live, so no separate window opens on Windows. When it finds something, it stops pressing buttons and asks there: <b>Keep hunting</b> (this can reset the game, so catch and save first) or <b>Stop hunter</b>. Closing ShinyForge doesn't stop a running hunt, and its output is back when you open ShinyForge again.</li>
+    <li><b>Shiny failsafe.</b> A find stays <i>held</i> until you press <b>Keep hunting</b> yourself. If the Switch falls asleep while it waits and you reconnect (even with a new IP address), ShinyForge never restarts the hunter on its own, so the game isn't reset. A hunter that gets started again while a find is held presses nothing until you answer. <b>Start hunting</b> asks first, because starting resets the game. Catch and save first.</li>
+    <li>The same Pokémon coming back (same PID) is fixed automatically and quietly: the hunter retries the reset or adds a little random timing. You're only told if it can't be fixed.</li>
     <li><b>Hunt options</b> sets stop rules, auto-catch and shiny RNG. <b>Statistics</b> opens this hunt's numbers.</li>
   </ul>
   <div class="callout"><strong>Wild hunting tip</strong>Lead with a Pokémon that's faster or higher level than the wild ones, or one holding a Smoke Ball. Failed escapes cost HP, and the bot stops if your lead faints.</div>
@@ -404,9 +406,10 @@
     <li><b>Start recording</b> opens Streamlabs Desktop (if it isn't open yet) and switches it to the game's console scene, then records. A few seconds later the card shows the file being written (<i>● Recording into Recording_0001.mp4</i>). If nothing is written, ShinyForge stops and tells you why.</li>
   </ul>
   <h3>Shiny clips <span class="badge on">on by default</span></h3>
-  <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code> (a stop target that isn't shiny: <code>Found_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>). The clip goes to the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
+  <p>While the Switch hunter runs, ShinyForge keeps the last minute of video in a rolling buffer. When a shiny appears, it waits a few more seconds and saves <code>Shiny_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code> (a stop target that isn't shiny: <code>Found_&lt;Pokémon&gt;_&lt;date&gt;.mp4</code>). The clip goes to <code>Shiny Clips</code> in the game's recording folder, or to <code>Data\Shiny Clips</code>.</p>
   <ul>
     <li>Uses the capture source chosen on the <b>Record Gameplay</b> card.</li>
+    <li>The <b>Shiny clips</b> button on the Shiny Hunt card opens the folder the clips are saved in.</li>
     <li>Change the length (20–300 seconds) or turn it off in <b>Settings → Shiny clips</b>.</li>
     <li>It pauses while a full recording is running, since that recording already has the moment.</li>
   </ul>

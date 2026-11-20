@@ -152,6 +152,43 @@ public static class HuntService
     /// <summary>The hunter found something and waits for Keep hunting / Stop hunter.</summary>
     public static bool IsWaitingForAnswer => BotDir is { } d && File.Exists(Path.Combine(d, WaitingFlag));
 
+    // ------------------------------------------------------------------ shiny failsafe
+    private const string HoldFile = "shiny_hold.flag";
+
+    /// <summary>
+    /// What the shiny failsafe holds ("SHINY Deoxys (PID ...)"), or null. The Python bot writes shiny_hold.flag the moment it
+    /// finds something and removes it only on "Keep hunting". While it exists ShinyForge never restarts the hunter by itself
+    /// (Switch IP prompt after the console slept, automatic fixes, phone remote): only the user's own Start hunting does.
+    /// </summary>
+    public static string? HeldFind
+    {
+        get
+        {
+            if (BotDir is not { } d) return null;
+            try
+            {
+                var text = File.ReadAllText(Path.Combine(d, HoldFile)).Trim();
+                var what = text.Contains('\t') ? text[(text.IndexOf('\t') + 1)..] : text;
+                return string.IsNullOrWhiteSpace(what) ? "Something was found" : what;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        }
+    }
+
+    /// <summary>The user chose to hunt again (after being told the game resets): the failsafe lets go.</summary>
+    public static void ReleaseShinyHold()
+    {
+        if (BotDir is not { } d) return;
+        try { File.Delete(Path.Combine(d, HoldFile)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { AppPaths.Log("Releasing the shiny hold: " + e.Message); }
+    }
+
+    /// <summary>The question asked before the user's own Start hunting while a find is held.</summary>
+    public static string HeldFindQuestion(string what) =>
+        $"{what} was found and the hunt was never told to go on - it may still be waiting in the game.\n\n" +
+        "Starting the hunt RESETS the game. Catch it and save first.\n\n" +
+        "Start hunting anyway?";
+
     public static void AnswerHunter(bool keepHunting)
     {
         if (BotDir is { } d) File.WriteAllText(Path.Combine(d, AnswerFile), keepHunting ? "keep" : "stop");
@@ -206,8 +243,9 @@ public static class HuntService
             state = j?["state"]?.GetValue<string>() ?? "";
         }
         catch { }
+        if (!running && HeldFind is { } held) return $"Python hunter: not running - {held} is held, nothing will reset it until you start the hunt yourself.";
         return !running ? "Python hunter: not running" + (state == "found" ? " (it found something - check the game!)" : "")
-             : IsPaused ? "Python hunter: PAUSED" : $"Python hunter: {state switch { "found" => "FOUND SOMETHING - waiting for you", "catching" => "catching...", "rng-waiting" => "RNG: waiting for the shiny frame", _ => "hunting" }}";
+             : IsPaused ? "Python hunter: PAUSED" : $"Python hunter: {state switch { "found" => "FOUND SOMETHING - waiting for you", "shiny-held" => "a find is held - waiting for you (nothing is pressed)", "catching" => "catching...", "rng-waiting" => "RNG: waiting for the shiny frame", _ => "hunting" }}";
     }
 
     /// <summary>Actions from the phone remote.</summary>
@@ -223,6 +261,8 @@ public static class HuntService
                 case "start":
                     if (_lastPython is not { } h) return "Start the hunt once from ShinyForge first (then the remote can restart it).";
                     if (IsPythonHuntRunning()) return "Already running.";
+                    if (HeldFind is { } held)
+                        return $"Not started: {held} was found and is held (starting resets the game). Catch it, then start the hunt in ShinyForge on the PC.";
                     ResetAutoFixes();
                     Start(h.Game, h.Key);
                     return "Started.";
@@ -427,6 +467,18 @@ public static class HuntService
             yield break;
         }
 
+        // Shiny failsafe: something was found and waits for the user. No encounters are logged meanwhile and the Switch may fall
+        // asleep - that must never lead to an IP prompt + restart (a restart resets the game and loses the find).
+        var held = HeldFind;
+        if (held != null || IsWaitingForAnswer)
+        {
+            var s = AppSettings.Current;
+            if (!HealthMonitor.CanReach(s.SwitchIP, s.SwitchPort, 3000))
+                yield return HealthMonitor.Warn(F, $"{held ?? "A find"} is held and the Switch doesn't answer (asleep?). Nothing will be reset: " +
+                                                   "wake the Switch, then choose Keep hunting or Stop hunter yourself.");
+            yield break;
+        }
+
         var csv = Path.Combine(h.BotDir, "encounters.csv");
         if (File.Exists(csv))
         {
@@ -434,12 +486,12 @@ public static class HuntService
             {
                 if (_autoRestarts < 3)
                 {
+                    // fixed quietly (the user asked not to be shown these): restart the hunter, note it in the log only
                     _autoRestarts++;
+                    AppPaths.Log($"The same {rep.Species} (PID {rep.Pid}) was logged 3 times in a row - restarting the hunter ({_autoRestarts}/3).");
                     StopPythonHunt();
                     Thread.Sleep(3000);
                     Start(h.Game, h.Key);
-                    yield return HealthMonitor.Error(F, $"The same {rep.Species} (PID {rep.Pid}) was logged 3 times in a row - the game wasn't resetting. " +
-                                                        $"Fixed automatically: the hunter was restarted (restart {_autoRestarts}/3).");
                 }
                 else
                     yield return HealthMonitor.Error(F, $"The same {rep.Species} (PID {rep.Pid}) keeps repeating even after 3 automatic restarts. " +
@@ -478,15 +530,21 @@ public static class HuntService
     /// <summary>The user started a hunt by hand: allow the automatic fixes again.</summary>
     public static void ResetAutoFixes() => _autoRestarts = 0;
 
-    /// <summary>Restarts the Python hunt (after the Switch IP changed, for example). False if none was running.</summary>
+    /// <summary>Restarts the Python hunt (after the Switch IP changed, for example). False if none was running - or if the shiny
+    /// failsafe holds a find (a restart would reset the game): then only the user's own Start hunting goes on.</summary>
     public static bool RestartPythonHunt()
     {
-        if (_lastPython is not { } h) return false;
+        if (_lastPython is not { } h || HeldFind != null) return false;
         StopPythonHunt();
         Thread.Sleep(2000);
         Start(h.Game, h.Key);
         return true;
     }
+
+    /// <summary>"Restart the hunt" from the error doctor: says why nothing happened when the failsafe holds a find.</summary>
+    public static string RestartFromDoctor() =>
+        HeldFind is { } held ? $"Not restarted: {held} was found and is held - a restart would reset the game. Catch it first, then press Start hunting on the game page."
+        : RestartPythonHunt() ? "Restarted the Python hunter." : "There's no hunt to restart - start it again from the game page.";
 
     private static IEnumerable<string> ReadLastLines(string path, int count)
     {

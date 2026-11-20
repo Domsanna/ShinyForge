@@ -13,7 +13,7 @@ from .capture import make_source
 from .config import ROOT, STATS_PATH, load_calibration, load_ref, sprite_path
 from .controllers import make_controller
 from .detector import ShinyDetector, match_in_region
-from .extras import EMBEDDED, PREVIEW, ask_keep_hunting, remove_file
+from .extras import EMBEDDED, PREVIEW, ask_keep_hunting, remove_file, respect_shiny_hold
 
 
 class Preview:
@@ -144,7 +144,9 @@ class Hunter:
         except Exception as e:
             p, note = None, f"stats error: {e}"
         if p is not None:
-            print("    " + p.summary().replace("\n", "\n    ") + (f"\n    NOTE: {note}" if note else ""))
+            # a repeated PID ("same PID as last encounter") is handled on its own - not shown
+            shown = note if note and "same PID" not in note else ""
+            print("    " + p.summary().replace("\n", "\n    ") + (f"\n    NOTE: {shown}" if shown else ""))
         else:
             print(f"    stats unavailable: {note}")
         log_encounter_csv(n, verdict, p, note)
@@ -248,6 +250,7 @@ class Hunter:
 
     # ------------------------------------------------------------- main loop
     def run(self):
+        respect_shiny_hold()   # a find from before is still held: press nothing until the user answers
         print(f"Connecting controller ({self.cfg['controller']['type']})...")
         self.ctrl.connect()
         print(f"Hunting! {self.stats['encounters']} encounters so far. Ctrl+C to stop.\n")
@@ -294,7 +297,8 @@ class Hunter:
                 self.preview.show(self.det.annotate(frame, r), "STOPPED - waiting for you")
                 alert_shiny(self.cfg["on_shiny"].get("beep", True))
                 if not ask_keep_hunting("\nType 'c' + Enter to keep hunting (this RESETS the game!), "
-                                        "or just Enter to quit: "):
+                                        "or just Enter to quit: ",
+                                        "SHINY Deoxys" if verdict == "shiny" else "An unrecognized encounter"):
                     break
         except KeyboardInterrupt:
             print("\nStopped by user.")
