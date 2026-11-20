@@ -42,8 +42,8 @@ if (Test-Path $keptBackup) {
 # they're over GitHub's 2 GB file limit): each one is published as its own file, tracker-<n>.xlsm, in the
 # "spreadsheets-1" release, listed in spreadsheets.json. The installer downloads the ones the user doesn't have yet,
 # and ShinyForge downloads a single tracker on demand. dist\sheets holds hard links to the originals (no copies).
-# Source: $env:SHINYFORGE_SHEETS or Desktop\Bot Spreadsheets.
-$sheetsSrc = if ($env:SHINYFORGE_SHEETS) { $env:SHINYFORGE_SHEETS } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "Bot Spreadsheets" }
+# Source: $env:SHINYFORGE_SHEETS, D:\ShinyForge Files\Bot Spreadsheets or Desktop\Bot Spreadsheets.
+$sheetsSrc = if ($env:SHINYFORGE_SHEETS) { $env:SHINYFORGE_SHEETS } elseif (Test-Path "D:\ShinyForge Files\Bot Spreadsheets") { "D:\ShinyForge Files\Bot Spreadsheets" } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "Bot Spreadsheets" }
 $sheetsOut = New-Item -ItemType Directory -Force (Join-Path $dist "sheets")
 $manifest = @()
 $pascal = @("procedure AddSheets;", "begin")

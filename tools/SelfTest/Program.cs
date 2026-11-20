@@ -9,6 +9,9 @@ Directory.CreateDirectory(work);
 var tests = args.Skip(1).ToHashSet();
 int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine($"{(ok ? "PASS" : "FAIL")}  {what}"); if (!ok) failures++; }
+// Dev test files (test saves, trackers, Python bot): SHINYFORGE_FILES, else D:\ShinyForge Files, else the Desktop.
+var devFiles = Environment.GetEnvironmentVariable("SHINYFORGE_FILES") is { Length: > 0 } sfEnv ? sfEnv
+    : Directory.Exists(@"D:\ShinyForge Files") ? @"D:\ShinyForge Files" : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 var uiReady = false;
 void InitUi() { if (uiReady) return; ApplicationConfiguration.Initialize(); uiReady = true; } // WinForms: once per process
 
@@ -57,7 +60,7 @@ if (tests.Contains("saves"))
 
 if (tests.Contains("realsaves"))
 {
-    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var desk = devFiles;
     var roc = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master");
     var pk = Path.Combine(desk, "PKHeX (26.10.18)");
     var cases = new (string Game, string Src)[]
@@ -429,7 +432,7 @@ if (tests.Contains("deps"))
 if (tests.Contains("3ds"))
 {
     // ---- Simulated 3DS: Luma3DS GDB stub (TCP 4000) + InputRedirection receiver (UDP 4950) running Ultra Moon.
-    var roc = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), @"RoCs-PC-master\RoCs-PC-master");
+    var roc = Path.Combine(devFiles, @"RoCs-PC-master\RoCs-PC-master");
     SaveUtil.TryGetSaveFile($@"{roc}\25 - Gen VII - USUM Collection\Save Data\20180228134254 - Ultra Moon\00001b51\main", out var umSave);
     var pool = SaveService.Boxes(umSave!).Select(b => b.Pk).Where(p => !p.IsShiny).Take(5).Cast<PK7>().ToList();
     var rng = new Random(7);
@@ -661,7 +664,7 @@ if (tests.Contains("3dsvc"))
           ShinyForge.Services.ThreeDS.VirtualConsoleGb.Make(2, 249, 40, 0xFA, 0xAA) is { IsShiny: true },
         "Gen 2 DV rule: Attack 9 not shiny, Attack 15 shiny (Def/Spe/Spc 10)");
     // the transfer rule agrees with PKHeX for every Pokémon in real Gen 1 / Gen 2 saves (copies are only read)
-    var bakDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PKHeX (26.10.18)", "bak");
+    var bakDir = Path.Combine(devFiles, "PKHeX (26.10.18)", "bak");
     int checkedMons = 0, disagree = 0;
     foreach (var f in Directory.Exists(bakDir) ? Directory.GetFiles(bakDir) : Array.Empty<string>())
         if (SaveUtil.TryGetSaveFile(f, out var gbSav) && gbSav is { Generation: <= 2 })
@@ -764,7 +767,7 @@ if (tests.Contains("dex"))
     Info(sw, 52, 2);                                 // Galarian Meowth
     Info(GameCatalog.Get("sw_violet"), 1007);        // Miraidon
     // Owned data rendered through the real save
-    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var desk = devFiles;
     var frSave = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav");
     if (File.Exists(frSave) && SaveUtil.TryGetSaveFile(frSave, out var frs) && frs != null)
     {
@@ -778,7 +781,7 @@ if (tests.Contains("dexui"))
     InitUi();
     var outDir = Path.Combine(work, "screens");
     Directory.CreateDirectory(outDir);
-    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var desk = devFiles;
     foreach (var (id, save) in new[]
              {
                  ("gba_firered", @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav"),
@@ -889,7 +892,7 @@ if (tests.Contains("pokeldn"))
     info[0] = 1;
     var big = Enumerable.Range(0, 600).Select(i => (byte)(i % 7 == 0 ? 0 : i)).ToArray();
     var root = Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "pokeldn");
-    var repo = new[] { root, @"C:\Users\Dominic Sanna\Desktop\Updated app\ShinyForge\Source\external\pokeldn" }.Select(Path.GetFullPath).FirstOrDefault(Directory.Exists);
+    var repo = new[] { root, Path.Combine(devFiles, @"Updated app\ShinyForge\Source\external\pokeldn") }.Select(Path.GetFullPath).FirstOrDefault(Directory.Exists);
     var py = DependencyService.FindPython();
     if (repo != null && py != null)
     {
@@ -992,7 +995,7 @@ if (tests.Contains("checkpoint"))
     var sd = Path.Combine(work, "fake_sd");
     if (Directory.Exists(sd)) Directory.Delete(sd, true);
     // Copies of real saves (blank saves made by PKHeX aren't recognised for every game); the originals are only read.
-    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var desk = devFiles;
     var roc = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master");
     var usSave = Path.Combine(roc, @"25 - Gen VII - USUM Collection\Save Data\20180228134249 - Ultra Sun\00001b50\main");
     var xSave = Path.Combine(roc, @"19 - Gen VI - XY Collection\Save Data\20180219163039 - X\0000055d\main");
@@ -1912,14 +1915,14 @@ if (tests.Contains("health"))
     File.WriteAllLines(csvPath, new[] { "header", Row(1, "11111111"), Row(2, "50CA8977"), Row(3, "50CA8977"), Row(4, "50CA8977") });
     Check(HuntService.FindRepeat(csvPath, since)?.Pid == "50CA8977", "same Pokémon 3x in a row -> detected");
     Check(HuntService.FindRepeat(csvPath, DateTime.Now.AddMinutes(5)) == null, "old rows (before the hunt started) are ignored");
-    var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\encounters.csv");
+    var real = Path.Combine(devFiles, @"Switch 1 Pokemon Bot\encounters.csv");
     if (File.Exists(real))
         Console.WriteLine($"   real log since 09:52: {HuntService.FindRepeat(real, new DateTime(2026, 11, 13, 9, 52, 0))?.Pid ?? "no 3-in-a-row at the end"}");
 
     // Switch IP is written into the Python bot's config.yaml
     var cfgDir = Path.Combine(work, "botcfg");
     Directory.CreateDirectory(cfgDir);
-    File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot\config.yaml"), Path.Combine(cfgDir, "config.yaml"), true);
+    File.Copy(Path.Combine(devFiles, @"Switch 1 Pokemon Bot\config.yaml"), Path.Combine(cfgDir, "config.yaml"), true);
     HuntService.SyncBotConfig(cfgDir, "192.168.1.77", 6000);
     var cfgText = File.ReadAllText(Path.Combine(cfgDir, "config.yaml"));
     Check(cfgText.Contains("host: 192.168.1.77") && cfgText.Contains("# <-- CHANGE") && cfgText.Contains("port: 6000"), "Switch IP synced into config.yaml (comments kept)");
@@ -1982,7 +1985,7 @@ if (tests.Contains("features"))
         $"notifications sent to Discord + ntfy ({res})");
     // the Python bot's notifier
     var py = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python",
-        "-c \"import sys; sys.path.insert(0, r'" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot") + "'); " +
+        "-c \"import sys; sys.path.insert(0, r'" + Path.Combine(devFiles, @"Switch 1 Pokemon Bot") + "'); " +
         "from shinybot.extras import notify; notify({'notify': {'discord_webhook': 'http://127.0.0.1:8798/pydiscord', 'ntfy_topic': 'pytopic', 'ntfy_server': 'http://127.0.0.1:8798'}}, 'Py shiny', 'from python', important=True)\"")
         { UseShellExecute = false, RedirectStandardOutput = true })!;
     Console.WriteLine("   python: " + py.StandardOutput.ReadToEnd().Trim());
@@ -2059,7 +2062,7 @@ if (tests.Contains("features"))
     HuntService.WriteBotOverrides(botCopy);
     Check(File.ReadAllText(Path.Combine(botCopy, "shinyforge.json")).Contains("\"mode\": \"rng\""), "RNG mode only when the user turned it on");
     var pyRules = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("python", "-c \"import sys; sys.path.insert(0, r'" +
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"Downloads\Switch 1 Pokemon Bot") + "'); " +
+        Path.Combine(devFiles, @"Switch 1 Pokemon Bot") + "'); " +
         "from types import SimpleNamespace as N; from shinybot.extras import check_rules; " +
         "p=N(species_name='Deoxys', nature='Jolly', iv_total=100, ivs={'Spe': 31}); q=N(species_name='Deoxys', nature='Bold', iv_total=50, ivs={'Spe': 3}); " +
         "r={'natures':['Jolly'],'min_ivs':{'Spe':31}}; print(check_rules(p,r)); print(check_rules(q,r)); print(check_rules(p, dict(r, require_all=True, min_iv_total=150)))\"")
@@ -2181,7 +2184,7 @@ if (tests.Contains("newui"))
     File.WriteAllText(keys, string.Join("\n", PokeldnService.KeysNeeded.Select(k => k + " = 00")));
     AppSettings.Current.ProdKeysPath = keys;
     Snap(new PokeldnForm(), "pokeldn", 15000);
-    var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+    var desk = devFiles;
     var us = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master\25 - Gen VII - USUM Collection\Save Data\20180228134249 - Ultra Sun\00001b50\main");
     if (PKHeX.Core.SaveUtil.TryGetSaveFile(us, out var usSav) && usSav != null)
     {
@@ -2572,7 +2575,7 @@ if (tests.Contains("framesdl"))
 if (tests.Contains("sheetreset"))
 {
     // on a COPY of a real tracker: mark a few Pokemon, then "start over" clears them; a second reset finds nothing
-    var src = Environment.GetEnvironmentVariable("SHEET") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+    var src = Environment.GetEnvironmentVariable("SHEET") ?? Path.Combine(devFiles,
         "Bot Spreadsheets", "Gen 1", "(1) Red", "Red Pokedex Tracker.xlsm");
     var copy = Path.Combine(work, "reset_" + Path.GetFileName(src));
     File.Copy(src, copy, true);
