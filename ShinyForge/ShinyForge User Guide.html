@@ -410,7 +410,7 @@
     <li>Change the length (20–300 seconds) or turn it off in <b>Settings → Shiny clips</b>.</li>
     <li>It pauses while a full recording is running, since that recording already has the moment.</li>
   </ul>
-  <p>The hunter also saves a screenshot taken straight from the Switch, so you get a picture even without a capture card.</p>
+  <p>The hunter also saves a screenshot of the find: straight from the Switch with the original sys-botbase (so you get a picture even without a capture card), from the capture card with sys-botbase-cpp.</p>
 </section>
 
 <!-- ============================================================ 8 -->
@@ -646,7 +646,7 @@
     <li>Keep the Switch and PC on the same network. Turn off the Switch's sleep mode while hunting.</li>
   </ol>
   <h3>Optional: sys-botbase-cpp</h3>
-  <div class="callout warn"><strong>Check screenshots after installing</strong>On some consoles sys-botbase-cpp 3.33 can't take screenshots over WiFi, and after one try it stops answering until the Switch restarts. ShinyForge needs screenshots to open games, find the FTP app and save. After the restart, open <b>sys-botbase</b> again: ShinyForge tests a screenshot and, if it fails, offers <b>Restore previous sys-botbase</b>. Start the FTP app yourself first (hold R while starting a game → ftpd), then restart the Switch. The original sys-botbase stays the safe choice.</div>
+  <div class="callout warn"><strong>Screenshots come from your capture card</strong>sys-botbase-cpp has only 3 MB of memory: once a game or the Homebrew Menu runs, a screenshot asked from it doesn't fit, and it stops answering until the Switch restarts (its log says "std::bad_alloc in pixelPeek"). So with sys-botbase-cpp, ShinyForge and its hunter take every screenshot from the capture card your Switch is docked to (the card your Switch games record from, else an Elgato card; <b>Settings → Switch</b> can name it). The <b>sys-botbase</b> window says which card it uses. Without a capture card, ShinyForge can't open games, find the FTP app or save with sys-botbase-cpp. Use the original sys-botbase then (<b>Restore previous sys-botbase</b>). Older ShinyForge versions and some other bots still ask sys-botbase-cpp for screenshots; if it stops answering, restart the Switch.</div>
   <p>Pokémon Automation's <b>sys-botbase-cpp</b> (<a href="https://github.com/PokemonAutomation/sys-botbase-cpp">github.com/PokemonAutomation/sys-botbase-cpp</a>, GPL-3.0) is a rewrite of sys-botbase with the same commands. It uses less memory, fixes a bug that could randomly crash the Switch, times button presses exactly, writes a log file to <code>atmosphere/contents/430000000000000B/log.txt</code>, and can talk over a USB cable. On any Switch game page, <b>Shiny Hunt card → sys-botbase</b> shows which version your Switch runs. Its <b>Install sys-botbase-cpp</b> button downloads the latest release from GitHub, starts the FTP app, backs up your current sys-botbase into <code>Data\Backups</code> and copies the new one onto the SD card. Close your game first, then restart the Switch when it's done.</p>
   <h3>WiFi or USB</h3>
   <ul>
@@ -771,7 +771,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
   <div class="table-wrap"><table class="credits">
     <tr><th>Project</th><th>By</th><th>Used for</th></tr>
     <tr><td>sys-botbase</td><td>olliz0r and contributors</td><td>Talking to the Switch over WiFi: buttons, memory and screenshots</td></tr>
-    <tr><td>sys-botbase-cpp</td><td>Pokémon Automation (C++ rewrite of sys-botbase / usb-botbase; thanks to olliz0r, berichan, jakibaki, FishGuy, Mysticial). GPL-3.0</td><td>Optional sys-botbase replacement: installed (and restored) by ShinyForge, WiFi or USB</td></tr>
+    <tr><td>sys-botbase-cpp</td><td>Pokémon Automation (C++ rewrite of sys-botbase / usb-botbase; thanks to olliz0r, berichan, jakibaki, FishGuy, Mysticial). GPL-3.0</td><td>sys-botbase replacement: installed (and restored) by ShinyForge, WiFi or USB; screenshots then come from the capture card</td></tr>
     <tr><td>usb-botbase protocol</td><td>Koi-3088, as spoken by SysBot.NET</td><td>ShinyForge's USB connection to the Switch</td></tr>
     <tr><td>Pokémon Automation Computer Control</td><td>The Pokémon Automation team (Mysticial and contributors). Personal, non-profit use</td><td>Linked and started from ShinyForge for unmodified Switches (not bundled)</td></tr>
     <tr><td>Zadig</td><td>Pete Batard (Akeo). GPL-3.0</td><td>Installs the WinUSB driver for the USB connection (you run it yourself)</td></tr>

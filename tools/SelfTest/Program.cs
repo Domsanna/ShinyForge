@@ -1,4 +1,4 @@
-﻿using PKHeX.Core;
+using PKHeX.Core;
 using ShinyForge.Core;
 using ShinyForge.Services;
 using ShinyForge.UI;
@@ -1630,6 +1630,28 @@ if (tests.Contains("sbbrestore"))
     }
 }
 
+if (tests.Contains("sbblog"))
+{
+    // REAL HARDWARE: SelfTest <work> sbblog - starts the FTP app if needed (an open game is CLOSED first, unsaved) and copies
+    // sys-botbase-cpp's log.txt and config.cfg into <work>\sbblog for reading.
+    ConsoleFtpLauncher.Decode = ShinyForge.UI.GdiImage.Decode;
+    var s = AppSettings.Current;
+    var port = ConsoleSdService.FindPort(s.SwitchIP);
+    if (port == null && ConsoleFtpLauncher.RunningGame(s.SwitchIP, s.SwitchPort) is { } open)
+    {
+        SwitchGameLauncher.CloseGame(s.SwitchIP, s.SwitchPort, SwitchGameLauncher.OtherGame.Close, m => Console.WriteLine("   " + m));
+        Check(ConsoleFtpLauncher.RunningGame(s.SwitchIP, s.SwitchPort) == null, $"the open game ({open}) was closed");
+    }
+    port ??= ConsoleFtpLauncher.StartFtpApp(s.SwitchIP, s.SwitchPort, m => Console.WriteLine("   " + m));
+    using var ftp = ConsoleFtp.Connect(s.SwitchIP, port.Value);
+    foreach (var name in new[] { "log.txt", "config.cfg" })
+    {
+        var local = Path.Combine(work, "sbblog", name);
+        try { ftp.Download("/atmosphere/contents/430000000000000B/" + name, local); Check(true, $"{name}: {new FileInfo(local).Length} bytes → {local}"); }
+        catch (Exception e) { Check(false, $"{name}: {e.Message}"); }
+    }
+}
+
 if (tests.Contains("sbbinstall"))
 {
     // REAL HARDWARE, writes the SD card: SelfTest <work> sbbinstall - installs sys-botbase-cpp (WiFi mode) over the FTP app,
@@ -1667,6 +1689,31 @@ if (tests.Contains("switchopen"))
     var game = GameCatalog.Get(args.Skip(1).First(a => a != "switchopen" && GameCatalog.All.Any(g => g.Id == a)));
     var t = SwitchGameLauncher.OpenGame(s.SwitchIP, s.SwitchPort, game, m => Console.WriteLine("   " + m));
     Check(SwitchGameLauncher.TitleIds(game).Contains(t), $"{game.Title} open ({t})");
+}
+
+if (tests.Contains("sbbshot"))
+{
+    // SelfTest <work> sbbshot <host> <port> [count]: the Switch's screen the way ShinyForge takes it (sys-botbase 2.x: its own
+    // screenshot; sys-botbase-cpp: the capture card). Each must decode, and sys-botbase must still answer normally afterwards
+    // (a screenshot asked from sys-botbase-cpp in a game would freeze it). Read-only: no buttons.
+    var host = args[2];
+    var port = int.Parse(args[3]);
+    var count = args.Length > 4 ? int.Parse(args[4]) : 5;
+    string? before;
+    using (var bot = new SysBotSession(host, port, controller: false)) before = bot.Version();
+    Console.WriteLine($"   sys-botbase {before ?? "(no version)"} at {host}:{port}");
+    for (var i = 1; i <= count; i++)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var bot = new SysBotSession(host, port, controller: false);
+        var jpg = bot.Screenshot();
+        var img = jpg == null ? null : ShinyForge.UI.GdiImage.Decode(jpg);
+        if (jpg != null) File.WriteAllBytes(Path.Combine(work, $"sbbshot_{i}.jpg"), jpg);
+        Check(img != null, $"screenshot {i}: {jpg?.Length ?? 0} bytes, {(img == null ? "not a picture" : $"{img.Width}x{img.Height}")}, {sw.ElapsedMilliseconds} ms");
+        var title = bot.TitleId();
+        var after = bot.Version();
+        Check(after == before, $"screenshot {i}: still answers normally afterwards (version {after ?? "none"}, title {title ?? "HOME menu"})");
+    }
 }
 
 if (tests.Contains("switchswap"))

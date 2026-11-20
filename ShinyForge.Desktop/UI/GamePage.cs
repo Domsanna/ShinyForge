@@ -167,12 +167,16 @@ public sealed class GamePage : UserControl, IDisposable
         var cpp = SysBotBaseInstaller.IsCpp(version);
         var frozen = version == SysBotBaseInstaller.Frozen;
         const string restore = "Restore previous";
-        if (backup != null && (cpp || frozen || version == null) && (version == null || !shots))
+        if (frozen)
         {
-            // sys-botbase-cpp jammed or can't take screenshots (ShinyForge needs them): offer the backed-up one
+            await Dialogs.Info(this, SysBotBaseInstaller.FrozenHelp, "sys-botbase"); // a restart is all it needs
+            return;
+        }
+        if (backup != null && (cpp || version == null) && (version == null || !shots))
+        {
+            // nothing answers, or sys-botbase-cpp can't take screenshots (ShinyForge needs them): offer the backed-up one
             if (await Dialogs.Show(this, (version == null ? $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}."
-                        : frozen ? "sys-botbase accepts the connection but answers nothing (frozen). " + SysBotBaseInstaller.CppWifiProblem
-                        : SysBotBaseInstaller.CppWifiProblem) +
+                        : SysBotBaseInstaller.CppNeedsCaptureCard) +
                     "\n\nRestore the previous sys-botbase? Start the FTP app yourself first (on the HOME menu hold R and press A on any game until " +
                     "the Homebrew Menu appears, then choose ftpd), then restart the Switch afterwards.", "sys-botbase", restore, Dialogs.Cancel) != restore) return;
             try
@@ -183,10 +187,9 @@ public sealed class GamePage : UserControl, IDisposable
             catch (Exception ex) { Status(ex.Message); await Dialogs.Info(this, ex.Message, "sys-botbase"); }
             return;
         }
-        if (version == null || frozen)
+        if (version == null)
         {
-            await Dialogs.Info(this, frozen ? "sys-botbase accepts the connection but answers nothing (frozen) - restart the Switch."
-                : $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}. Is the Switch on, on WiFi, and running Atmosphère?", "sys-botbase");
+            await Dialogs.Info(this, $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}. Is the Switch on, on WiFi, and running Atmosphère?", "sys-botbase");
             return;
         }
         var install = cpp ? "Reinstall / update" : "Install sys-botbase-cpp";
@@ -197,9 +200,6 @@ public sealed class GamePage : UserControl, IDisposable
             "the FTP app (the old files are backed up first); then restart the Switch. No game may be open - save and close it first.",
             "sys-botbase", install, Dialogs.Cancel);
         if (r != install) return;
-        if (!await Dialogs.YesNo(this, "Install sys-botbase-cpp over WiFi anyway?\n\n" + SysBotBaseInstaller.CppWifiProblem +
-                "\n\nAfterwards ShinyForge can't open games until the old sys-botbase is restored (the FTP app has to be started by hand for that).", "sys-botbase"))
-            return;
         if (HuntService.IsPythonHuntRunning()) { await Dialogs.Info(this, "The hunter is running - stop it first.", "sys-botbase"); return; }
         try
         {

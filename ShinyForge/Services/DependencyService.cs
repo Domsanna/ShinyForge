@@ -447,6 +447,12 @@ public static class DependencyService
     /// </summary>
     public static List<UpdateInfo> Updates { get; private set; } = new();
 
+    /// <summary>
+    /// <see cref="Updates"/> changed: a check finished or an update was installed. The update banner listens, so it says
+    /// what's still pending and goes away once nothing is (it used to stay up after the update was done). May fire on any thread.
+    /// </summary>
+    public static event Action? UpdatesChanged;
+
     /// <summary>The newer version found for this tool, or null.</summary>
     public static UpdateInfo? UpdateFor(Dependency d) => Updates.FirstOrDefault(u => u.Item == d.Name);
 
@@ -465,6 +471,7 @@ public static class DependencyService
             try { dep.Version = await ReadVersion(dep); } catch { }
         }
         if (u.Item == "SysBot.exe") ForgetSysBotCheck();
+        UpdatesChanged?.Invoke();
         return msg;
     }
 
@@ -500,6 +507,7 @@ public static class DependencyService
             Checked = _checking;
             CheckFailures = _failing.Distinct().ToList();
             LastChecked = DateTime.Now;
+            UpdatesChanged?.Invoke();
             return list;
         }
         finally { CheckGate.Release(); }

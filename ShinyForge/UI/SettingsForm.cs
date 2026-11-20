@@ -13,6 +13,10 @@ public sealed class SettingsForm : Form
         public string SwitchIP { get => AppSettings.Current.SwitchIP; set => AppSettings.Current.SwitchIP = value.Trim(); }
         [Category("Switch"), DisplayName("sys-botbase port")]
         public int SwitchPort { get => AppSettings.Current.SwitchPort; set => AppSettings.Current.SwitchPort = value; }
+        [Category("Switch"), DisplayName("Capture card for screenshots (blank = auto)"), TypeConverter(typeof(VideoDeviceList)),
+         Description("With sys-botbase-cpp, ShinyForge sees the Switch's screen through this capture card (sys-botbase-cpp has too " +
+                     "little memory for screenshots while a game runs). Blank = the card your Switch games record from, else an Elgato card.")]
+        public string SwitchScreenDevice { get => AppSettings.Current.SwitchScreenDevice; set => AppSettings.Current.SwitchScreenDevice = value.Trim(); }
         [Category("3DS"), DisplayName("3DS IP address"), Description("Shown in Rosalina's menu. Asked once each time ShinyForge starts and remembered until it closes (not saved). Change it here if the 3DS gets a new IP.")]
         public string ThreeDSIP { get => AppSettings.Current.ThreeDSIP; set => AppSettings.Current.ThreeDSIP = value.Trim(); }
         [Category("Paths"), DisplayName("Pokédex spreadsheets folder"), Description("Folder containing the Gen 1 ... Gen 9 tracker workbooks.")]
@@ -83,6 +87,15 @@ public sealed class SettingsForm : Form
         public int WebPort { get => S.WebPort; set => S.WebPort = Math.Clamp(value, 1024, 65535); }
         [Category("Stream overlay & phone remote"), DisplayName("Remote PIN")]
         public string RemotePin { get => Services.WebServer.Pin; set => S.RemotePin = value.Trim(); }
+    }
+
+    /// <summary>The capture devices FFmpeg sees, as the drop-down of a text setting (blank = auto; typing a name works too).</summary>
+    private sealed class VideoDeviceList : StringConverter
+    {
+        public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
+        public override bool GetStandardValuesExclusive(ITypeDescriptorContext? context) => false;
+        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context) =>
+            new(new[] { "" }.Concat(Services.Equipment.VideoSources()).ToArray());
     }
 
     public SettingsForm()

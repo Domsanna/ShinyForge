@@ -191,9 +191,13 @@ public static class WebServer
         return id == 0 ? "" : $"/sprite/{id}.png";
     }
 
-    /// <summary>A screenshot straight from the Switch (sys-botbase pixelPeek) - no capture card needed.</summary>
+    /// <summary>
+    /// The Switch's screen for the phone remote: from the capture card when there is one (it never needs sys-botbase, which
+    /// with sys-botbase-cpp answers only the hunter while a hunt runs), else straight from sys-botbase.
+    /// </summary>
     public static byte[]? SwitchScreenshot()
     {
+        if (SwitchScreen.Grab() is { } card) return card;
         var s = AppSettings.Current;
         try
         {

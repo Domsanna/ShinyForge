@@ -5,12 +5,11 @@ Offsets come from Lusamine's SysBot.NET "moarencounterbots" FRLG research (also 
 by LegoFigure11's GRASS): https://github.com/Lusamine/SysBot.NET/tree/moarencounterbots
 Verified on English LeafGreen (010034D02340E000) with sys-botbase 2.5.
 
-Uses its own sys-botbase connection (sys-botbase serves several clients at once).
+Shares the hunt's one sys-botbase connection with the controller (sys-botbase-cpp serves only one client at a time).
 """
 from __future__ import annotations
 
-import socket
-
+from .controllers import sysbot_socket
 from .gen3 import decode
 
 SLOT = 100  # party-format Pokemon record
@@ -84,37 +83,28 @@ ROAMERS = {"Raikou", "Entei", "Suicune"}
 
 
 class SysBotMemory:
-    """Minimal sys-botbase reader that stays in sync after failed reads."""
+    """Minimal sys-botbase reader on the hunt's one shared connection (controllers.sysbot_socket - sys-botbase-cpp
+    answers only one connection at a time)."""
 
     def __init__(self, host, port=6000):
         self.host, self.port = host, port
-        self.sock = self.f = None
-
-    def _open(self):
-        self.sock = socket.create_connection((self.host, self.port), timeout=15)
-        self.f = self.sock.makefile("rb")
-        self.sock.sendall(b"configure echoCommands 0\r\n")  # (no reply)
+        self.link = sysbot_socket(host, port)
 
     def cmd(self, text: str) -> str:
-        """One request, one hex answer. A failed request raises IOError and leaves the connection in sync:
-        sys-botbase 2.x answers several error lines ("pmdmnt...", "svc...") plus a blank line - the connection is
-        reopened instead of guessing how many lines are left; sys-botbase-cpp 3.x answers "0"."""
+        """One request, one hex answer; a failed request raises IOError. sys-botbase 2.x answers a failed read with
+        several error lines ("pmdmnt...", "svc...") plus a blank line, 3.x with "0" - the next request drops whatever
+        is left first, so the connection stays in sync."""
         line = None
         for attempt in range(2):
             try:
-                if self.sock is None:
-                    self._open()
-                self.sock.sendall((text + "\r\n").encode())
-                line = self.f.readline().decode(errors="replace").strip()
+                line = self.link.request(text)
                 break
             except OSError:  # connection lost: reconnect once
-                self.close()
+                self.link.close()
                 if attempt:
                     raise
         if line and line != "0" and len(line) % 2 == 0 and all(c in "0123456789abcdefABCDEF" for c in line):
             return line
-        if line != "0":
-            self.close()  # 2.x error lines (and a blank line) may still be on the way
         raise IOError(f"sys-botbase: {text.split()[0]} failed ({line or 'no answer'})")
 
     def peek(self, heap_off: int, size: int) -> bytes:
@@ -124,12 +114,7 @@ class SysBotMemory:
         return data
 
     def close(self):
-        try:
-            if self.sock:
-                self.sock.close()
-        except OSError:
-            pass
-        self.sock = self.f = None
+        """Nothing to do: the shared connection is closed by the controller (after it lets go of the buttons)."""
 
 
 # Gen 3 Poke Ball item IDs (the POKe BALLS pocket holds these)

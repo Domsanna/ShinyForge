@@ -79,6 +79,11 @@ public sealed class AppSettings
     /// at a time (its config.cfg) - <see cref="Services.SysBotBaseInstaller.SetMode"/> changes both together.
     /// </summary>
     public string SwitchConnection { get; set; } = "WiFi";
+    /// <summary>
+    /// The capture card that shows the Switch, for screenshots while it runs sys-botbase-cpp ("" = found by itself: the
+    /// card the Switch games record from, else an Elgato / Game Capture card) - see Services.SwitchScreen.
+    /// </summary>
+    public string SwitchScreenDevice { get; set; } = "";
     [JsonIgnore] public bool SwitchUsb => SwitchConnection.Equals("USB", StringComparison.OrdinalIgnoreCase);
     /// <summary>Session-only: remembered while ShinyForge runs, asked again after a restart (never saved to settings.json).</summary>
     [JsonIgnore]

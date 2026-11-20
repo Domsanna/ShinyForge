@@ -14,6 +14,7 @@ Button names used everywhere in this bot:
 from __future__ import annotations
 
 import json
+import select
 import socket
 import threading
 import time
@@ -55,17 +56,37 @@ class DryRunController(Controller):
 
 
 class _LineSocket:
-    """Small TCP helper with automatic reconnect."""
+    """Small TCP helper with automatic reconnect. `init` is sent after every (re)connect."""
 
-    def __init__(self, host, port, timeout=5.0):
-        self.host, self.port, self.timeout = host, port, timeout
+    def __init__(self, host, port, timeout=5.0, init: bytes = b""):
+        self.host, self.port, self.timeout, self.init = host, port, timeout, init
         self.sock = None
-        self.lock = threading.Lock()
+        self.buf = b""
+        self.lock = threading.RLock()
 
     def open(self):
-        self.close()
-        self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        """Connects. sys-botbase-cpp rebuilds its listening socket every time a client leaves (ShinyForge's game launcher just
+        before the hunt starts); a connection made in that moment is reset at once - watched for 150 ms and made again."""
+        with self.lock:
+            for attempt in range(3):
+                self.close()
+                self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                time.sleep(0.15)
+                if not self._reset_at_once() or attempt == 2:
+                    break
+                time.sleep(0.5)
+            if self.init:
+                self.sock.sendall(self.init)
+
+    def _reset_at_once(self) -> bool:
+        ready, _, _ = select.select([self.sock], [], [], 0)
+        if not ready:
+            return False
+        try:
+            return self.sock.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
 
     def send(self, data: bytes):
         with self.lock:
@@ -82,21 +103,57 @@ class _LineSocket:
             raise ConnectionError(f"Could not reach {self.host}:{self.port}")
 
     def readline(self) -> str:
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = self.sock.recv(1)
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1 << 16)
             if not chunk:
                 raise ConnectionError("connection closed")
-            buf += chunk
-        return buf.decode(errors="replace").strip()
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return line.decode(errors="replace").strip()
+
+    def request(self, text: str, timeout: float = 15.0) -> str:
+        """Sends one command and returns its answer line. Whatever arrived unasked before (error lines after button
+        presses, leftovers of a failed read) is dropped first, so answers never get mixed up."""
+        with self.lock:
+            if self.sock is None:
+                self.open()
+            self.buf = b""
+            self.sock.setblocking(False)
+            try:
+                while self.sock.recv(1 << 16):
+                    pass
+            except OSError:
+                pass  # nothing more waiting
+            self.sock.settimeout(timeout)
+            try:
+                self.sock.sendall((text + "\r\n").encode())
+                return self.readline()
+            finally:
+                self.sock.settimeout(self.timeout)
 
     def close(self):
-        if self.sock:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
-        self.sock = None
+        with self.lock:
+            if self.sock:
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+            self.sock = None
+            self.buf = b""
+
+
+_SHARED: dict = {}
+
+
+def sysbot_socket(host, port=6000) -> _LineSocket:
+    """THE connection to sys-botbase on this Switch, shared by button presses, memory reads and screenshots.
+    sys-botbase-cpp (3.x) serves only one connection at a time - a second one is never answered (sys-botbase 2.x serves
+    several, and works the same way through one)."""
+    key = (host, int(port))
+    if key not in _SHARED:
+        # (no replies) no echo; hex answers on - sys-botbase-cpp may still have them off (2.x ignores the option)
+        _SHARED[key] = _LineSocket(host, int(port), init=b"configure echoCommands 0\r\nconfigure enableBackwardsCompat 1\r\n")
+    return _SHARED[key]
 
 
 class SysBotBaseController(Controller):
@@ -110,7 +167,7 @@ class SysBotBaseController(Controller):
     MIN_HOLD = 0.15
 
     def __init__(self, host, port=6000):
-        self.conn = _LineSocket(host, port)
+        self.conn = sysbot_socket(host, port)
         self._click_ms = None
 
     def _cmd(self, text):
@@ -118,7 +175,6 @@ class SysBotBaseController(Controller):
 
     def connect(self):
         self.conn.open()
-        self._cmd("configure echoCommands 0")
         self._click_ms = None
         # If a previous bot was closed abruptly its virtual controller can stay half-attached and the game then
         # ignores every input: release everything and detach it first, then attach a fresh one.

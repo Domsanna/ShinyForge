@@ -5,13 +5,15 @@
 - pause.flag  (ShinyForge / the phone remote creates it -> the bot pauses between attempts)
 - bot_status.json (what the bot is doing right now - read by ShinyForge's overlay / phone remote)
 - stop rules: stop on species, natures, IVs - not only on shinies
-- a screenshot straight from the Switch (sys-botbase pixelPeek) when something is found
+- a screenshot of the Switch when something is found (sys-botbase pixelPeek, or the capture card with sys-botbase-cpp)
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
-import socket
+import subprocess
+import threading
 import time
 import urllib.request
 import uuid
@@ -168,15 +170,114 @@ def check_rules(p, rules: dict | None) -> str | None:
 
 # ---------------------------------------------------------------------------- screenshot
 def switch_screenshot(host: str, port: int = 6000) -> bytes | None:
+    """The Switch's screen as JPEG bytes, or None.
+    sys-botbase 2.x: its own screenshot (pixelPeek). sys-botbase-cpp (3.x): the capture card ShinyForge named in
+    shinyforge.json - with a game running, sys-botbase-cpp's fixed 3 MB of memory can't hold a screenshot (std::bad_alloc in
+    pixelPeek, then it answers nothing until the Switch restarts). The hunter always has the game open, so without a capture
+    card there's no screenshot with sys-botbase-cpp."""
+    from .controllers import sysbot_socket  # the hunt's one connection (sys-botbase-cpp answers only one)
+    link = sysbot_socket(host, port)
     try:
-        s = socket.create_connection((host, port), timeout=15)
-        s.sendall(b"configure echoCommands 0\r\npixelPeek\r\n")
-        f = s.makefile("rb")
-        line = f.readline().strip()
-        s.close()
-        return bytes.fromhex(line.decode()) if line else None
+        if _is_cpp(link.request("getVersion", timeout=5)):
+            return _CARD.grab()
+        return bytes.fromhex(link.request("pixelPeek", timeout=20)) or None
     except (OSError, ValueError):
         return None
+
+
+def _is_cpp(version: str) -> bool:
+    try:
+        return int(version.split("/")[-1].split(".")[0]) >= 3
+    except ValueError:
+        return False
+
+
+class _CaptureCard:
+    """Reads the capture card with one FFmpeg (5 JPEG pictures a second, 1280x720 like sys-botbase's screenshots) while
+    screenshots are wanted; stops 30 s after the last one. FFmpeg and the device come from shinyforge.json ("switch_screen")."""
+
+    def __init__(self):
+        self.proc = None
+        self.frame, self.frame_at, self.wanted_at = None, 0.0, 0.0
+        self.lock = threading.Lock()
+
+    def grab(self, timeout: float = 6.0) -> bytes | None:
+        asked = time.time()
+        with self.lock:
+            self.wanted_at = asked
+            if self.proc is None or self.proc.poll() is not None:
+                if not self._start():
+                    return None
+        while time.time() - asked < timeout:  # a picture that left the card after the request (~0.1-0.2 s delay)
+            with self.lock:
+                if self.frame and self.frame_at >= asked + 0.25:
+                    return self.frame
+                if self.proc is None or self.proc.poll() is not None:
+                    break
+            time.sleep(0.04)
+        return None
+
+    def _start(self) -> bool:
+        try:
+            screen = json.loads(OVERRIDES.read_text(encoding="utf-8")).get("switch_screen") or {}
+        except (OSError, ValueError):
+            screen = {}
+        if not screen.get("ffmpeg") or not screen.get("args"):
+            print("  No capture card is set for screenshots (ShinyForge names it) - sys-botbase-cpp can't take them in-game.")
+            return False
+        try:
+            self.proc = subprocess.Popen([screen["ffmpeg"], "-hide_banner", "-loglevel", "error", *screen["args"]],
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError as e:
+            print(f"  The capture card couldn't be read for a screenshot: {e}")
+            return False
+        self.frame = None
+        threading.Thread(target=self._read, args=(self.proc,), daemon=True).start()
+        threading.Thread(target=self._stop_when_idle, args=(self.proc,), daemon=True).start()
+        return True
+
+    def _read(self, proc):
+        """Splits FFmpeg's stream into pictures: FFmpeg's JPEGs end at the first FF D9 (no thumbnails or restart markers,
+        and the compressed data never holds FF D9)."""
+        buf = b""
+        try:
+            while True:
+                chunk = proc.stdout.read1(1 << 16)
+                if not chunk:
+                    return  # FFmpeg stopped
+                buf += chunk
+                while (start := buf.find(b"\xff\xd8")) >= 0 and (end := buf.find(b"\xff\xd9", start + 2)) >= 0:
+                    jpg, buf = buf[start:end + 2], buf[end + 2:]
+                    with self.lock:
+                        if proc is not self.proc:
+                            return
+                        self.frame, self.frame_at = jpg, time.time()
+                if len(buf) > 0x400000:
+                    buf = b""
+        except (OSError, ValueError):
+            pass
+
+    def _stop_when_idle(self, proc):
+        while proc.poll() is None:
+            time.sleep(5)
+            with self.lock:
+                if proc is self.proc and time.time() - self.wanted_at > 30:
+                    self.stop()
+
+    def stop(self):
+        p, self.proc, self.frame = self.proc, None, None
+        if p and p.poll() is None:
+            try:
+                p.stdin.write(b"q")
+                p.stdin.flush()
+                p.wait(1.5)
+            except (OSError, subprocess.TimeoutExpired):
+                p.kill()
+
+
+_CARD = _CaptureCard()
+atexit.register(lambda: _CARD.stop())
 
 
 def save_screenshot(host: str, port: int, tag: str):

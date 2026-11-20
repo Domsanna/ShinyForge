@@ -39,7 +39,8 @@ public sealed class MainForm : Form
         name.Location = new Point(66, 14);
         _back.Location = new Point(220, 14);
         _back.Click += (_, _) => GoBack();
-        _crumb.Location = new Point(330, 22);
+        _crumb.AutoSize = false;     // it gets the room left of the buttons (header.Resize), cut with "..." - it used to
+        _crumb.AutoEllipsis = true;  // grow over the Guide button on long game names
         var settings = new FancyButton("Settings", Theme.GlyphSettings, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
         _updates.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         var livingDex = new FancyButton("Living Dex", Theme.GlyphSparkle, Theme.Accent2) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
@@ -48,7 +49,7 @@ public sealed class MainForm : Form
         stats.Click += (_, _) => new HuntStatsForm().Show(this);
         var guide = new FancyButton("Guide", "" /* Help (question mark) */, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
         guide.Click += (_, _) => OpenUserGuide();
-        header.Controls.AddRange(new Control[] { logo, name, _back, _crumb, settings, _updates, livingDex, stats, guide });
+        header.Controls.AddRange(new Control[] { settings, _updates, livingDex, stats, guide, logo, name, _back, _crumb }); // buttons on top
         header.Resize += (_, _) =>
         {
             settings.Location = new Point(header.Width - settings.Width - 16, 14);
@@ -56,9 +57,10 @@ public sealed class MainForm : Form
             livingDex.Location = new Point(_updates.Left - livingDex.Width - 10, 14);
             stats.Location = new Point(livingDex.Left - stats.Width - 10, 14);
             guide.Location = new Point(stats.Left - guide.Width - 10, 14);
+            _crumb.Bounds = new Rectangle(330, 22, Math.Max(0, guide.Left - 12 - 330), 24);
         };
         settings.Click += (_, _) => { using var f = new SettingsForm(); f.ShowDialog(this); };
-        _updates.Click += (_, _) => { using var f = new ToolsForm(_isSwitch); f.ShowDialog(this); };
+        _updates.Click += (_, _) => { using (var f = new ToolsForm(_isSwitch)) f.ShowDialog(this); RefreshUpdateBanner(); };
 
         // ---- status bar
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = Theme.Panel };
@@ -79,6 +81,9 @@ public sealed class MainForm : Form
         HealthMonitor.Updated += () => UiSafe(UpdateHealthLabel);
         HealthMonitor.Problem += item => UiSafe(() => OnHealthProblem(item));
         HuntService.SwitchUnreachable += msg => UiSafe(() => AskNewSwitchIp(msg));
+        Action updatesChanged = () => UiSafe(RefreshUpdateBanner);
+        DependencyService.UpdatesChanged += updatesChanged;
+        FormClosed += (_, _) => DependencyService.UpdatesChanged -= updatesChanged;
         UpdateHealthLabel();
 
         Controls.Add(_content);
@@ -293,17 +298,13 @@ public sealed class MainForm : Form
         try
         {
             var updates = await DependencyService.CheckUpdates();
-            var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
             _bannerUpdates = updates.Select(u => u.Item).ToHashSet();
-            if (updates.Count == 0 && missing.Count == 0)
+            if (UpdateBannerText() is not { } text)
             {
                 SetStatus("Everything is up to date.");
                 return;
             }
-            var parts = new List<string>();
-            if (updates.Count > 0) parts.Add($"{updates.Count} update(s) available ({string.Join(", ", updates.Select(u => u.Item))})");
-            if (missing.Count > 0) parts.Add($"{missing.Count} optional tool(s) not installed ({string.Join(", ", missing.Select(m => m.Name))})");
-            ShowBanner(string.Join("   •   ", parts));
+            ShowBanner(text);
             SetStatus("Update check finished.");
         }
         catch (Exception e)
@@ -335,20 +336,22 @@ public sealed class MainForm : Form
         _rechecking = true;
         try
         {
-            var parts = new List<string>();
+            var news = false;
             // ShinyForge itself: only named in the banner (no window pops up in the middle of a hunt); Tools & Updates installs it
             try
             {
-                if (await AppUpdateService.CheckAsync() is { IsNewer: true } r && r.Tag != AppSettings.Current.SkippedAppVersion && _bannerUpdates.Add("ShinyForge " + r.Tag))
-                    parts.Add($"ShinyForge {r.VersionText} is available");
+                if (await AppUpdateService.CheckAsync() is { IsNewer: true } r && r.Tag != AppSettings.Current.SkippedAppVersion)
+                {
+                    _appUpdateText = $"ShinyForge {r.VersionText} is available";
+                    news |= _bannerUpdates.Add("ShinyForge " + r.Tag);
+                }
             }
             catch (Exception e) { AppPaths.Log("ShinyForge update check: " + e.Message); }
             var updates = await DependencyService.CheckUpdates();
-            var fresh = updates.Where(u => !_bannerUpdates.Contains(u.Item)).ToList();
-            foreach (var u in fresh) _bannerUpdates.Add(u.Item);
-            if (fresh.Count > 0) parts.Add($"{fresh.Count} new update(s) available ({string.Join(", ", fresh.Select(u => u.Item))})");
+            foreach (var u in updates) news |= _bannerUpdates.Add(u.Item);
             AppPaths.Log($"Hourly update check: {(updates.Count == 0 ? "nothing new" : string.Join(", ", updates.Select(u => u.Item)))}");
-            if (parts.Count > 0) { ShowBanner(string.Join("   •   ", parts)); SetStatus("Update check finished."); }
+            // only something new opens the banner; what's in it is always everything still pending
+            if (news && UpdateBannerText() is { } text) { ShowBanner(text); SetStatus("Update check finished."); }
         }
         catch (Exception e) { AppPaths.Log("Hourly update check: " + e.Message); }
         finally { _rechecking = false; }
@@ -380,8 +383,38 @@ public sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>"ShinyForge 1.x is available" once the hourly check found it (ShinyForge isn't in DependencyService.Updates).</summary>
+    private string? _appUpdateText;
+    /// <summary>The banner shows updates (not a health problem): it follows <see cref="DependencyService.UpdatesChanged"/>.</summary>
+    private bool _bannerIsUpdates;
+
+    /// <summary>What the update banner says now - pending updates and missing tools - or null when nothing is left.</summary>
+    private string? UpdateBannerText()
+    {
+        var parts = new List<string>();
+        if (_appUpdateText != null) parts.Add(_appUpdateText);
+        var updates = DependencyService.Updates;
+        if (updates.Count > 0) parts.Add($"{updates.Count} update(s) available ({string.Join(", ", updates.Select(u => u.Item))})");
+        var missing = DependencyService.All.Where(d => d.State == DepState.Missing && d.Wanted).ToList();
+        if (missing.Count > 0) parts.Add($"{missing.Count} optional tool(s) not installed ({string.Join(", ", missing.Select(m => m.Name))})");
+        return parts.Count == 0 ? null : string.Join("   •   ", parts);
+    }
+
+    /// <summary>
+    /// After an update, an install or a new check: the update banner is made again from what's still pending, and closes when
+    /// nothing is (it used to keep saying e.g. "1 update(s) available (pokeldn)" after pokeldn was updated). A banner the user
+    /// closed stays closed.
+    /// </summary>
+    private void RefreshUpdateBanner()
+    {
+        if (!_bannerIsUpdates || _banner.Height == 0) return;
+        if (UpdateBannerText() is { } text) ShowBanner(text);
+        else { _banner.Height = 0; _bannerIsUpdates = false; }
+    }
+
     private void ShowBanner(string text, bool health = false)
     {
+        _bannerIsUpdates = !health;
         _banner.Controls.Clear();
         _banner.Height = 44;
         _banner.BackColor = health ? Color.FromArgb(80, 30, 30) : Color.FromArgb(60, 45, 10);
@@ -393,10 +426,11 @@ public sealed class MainForm : Form
         review.Click += (_, _) =>
         {
             if (health) { using var h = new HealthForm(); h.ShowDialog(this); UpdateHealthLabel(); return; }
-            using var f = new ToolsForm(_isSwitch); f.ShowDialog(this);
+            using (var f = new ToolsForm(_isSwitch)) f.ShowDialog(this);
+            RefreshUpdateBanner();
         };
         var installAll = new FancyButton("Install all", Theme.GlyphDownload, Theme.PanelHi) { Height = 32 };
-        installAll.Click += (_, _) => ToolsForm.InstallAll(this, _isSwitch, everything: false);
+        installAll.Click += (_, _) => { ToolsForm.InstallAll(this, _isSwitch, everything: false); RefreshUpdateBanner(); };
         installAll.Visible = !health && DependencyService.All.Any(d => d.State == DepState.Missing && d.Wanted);
         var close = Theme.Label("✕", Theme.H2, Theme.Muted);
         close.Cursor = Cursors.Hand;

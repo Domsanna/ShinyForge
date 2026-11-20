@@ -174,23 +174,32 @@ public static class SysBotBaseInstaller
     }
 
     /// <summary>
-    /// Why sys-botbase-cpp can't be used over WiFi on consoles like the user's: its screenshot command runs out of memory
-    /// (std::bad_alloc in pixelPeek_cmd, seen in its log.txt) and its command thread dies - it keeps accepting connections but
-    /// answers nothing until the Switch restarts. ShinyForge needs screenshots to open games, find the FTP app and save.
+    /// What a frozen sys-botbase means and what to do. sys-botbase-cpp freezes when it's asked for a screenshot while a game or
+    /// the Homebrew Menu runs: its fixed 3 MB of memory can't hold it (std::bad_alloc in pixelPeek_cmd in its log.txt), its
+    /// command thread dies and it still accepts connections but answers nothing until the Switch restarts. ShinyForge 1.4 and
+    /// its hunter take those screenshots from the capture card instead (<see cref="SwitchScreen"/>).
     /// </summary>
-    public const string CppWifiProblem =
-        "sys-botbase-cpp runs out of memory when it's asked for a screenshot over WiFi and then stops answering anything until the " +
-        "Switch restarts (its log on the SD card says \"std::bad_alloc in pixelPeek\"). ShinyForge needs screenshots to open games, " +
-        "find the FTP app and save.";
+    public const string FrozenHelp =
+        "sys-botbase accepts the connection but answers nothing - it froze. sys-botbase-cpp does that when it's asked for a screenshot " +
+        "while a game or the Homebrew Menu runs: it has too little memory for it (its log on the SD card says \"std::bad_alloc in " +
+        "pixelPeek\"). ShinyForge 1.4 and its hunter take those screenshots from the capture card instead; older ShinyForge versions " +
+        "and some other bots still ask sys-botbase. Restart the Switch (hold POWER → Power Options → Restart) to bring it back.";
+
+    /// <summary>Why ShinyForge can't see the Switch's screen with sys-botbase-cpp when no capture card shows it.</summary>
+    public const string CppNeedsCaptureCard =
+        "sys-botbase-cpp can't take screenshots while a game or the Homebrew Menu runs (it has too little memory - it would freeze), " +
+        "so ShinyForge takes them from the capture card the Switch is docked to - and none was found. Connect the capture card " +
+        "(Settings can name it), or restore the previous sys-botbase.";
 
     /// <summary>
-    /// Can sys-botbase take a screenshot? ShinyForge needs that to open games, find the FTP app and save. sys-botbase-cpp over
-    /// WiFi is never asked: the test itself would crash it (<see cref="CppWifiProblem"/>). <paramref name="version"/> = what
-    /// <see cref="InstalledVersion"/> said.
+    /// Can ShinyForge see the Switch's screen? It needs that to open games, find the FTP app and save. sys-botbase-cpp over
+    /// WiFi: through the capture card (asking sys-botbase-cpp itself would freeze it once a game runs).
+    /// <paramref name="version"/> = what <see cref="InstalledVersion"/> said.
     /// </summary>
     public static bool ScreenshotWorks(string host, int port, string? version)
     {
-        if (version == null || version == Frozen || (IsCpp(version) && !AppSettings.Current.SwitchUsb)) return false;
+        if (version == null || version == Frozen) return false;
+        if (IsCpp(version) && !AppSettings.Current.SwitchUsb) return SwitchScreen.Grab() != null;
         try
         {
             using var bot = new SysBotSession(host, port, controller: false);

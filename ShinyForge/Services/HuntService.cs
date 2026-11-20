@@ -91,6 +91,14 @@ public static class HuntService
                 ["ntfy_topic"] = s.NtfyTopic, ["ntfy_server"] = s.NtfyServer,
                 ["shiny"] = s.NotifyShiny, ["problems"] = false, // problems are sent by ShinyForge's system check
             },
+            // where the hunter sees the screen when the Switch runs sys-botbase-cpp (too little memory for screenshots in-game)
+            ["switch_screen"] = SwitchScreen.Device() is { } dev && RecordingService.FindFfmpeg() is { } ff
+                ? new JsonObject
+                {
+                    ["device"] = dev, ["ffmpeg"] = ff,
+                    ["args"] = new JsonArray(SwitchScreen.InputArgs(dev).Concat(SwitchScreen.OutputArgs).Select(a => (JsonNode)a).ToArray()),
+                }
+                : null,
         };
         File.WriteAllText(Path.Combine(botDir, "shinyforge.json"), o.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
     }
@@ -497,6 +505,15 @@ public static class HuntService
         try { PythonHunt?.Kill(entireProcessTree: true); } catch { }
         if (BotDir is { } d) ClearHunterFiles(d);
         MarkStopped();
+        // A killed hunter can't let go of its buttons, and sys-botbase-cpp keeps them held (stopped during a soft reset, the game
+        // kept restarting): let go of every button and hand the controls back to the real controller.
+        var s = AppSettings.Current;
+        if (!string.IsNullOrWhiteSpace(s.SwitchIP))
+            Task.Run(() =>
+            {
+                try { using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort); }
+                catch (Exception e) { AppPaths.Log("Letting go of the hunter's buttons: " + e.Message); }
+            });
     }
 
     /// <summary>

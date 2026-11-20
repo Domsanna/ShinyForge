@@ -2,6 +2,20 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.4.0
+
+### Changed
+- **Works with the newest sys-botbase (sys-botbase-cpp 3.33).** sys-botbase-cpp has only 3 MB of memory: once a game or the Homebrew Menu runs, a screenshot asked from it doesn't fit (`std::bad_alloc in pixelPeek` in its log) and it stops answering until the Switch restarts. That's the "sys-botbase is frozen" message. With sys-botbase-cpp, ShinyForge now takes every Switch screenshot from the capture card the Switch is docked to (opening games, the FTP app, user picker, saving, closing, the phone remote) and never asks sys-botbase-cpp for one. The card is found by itself (the one your Switch games record from, else an Elgato card) or named in **Settings → Switch → Capture card for screenshots**. The original sys-botbase 2.x works as before.
+- **The hunter works with sys-botbase-cpp.** sys-botbase-cpp answers only one connection at a time. The hunter's button presses, memory reads and screenshots now share one connection (it used to open two, and the second got no answer: "no game is running"). Its shiny screenshot and auto-catch bag checks come from the capture card with sys-botbase-cpp.
+- The **sys-botbase** window says where screenshots come from, and the warnings against using sys-botbase-cpp over WiFi are gone.
+
+### Fixed
+- **The update banner goes away after the update.** It used to keep saying e.g. "1 update(s) available (pokeldn)" after pokeldn was updated. It now follows every update, install and check: it lists only what's still pending and closes when nothing is left. A banner you closed stays closed.
+- **Closing a game with sys-botbase-cpp.** sys-botbase-cpp 3.33 keeps reporting the last game as running after it was closed, so the close was retried and its A press started the game again. ShinyForge now asks whether that game really still runs.
+- **Stopping the hunter lets go of its buttons.** A hunter stopped during a soft reset left A+B+START+SELECT held with sys-botbase-cpp, and the game kept restarting.
+- **A new connection right after another one** is no longer reset by sys-botbase-cpp (it rebuilds its listening socket when a client leaves). Such a connection is now noticed and made again.
+- **The header's Guide button is no longer hidden** behind a long page title (e.g. "Nintendo Switch › Pokémon LeafGreen (Switch)"). The title is shortened with "…" instead.
+
 ## 1.3.3
 
 ### Fixed

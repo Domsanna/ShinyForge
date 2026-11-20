@@ -273,7 +273,7 @@ public sealed class GamePage : UserControl
         var version = await Task.Run(() => SysBotBaseInstaller.InstalledVersion(s.SwitchIP, s.SwitchPort));
         var cpp = SysBotBaseInstaller.IsCpp(version);
         var frozen = version == SysBotBaseInstaller.Frozen;
-        // ShinyForge needs screenshots; sys-botbase-cpp over WiFi isn't even asked (the test itself would crash it)
+        // ShinyForge needs screenshots (asked for the memory-light way, so sys-botbase-cpp is tested too)
         var shots = await Task.Run(() => SysBotBaseInstaller.ScreenshotWorks(s.SwitchIP, s.SwitchPort, version));
         Status("");
         var backup = SysBotBaseInstaller.LatestBackup();
@@ -286,9 +286,9 @@ public sealed class GamePage : UserControl
             Caption = "ShinyForge - sys-botbase",
             Heading = version == null ? "The Switch doesn't answer" : frozen ? "sys-botbase is frozen" : cpp ? $"sys-botbase-cpp {version} (Pokémon Automation)" : $"sys-botbase {version} (original)",
             Text = (version == null ? (s.SwitchUsb ? IpPrompt.UsbMissing : $"Nothing answers at {s.SwitchIP}:{s.SwitchPort}. Is the Switch on, on WiFi, and running Atmosphère?") + "\n\n" : "") +
-                   (frozen ? "⚠ sys-botbase accepts the connection but answers nothing. That's how sys-botbase-cpp breaks: " + SysBotBaseInstaller.CppWifiProblem +
-                             " A restart brings it back until the next screenshot. " + restoreHow + "\n\n"
-                    : cpp && !s.SwitchUsb ? "⚠ " + SysBotBaseInstaller.CppWifiProblem + " " + restoreHow + "\n\n"
+                   (frozen ? "⚠ " + SysBotBaseInstaller.FrozenHelp + "\n\n"
+                    : cpp && !s.SwitchUsb && !shots ? "⚠ " + SysBotBaseInstaller.CppNeedsCaptureCard + " " + restoreHow + "\n\n"
+                    : cpp && !s.SwitchUsb ? $"✓ Screenshots come from the capture card ({SwitchScreen.Device()}): sys-botbase-cpp has too little memory for them while a game runs.\n\n"
                     : version != null && !shots ? "⚠ It can't take screenshots on this Switch, and ShinyForge needs them to open games, find the FTP app and save. " + restoreHow + "\n\n" : "") +
                    $"Connection: {(s.SwitchUsb ? "USB cable" : "WiFi")}.\n\n" +
                    "sys-botbase-cpp (github.com/PokemonAutomation/sys-botbase-cpp, GPL-3.0) is a rewrite of sys-botbase with the same commands: " +
@@ -302,14 +302,13 @@ public sealed class GamePage : UserControl
         var install = new TaskDialogButton(cpp ? "Reinstall / update sys-botbase-cpp" : "Install sys-botbase-cpp") { Enabled = version != null && !frozen };
         var toUsb = new TaskDialogButton("Use USB") { Enabled = cpp && !s.SwitchUsb };
         var toWifi = new TaskDialogButton("Use WiFi") { Enabled = s.SwitchUsb };
-        var restore = new TaskDialogButton("Restore previous sys-botbase") { Enabled = backup != null && (cpp || frozen || version == null) };
-        var close = TaskDialogButton.Close;
+        var restore = new TaskDialogButton("Restore previous sys-botbase") { Enabled = backup != null && (cpp || frozen || version == null) };        var close = TaskDialogButton.Close;
         page.Buttons.Add(install);
         page.Buttons.Add(s.SwitchUsb ? toWifi : toUsb);
         if (backup != null) page.Buttons.Add(restore);
         page.Buttons.Add(close);
-        // Enter / Space must never install: Restore when sys-botbase-cpp is the problem, otherwise Close
-        page.DefaultButton = restore.Enabled && backup != null ? restore : close;
+        // Enter / Space must never install: Restore when screenshots don't work, otherwise Close (a frozen one only needs a restart)
+        page.DefaultButton = restore.Enabled && backup != null && version != null && !frozen && !shots ? restore : close;
         var choice = TaskDialog.ShowDialog(FindForm()!, page);
         if (choice == restore)
         {
@@ -325,10 +324,6 @@ public sealed class GamePage : UserControl
         }
         if (choice != install && choice != toUsb && choice != toWifi) return;
         if (HuntService.IsPythonHuntRunning()) { MessageBox.Show(FindForm(), "The hunter is running - stop it first.", "sys-botbase"); return; }
-        if (choice == install && !s.SwitchUsb && MessageBox.Show(FindForm(), "Install sys-botbase-cpp over WiFi anyway?\n\n" + SysBotBaseInstaller.CppWifiProblem +
-                "\n\nThis happened on this kind of console: afterwards ShinyForge can't open games until the old sys-botbase is restored " +
-                "(the FTP app has to be started by hand for that, then the Switch restarted).", "sys-botbase",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         if (choice == install && MessageBox.Show(FindForm(), "No game may be open on the Switch (ShinyForge starts the FTP app from the HOME menu). " +
                 "Save and close your game, then press OK.", "sys-botbase", MessageBoxButtons.OKCancel, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
         try

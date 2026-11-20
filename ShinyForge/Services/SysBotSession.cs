@@ -63,7 +63,9 @@ internal sealed class SysBotSession : IDisposable
     {
         _link = link;
         _controller = controller;
-        if (!_link.IsUsb) Send("configure echoCommands 0"); // USB never echoes
+        // USB never echoes. enableBackwardsCompat 1: sys-botbase-cpp's hex answers (what this reads), in case another program
+        // switched them off - the setting outlives connections. sys-botbase 2.x ignores that option.
+        if (!_link.IsUsb) { Send("configure echoCommands 0"); Send("configure enableBackwardsCompat 1"); }
         if (controller) ResetController();
     }
 
@@ -112,7 +114,19 @@ internal sealed class SysBotSession : IDisposable
         var id = _link.IsUsb
             ? (reply.Length == 8 ? BinaryPrimitives.ReadUInt64LittleEndian(reply).ToString("X16") : null)
             : Encoding.ASCII.GetString(reply).Trim();
-        return id != null && Regex.IsMatch(id, "^[0-9A-Fa-f]{16}$") && id.TrimStart('0').Length > 0 ? id.ToUpperInvariant() : null;
+        if (id == null || !Regex.IsMatch(id, "^[0-9A-Fa-f]{16}$") || id.TrimStart('0').Length == 0) return null;
+        // sys-botbase-cpp 3.33 keeps answering the LAST app's title ID after it was closed (it re-reads it only from a running
+        // app), so it's asked whether that program really runs (pm's own answer)
+        return IsCpp() && !IsRunning(id) ? null : id.ToUpperInvariant();
+    }
+
+    /// <summary>sys-botbase-cpp's isProgramRunning (pm:dmnt): one byte, 1 = running. No clear answer = assumed running.</summary>
+    private bool IsRunning(string titleId)
+    {
+        var reply = _link.Request($"isProgramRunning 0x{titleId}", SysBotReply.Value);
+        if (reply == null) return true;
+        var text = _link.IsUsb ? Convert.ToHexString(reply) : Encoding.ASCII.GetString(reply).Trim();
+        return text.TrimStart('0').Length > 0;
     }
 
     /// <summary>
@@ -126,8 +140,29 @@ internal sealed class SysBotSession : IDisposable
         catch (IOException) { return false; }
     }
 
-    /// <summary>The Switch's screen as a JPEG, or null.</summary>
-    public byte[]? Screenshot() => _link.Request("pixelPeek", SysBotReply.Image);
+    /// <summary>
+    /// The Switch's screen as a JPEG (1280x720), or null. sys-botbase 2.x and USB: sys-botbase's screenshot. sys-botbase-cpp
+    /// over WiFi: only the capture card (<see cref="SwitchScreen"/>) - once a game or the Homebrew Menu has run, its fixed 3 MB
+    /// of memory can't hold a screenshot (std::bad_alloc in pixelPeek_cmd, then it answers nothing until the Switch restarts).
+    /// </summary>
+    public byte[]? Screenshot() => _link.IsUsb || !IsCpp() ? _link.Request("pixelPeek", SysBotReply.Image) : SwitchScreen.Grab();
+
+    /// <summary>sys-botbase-cpp (3.x) at this address? Asked once, remembered for 2 minutes (it only changes with a restart).</summary>
+    private bool IsCpp()
+    {
+        var key = _link.Address;
+        lock (CppKnown)
+            if (CppKnown.TryGetValue(key, out var known) && DateTime.UtcNow - known.At < TimeSpan.FromMinutes(2)) return known.Cpp;
+        var version = Version();
+        _link.ReadTimeoutMs = 15000;
+        // no answer: can't tell - not remembered, and the safe guess (the capture card) is taken when there is one
+        if (version == null) return SwitchScreen.Device() != null;
+        var cpp = SysBotBaseInstaller.IsCpp(version);
+        lock (CppKnown) CppKnown[key] = (cpp, DateTime.UtcNow);
+        return cpp;
+    }
+
+    private static readonly Dictionary<string, (bool Cpp, DateTime At)> CppKnown = new();
 
     /// <summary>Bytes from the game's heap, or null when sys-botbase can't read there.</summary>
     public byte[]? Peek(uint heapOffset, int size)
@@ -163,6 +198,8 @@ internal enum SysBotReply { Value, Bytes, Image, Text }
 internal abstract class SysBotLink : IDisposable
 {
     public abstract bool IsUsb { get; }
+    /// <summary>Which Switch this is ("host:port", or "usb").</summary>
+    public abstract string Address { get; }
     /// <summary>How long a request waits for its answer.</summary>
     public abstract int ReadTimeoutMs { set; }
     public abstract void Send(string cmd);
@@ -176,23 +213,45 @@ internal abstract class SysBotLink : IDisposable
 /// <summary>WiFi: one text line per command ("\r\n"), answers are text lines (hex for data).</summary>
 internal sealed class WifiLink : SysBotLink
 {
-    private readonly TcpClient _c = new();
-    private readonly NetworkStream _s;
+    private TcpClient _c = new();
+    private NetworkStream _s = null!;
     private readonly byte[] _buf = new byte[1 << 16];
     private int _start, _end;
 
+    /// <summary>
+    /// Connects. sys-botbase-cpp rebuilds its listening socket every time a client leaves; a connection that arrives in that
+    /// moment is reset at once ("forcibly closed" on the first request). So the new connection is watched for 150 ms and made
+    /// again (up to 3 times) when it was reset.
+    /// </summary>
     public WifiLink(string host, int port)
     {
-        if (string.IsNullOrWhiteSpace(host) || !_c.ConnectAsync(host, port).Wait(3000) || !_c.Connected)
+        Address = $"{host}:{port}";
+        for (var attempt = 0; ; attempt++)
         {
+            _c = new TcpClient();
+            if (string.IsNullOrWhiteSpace(host) || !_c.ConnectAsync(host, port).Wait(3000) || !_c.Connected)
+            {
+                _c.Dispose();
+                throw new IOException($"sys-botbase doesn't answer at {host}:{port}.");
+            }
+            _c.ReceiveTimeout = 15000;
+            _s = _c.GetStream();
+            Thread.Sleep(150);
+            if (!ResetAtOnce() || attempt == 2) return;
             _c.Dispose();
-            throw new IOException($"sys-botbase doesn't answer at {host}:{port}.");
+            Thread.Sleep(500);
         }
-        _c.ReceiveTimeout = 15000;
-        _s = _c.GetStream();
+    }
+
+    /// <summary>The connection was closed / reset right after it was made (readable with nothing to read).</summary>
+    private bool ResetAtOnce()
+    {
+        try { return _c.Client.Poll(0, SelectMode.SelectRead) && _c.Client.Available == 0; }
+        catch (SocketException) { return true; }
     }
 
     public override bool IsUsb => false;
+    public override string Address { get; }
     public override int ReadTimeoutMs { set => _c.ReceiveTimeout = value; }
 
     public override void Send(string cmd)
@@ -205,6 +264,11 @@ internal sealed class WifiLink : SysBotLink
     {
         TakePending();
         Send(cmd);
+        return ReadAnswer(kind);
+    }
+
+    private byte[]? ReadAnswer(SysBotReply kind)
+    {
         // 2.x: a failed request answers error lines ("svc...", "pmdmnt...") and then a blank line; 3.x answers "0".
         for (var i = 0; i < 8; i++)
         {
@@ -273,6 +337,7 @@ internal sealed class UsbLink : SysBotLink
     }
 
     public override bool IsUsb => true;
+    public override string Address => "usb";
     public override int ReadTimeoutMs { set => _dev.TimeoutMs = (uint)value; }
 
     public override void Send(string cmd)
