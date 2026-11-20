@@ -186,8 +186,16 @@ if (tests.Contains("framedcard"))
         var dir = Path.Combine(work, "framedcard");
         if (Directory.Exists(dir)) Directory.Delete(dir, true);
         rec.Status += s => Console.WriteLine("   rec: " + s);
-        rec.Start(new RecordingService.CaptureSpec(RecordingService.DevicePrefix + card, RecordingService.NoAudio, Platform.Switch, ConsoleFrames.Auto), dir, 1, 60);
-        Thread.Sleep(8000);
+        // with the card's own sound, like a real recording (a sleeping Switch sends almost none: the case that failed)
+        var (_, audios) = RecordingService.ListDevices();
+        var cardAudio = audios.FirstOrDefault(a => a.StartsWith(card)) ?? RecordingService.NoAudio;
+        rec.Start(new RecordingService.CaptureSpec(RecordingService.DevicePrefix + card, cardAudio, Platform.Switch, ConsoleFrames.Auto), dir, 1, 60);
+        // the same check Start recording makes: the file must be seen being written within 20 seconds
+        FileInfo? written = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (written == null && sw.Elapsed.TotalSeconds < 20 && rec.IsRecording) { Thread.Sleep(1000); written = rec.WrittenFile(); }
+        Check(written != null, $"Start recording's check sees the file being written ({written?.Name} {written?.Length ?? 0} bytes after {sw.Elapsed.TotalSeconds:0} s, audio: {cardAudio})");
+        Thread.Sleep(Math.Max(0, 8000 - (int)sw.ElapsedMilliseconds));
         rec.Stop();
         var file = Directory.EnumerateFiles(dir, "Recording_*.mp4").FirstOrDefault();
         Check(file != null, "recording written: " + file);
@@ -2227,7 +2235,7 @@ if (tests.Contains("healthui"))
     main.GetType().GetMethod("UpdateHealthLabel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(main, null);
     for (int i = 0; i < 10; i++) { Application.DoEvents(); Thread.Sleep(50); }
     using (var bmp = new Bitmap(main.Width, main.Height)) { main.DrawToBitmap(bmp, new Rectangle(Point.Empty, main.Size)); bmp.Save(Path.Combine(outDir, "main_health.png")); }
-    main.Close();
+    main.Dispose(); // not Close(): closing asks to stop the user's own running hunt
     Console.WriteLine("   rendered main_health");
 }
 
@@ -2261,7 +2269,7 @@ if (tests.Contains("render"))
     var main = new MainForm { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000) };
     main.Show(); Application.DoEvents(); Thread.Sleep(500); Application.DoEvents();
     using (var bmp = new Bitmap(main.Width, main.Height)) { main.DrawToBitmap(bmp, new Rectangle(Point.Empty, main.Size)); bmp.Save(Path.Combine(outDir, "0_mainform.png")); }
-    main.Close();
+    main.Dispose(); // not Close(): closing asks to stop the user's own running hunt
     Console.WriteLine("   rendered 0_mainform");
 }
 
@@ -2542,12 +2550,94 @@ if (tests.Contains("recheck"))
     }
     finally
     {
-        main?.Close();
+        main?.Dispose(); // not Close(): closing asks to stop the user's own running hunt
         (s.PokeldnPath, s.PokeldnSetupDone, s.CheckUpdatesOnStart, s.SkippedAppVersion) = keep;
         foreach (var d in DependencyService.All) d.Version = null;
         await DependencyService.CheckUpdates();
     }
     }
+}
+
+if (tests.Contains("closeparts"))
+{
+    // 1) what's running is only LISTED here (never stopped: the user's own hunt may be running)
+    var parts = RunningParts.Find();
+    Console.WriteLine("   running now: " + (parts.Count == 0 ? "nothing" : string.Join(" | ", parts.Select(p => p.Name))));
+    Check(HuntService.IsPythonHuntRunning() == parts.Any(p => p.Name.Contains("Python")), "a running Python hunter is listed");
+    var owner = new object();
+    var stopped = false;
+    RunningParts.Register(owner, () => stopped ? null : "Fake part", () => stopped = true);
+    var fake = RunningParts.Find().Where(p => p.Name == "Fake part").ToList();
+    Check(fake.Count == 1, "a registered part is listed while it runs");
+    var q = RunningParts.Question(fake);
+    Console.WriteLine("   question:\n" + string.Join("\n", q.Split('\n').Select(l => "      " + l)));
+    Check(q.Contains("Part of ShinyForge is still running") && q.Contains("Is that OK?"), "the question says part of ShinyForge is running and asks");
+    RunningParts.StopAll(fake);
+    Check(stopped && !RunningParts.Find().Any(p => p.Name == "Fake part"), "stopping it stops it (and it's no longer listed)");
+    RunningParts.Unregister(owner);
+
+    // 2) titles for each kind of recording: never the Pokemon's name, never over YouTube's 100 characters
+    var game = GameCatalog.All.First(g => g.Id == "sw_frlg_fr");
+    Check(YouTubeTitles.GameName(game) == "Pokémon FireRed", "game name: " + YouTubeTitles.GameName(game));
+    var now = DateTime.Now;
+    var cases = new (string Name, YouTubeTitles.Facts F)[]
+    {
+        ("one legendary shiny", new("Pokémon FireRed", TimeSpan.FromMinutes(102), 1284, new() { (now, "Deoxys", true) }, true)),
+        ("two shinies", new("Pokémon FireRed", TimeSpan.FromHours(3), 2210, new() { (now, "Pidgey", true), (now, "Rattata", true) }, true)),
+        ("stop target", new("Pokémon FireRed", TimeSpan.FromMinutes(40), 300, new() { (now, "Mewtwo", false) }, true)),
+        ("no shiny yet", new("Pokémon FireRed", TimeSpan.FromHours(2), 950, new(), true)),
+        ("just gameplay", new("Pokémon Legends: Arceus", TimeSpan.FromMinutes(25), 0, new(), false)),
+    };
+    foreach (var (name, f) in cases)
+    {
+        var t = YouTubeTitles.Suggest(f, new Random(1));
+        Console.WriteLine($"   {name}: " + string.Join("  /  ", t));
+        Check(t.Count >= 3 && t.All(x => x.Length <= YouTubeTitles.MaxLength), $"{name}: {t.Count} titles, all within 100 characters");
+        Check(!t.Any(x => f.Finds.Any(m => x.Contains(m.Species, StringComparison.OrdinalIgnoreCase))), $"{name}: no title gives the Pokémon away");
+    }
+
+    // 3) a real recording (a small test window, 2 x 3-second segments) stops and leaves its title file next to the videos
+    var dir = Path.Combine(work, "yttitle");
+    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    Directory.CreateDirectory(dir);
+    File.WriteAllText(Path.Combine(dir, "Recording_0004.mp4"), "an older recording");
+    var t0 = new Thread(() =>
+    {
+        InitUi();
+        using var win = new Form { Text = "SF title test window", StartPosition = FormStartPosition.Manual, Location = new Point(40, 40), Size = new Size(320, 240), BackColor = Color.SeaGreen, TopMost = true };
+        win.Shown += async (_, _) =>
+        {
+            var rec = new RecordingService { Name = game.Title };
+            string? written = null;
+            rec.Finished += (s, end) => written = YouTubeTitles.Write(game, s, end);
+            rec.Start(RecordingService.WindowPrefix + "SF title test window", RecordingService.NoAudio, dir, 1, 3);
+            await Task.Delay(2500);
+            rec.AddMoment("Deoxys", true);
+            await Task.Delay(4500);
+            Check(RecordingService.Running().Contains(rec), "the recording is listed as running");
+            Check(RunningParts.Find().Any(p => p.Name == "A gameplay recording (FireRed (Switch))"), "it's in the close question as \"A gameplay recording (FireRed (Switch))\"");
+            rec.Stop();
+            Check(!RecordingService.Running().Contains(rec), "stopped: no longer running");
+            Check(written != null && File.Exists(written), "title file written: " + Path.GetFileName(written ?? "(none)"));
+            if (written != null)
+            {
+                var text = File.ReadAllText(written);
+                Console.WriteLine(string.Join("\n", text.Split('\n').Select(l => "      | " + l.TrimEnd('\r'))));
+                Check(Path.GetFileName(written).StartsWith("Recording_0005") && text.Contains("TITLE:"), "named after this recording's first video (Recording_0005), not the older one");
+                var title = text.Split('\n')[4].Trim();
+                Check(!title.Contains("Deoxys"), "the title doesn't name the shiny");
+                Check(text.Contains("Shiny Deoxys at") && text.Contains("Recording_0005.mp4 at 0:02"), "the facts say what was found and where in the videos");
+            }
+            var count = Directory.GetFiles(dir, "*YouTube title.txt").Length;
+            rec.Stop();
+            Check(Directory.GetFiles(dir, "*YouTube title.txt").Length == count, "a second Stop writes no second file");
+            win.Close();
+        };
+        Application.Run(win);
+    });
+    t0.SetApartmentState(ApartmentState.STA);
+    t0.Start();
+    t0.Join();
 }
 
 if (tests.Contains("framesdl"))

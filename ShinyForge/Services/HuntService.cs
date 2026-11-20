@@ -555,7 +555,11 @@ public static class HuntService
         return sr.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).TakeLast(count).ToList();
     }
 
-    public static void StopPythonHunt()
+    public static void StopPythonHunt() => StopPythonHunt(wait: false);
+
+    /// <param name="wait">Wait (a few seconds at most) until the Switch's buttons are let go - ShinyForge is closing, so a
+    /// background task would be cut off.</param>
+    public static void StopPythonHunt(bool wait)
     {
         _stopRequested = true;
         foreach (var p in PythonProcesses().Where(p => CommandLineContains(p, "shinybot")))
@@ -565,13 +569,43 @@ public static class HuntService
         MarkStopped();
         // A killed hunter can't let go of its buttons, and sys-botbase-cpp keeps them held (stopped during a soft reset, the game
         // kept restarting): let go of every button and hand the controls back to the real controller.
+        ReleaseSwitchButtons(wait);
+    }
+
+    private static void ReleaseSwitchButtons(bool wait)
+    {
         var s = AppSettings.Current;
-        if (!string.IsNullOrWhiteSpace(s.SwitchIP))
-            Task.Run(() =>
-            {
-                try { using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort); }
-                catch (Exception e) { AppPaths.Log("Letting go of the hunter's buttons: " + e.Message); }
-            });
+        if (string.IsNullOrWhiteSpace(s.SwitchIP)) return;
+        var release = Task.Run(() =>
+        {
+            try { using var bot = new SysBotSession(s.SwitchIP, s.SwitchPort); }
+            catch (Exception e) { AppPaths.Log("Letting go of the hunter's buttons: " + e.Message); }
+        });
+        if (wait) release.Wait(TimeSpan.FromSeconds(6));
+    }
+
+    /// <summary>SysBot.exe windows that are open now (the copy ShinyForge starts hunts with). Windows only.</summary>
+    public static List<Process> SysBotProcesses()
+    {
+        if (!OsInfo.IsWindows || DependencyService.PathOf("SysBot.exe") is not { } exe) return new();
+        var name = Path.GetFileNameWithoutExtension(exe);
+        return Process.GetProcessesByName(name).Where(p =>
+        {
+            try { return string.Equals(p.MainModule?.FileName, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase); }
+            catch { return true; } // can't read its path (other user / elevated): it is still a SysBot window
+        }).ToList();
+    }
+
+    /// <summary>Closes SysBot.exe (its own close first, so it stops its bots cleanly) and lets go of the Switch's buttons.</summary>
+    public static void StopSysBot(Process p, bool wait)
+    {
+        try
+        {
+            if (!p.HasExited && !(p.CloseMainWindow() && p.WaitForExit(5000)))
+                p.Kill(entireProcessTree: true);
+        }
+        catch (Exception e) { AppPaths.Log("Closing SysBot.exe: " + e.Message); }
+        ReleaseSwitchButtons(wait);
     }
 
     /// <summary>

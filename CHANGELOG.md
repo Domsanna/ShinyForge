@@ -2,6 +2,18 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.4.2
+
+### Added
+- **YouTube title for every recording.** When a recording stops, `Recording_NNNN - YouTube title.txt` is saved next to its videos with a catchy title and a few more ideas. They're based on what happened: how long it ran, encounters logged, shinies or stop targets found. The titles never name the Pokémon. The file also lists what was found and where it is in the videos.
+
+### Changed
+- **Closing ShinyForge stops what it runs, after asking.** When a hunt (Python hunter, SysBot.exe, 3DS bot) or a recording is running, closing ShinyForge lists it and asks whether to stop it too. Before, the hunter kept pressing buttons on the Switch with ShinyForge gone. With nothing running, ShinyForge just closes.
+
+### Fixed
+- A working recording could be stopped after 20 seconds with "The recording didn't start" (seen when the capture card sends almost no sound, e.g. while the Switch sleeps). Windows' folder listing keeps showing an open file's starting size (0 bytes), and the start check (and the "file hasn't grown" health check) only looked at that listing. They now read each file's real size.
+- 3DS Capture window recordings and their sound failed with FFmpeg 9 ("Option thread_queue_size cannot be applied to input url"). FFmpeg 9 made that an output-only option, so it's now only used with FFmpeg 8 and older.
+
 ## 1.4.1
 
 ### Added

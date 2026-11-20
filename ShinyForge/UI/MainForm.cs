@@ -99,11 +99,25 @@ public sealed class MainForm : Form
             await StartupChecks();
             StartRecheckTimer();
         };
+        // Closing ShinyForge stops everything it runs (the hunter used to keep pressing buttons on the Switch on its own) -
+        // after asking, when something is running.
         FormClosing += (_, e) =>
         {
-            if (_content.Controls.Count > 0 && _content.Controls[0] is GamePage { IsRecording: true } &&
-                MessageBox.Show(this, "A recording is in progress. Stop it and exit?", "ShinyForge", MessageBoxButtons.YesNo) == DialogResult.No)
+            var parts = RunningParts.Find();
+            if (parts.Count == 0) return;
+            // Only a Windows shutdown skips the question. (A close sent by another program - a script, an installer - reaches
+            // WinForms as TaskManagerClosing, so that one must ask too: skipping it once stopped a hunt without a word.)
+            var ask = e.CloseReason != CloseReason.WindowsShutDown;
+            if (ask && MessageBox.Show(this, RunningParts.Question(parts), "ShinyForge is still running",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.No)
+            {
                 e.Cancel = true;
+                return;
+            }
+            SetStatus("Stopping " + string.Join(", ", parts.Select(p => p.Name.ToLowerInvariant())) + "...");
+            UseWaitCursor = true;
+            Refresh();
+            RunningParts.StopAll(parts);
         };
     }
 

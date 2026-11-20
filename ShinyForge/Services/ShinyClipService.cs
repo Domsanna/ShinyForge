@@ -20,6 +20,17 @@ public sealed class ShinyClipService
 
     public static string DefaultFolder => Path.Combine(AppPaths.DataDir, "Shiny Clips");
 
+    private static readonly List<ShinyClipService> Instances = new();
+    public ShinyClipService() { lock (Instances) Instances.Add(this); }
+
+    /// <summary>ShinyForge is closing: every clip buffer stops (its FFmpeg would otherwise keep recording on its own).</summary>
+    public static void StopAll()
+    {
+        List<ShinyClipService> all;
+        lock (Instances) all = Instances.ToList();
+        foreach (var c in all) c.Stop();
+    }
+
     private ProcessAudioCapture? _appAudio;
 
     public void Start(string source, string audio, string gameId, string outFolder) => Start(new RecordingService.CaptureSpec(source, audio), gameId, outFolder);

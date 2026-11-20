@@ -85,6 +85,14 @@ public sealed class GamePage : UserControl
         Resize += (_, _) => grid.Width = Math.Max(900, ClientSize.Width - 40);
 
         _recorder.Status += s => Ui(() => _recStatus.Text = s);
+        _recorder.Name = game.Title;
+        // a finished recording gets a text file with YouTube title ideas next to its videos
+        _recorder.Finished += (session, ended) =>
+        {
+            if (YouTubeTitles.Write(_game, session, ended) is { } titles)
+                Ui(() => _recStatus.Text = "Recording stopped. YouTube title ideas: " + Path.GetFileName(titles));
+        };
+        RunningParts.Register(this, () => _hunt3ds != null ? $"The 3DS shiny hunt ({game.Title})" : null, Stop3DSHuntAndWait);
         _poll.Tick += (_, _) => RefreshHuntStatus();
         _poll.Start();
         if (_gs.AutoMonitor)
@@ -96,6 +104,7 @@ public sealed class GamePage : UserControl
         Disposed += (_, _) =>
         {
             HealthMonitor.Unregister(_healthKey);
+            RunningParts.Unregister(this);
             HuntService.Found -= OnFound;
             _clips.Stop();
         };
@@ -512,6 +521,13 @@ public sealed class GamePage : UserControl
     private DateTime _last3dsActivity = DateTime.Now;
     private Services.ThreeDS.Bot3DS? _bot3ds;
     public bool IsHunting3DS => _hunt3ds != null;
+
+    /// <summary>ShinyForge is closing: stops the 3DS hunt and gives it a few seconds to let go of the 3DS.</summary>
+    private void Stop3DSHuntAndWait()
+    {
+        _hunt3ds?.Cancel();
+        for (int i = 0; i < 50 && _hunt3ds != null; i++) Thread.Sleep(100);
+    }
     private static int _3dsHunts;
     /// <summary>Is a 3DS hunt running on any game page (for keep-awake)?</summary>
     public static bool Any3DSHunt => _3dsHunts > 0;
@@ -724,6 +740,7 @@ public sealed class GamePage : UserControl
     /// <summary>Something was found: save the clip (or point at the running recording).</summary>
     private void OnFound(string species, bool shiny)
     {
+        _recorder.AddMoment(species, shiny);
         Ui(() => Status($"{(shiny ? "★ Shiny " : "Found ")}{species}! {(_recorder.IsRecording ? "It's in the current recording." : "")}"));
         if (_clips.Running)
             _ = Task.Run(async () =>

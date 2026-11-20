@@ -19,6 +19,62 @@ public sealed class RecordingService
     public bool IsRecording => _ffmpeg is { HasExited: false };
     public event Action<string>? Status;
 
+    /// <summary>What is being recorded (the game's name) - shown when closing ShinyForge would stop it.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>One recording from Start to Stop (automatic restarts after FFmpeg died stay in the same session).</summary>
+    public sealed class Session(string folder, int firstNumber, DateTime started, int segmentSeconds)
+    {
+        public string Folder { get; } = folder;
+        public int FirstNumber { get; } = firstNumber;
+        public DateTime Started { get; } = started;
+        public int SegmentSeconds { get; } = segmentSeconds;
+        /// <summary>Things that happened while recording (shiny / stop target found): time, species, shiny.</summary>
+        public List<(DateTime Time, string Species, bool Shiny)> Moments { get; } = new();
+    }
+
+    private Session? _session;
+
+    /// <summary>Raised (on the thread that called Stop) when a recording has been stopped: the session and when it ended.</summary>
+    public event Action<Session, DateTime>? Finished;
+
+    /// <summary>Notes a find in the running recording (used for the YouTube title written when it stops).</summary>
+    public void AddMoment(string species, bool shiny)
+    {
+        if (_session is { } s) lock (s.Moments) s.Moments.Add((DateTime.Now, species, shiny));
+    }
+
+    /// <summary>
+    /// "-thread_queue_size N " for an input (a bigger queue, so a window / pipe input never waits on the encoder) - but only
+    /// for FFmpeg 8 and older: FFmpeg 9 made it an output-only option and refuses the whole command ("cannot be applied to
+    /// input url"), which broke every 3DS Capture recording.
+    /// </summary>
+    public static string InputQueue(int packets) => FfmpegMajor() is > 0 and < 9 ? $"-thread_queue_size {packets} " : "";
+
+    private static (string? Path, int Major)? _ffVersion;
+
+    private static int FfmpegMajor()
+    {
+        var ff = FindFfmpeg();
+        if (_ffVersion is { } c && c.Path == ff) return c.Major;
+        var major = 0;
+        try
+        {
+            if (ff != null)
+            {
+                using var p = Process.Start(new ProcessStartInfo(ff, "-hide_banner -version") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+                var first = p.StandardOutput.ReadLine() ?? "";
+                p.WaitForExit(5000);
+                // "ffmpeg version 9.1-full_build-www.gyan.dev", "ffmpeg version n7.1", "ffmpeg version 6.1.1-3ubuntu5"
+                var m = Regex.Match(first, @"version n?(\d+)\.");
+                if (m.Success) major = int.Parse(m.Groups[1].Value);
+            }
+        }
+        catch (Exception e) { AppPaths.Log("Reading the FFmpeg version: " + e.Message); }
+        _ffVersion = (ff, major);
+        return major;
+    }
+
     public static string? FindFfmpeg()
     {
         var configured = AppSettings.Current.FfmpegPath;
@@ -189,7 +245,7 @@ public sealed class RecordingService
             foreach (var v in sources)
             {
                 inputs.Add(v.StartsWith(WindowPrefix)
-                    ? $"-f gdigrab -framerate 30 -draw_mouse 0 -thread_queue_size 512 -i title=\"{WindowTitle(v[WindowPrefix.Length..])}\""
+                    ? $"-f gdigrab -framerate 30 -draw_mouse 0 {InputQueue(512)}-i title=\"{WindowTitle(v[WindowPrefix.Length..])}\""
                     : $"-f dshow -rtbufsize {(bigBuffers ? "512M" : "256M")} -i video=\"{(v.StartsWith(DevicePrefix) ? v[DevicePrefix.Length..] : v)}\"");
                 videos.Add((count++, v));
             }
@@ -390,6 +446,7 @@ public sealed class RecordingService
             AppPaths.Log("ffmpeg: " + e.Data);
         };
         _ffmpeg.BeginErrorReadLine();
+        _session ??= new Session(folder, start, DateTime.Now, segmentSeconds);
         _last = (spec, folder, minutes, segmentSeconds);
         _wanted = true;
         _lastSize = -1;
@@ -398,6 +455,18 @@ public sealed class RecordingService
     }
 
     private ProcessAudioCapture? _appAudio;
+
+    /// <summary>
+    /// The recording file FFmpeg writes now, with its REAL size. A folder listing keeps showing the size (0) and time a file
+    /// had when FFmpeg opened it until something asks for that file itself, so each file is read again (Refresh) - the
+    /// listing alone made a working recording look empty: "The recording didn't start" after 20 s, then it was stopped.
+    /// </summary>
+    private static FileInfo? NewestRecording(string folder)
+    {
+        var files = new DirectoryInfo(folder).EnumerateFiles("Recording_*.mp4").ToList();
+        foreach (var f in files) f.Refresh();
+        return files.OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
+    }
 
     /// <summary>The last error line FFmpeg printed in this recording (null = none).</summary>
     public string? LastError { get; private set; }
@@ -409,7 +478,7 @@ public sealed class RecordingService
     public FileInfo? WrittenFile()
     {
         if (_last is not { } l || !Directory.Exists(l.Folder)) return null;
-        var newest = new DirectoryInfo(l.Folder).EnumerateFiles("Recording_*.mp4").OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
+        var newest = NewestRecording(l.Folder);
         return IsRecording && newest is { Length: > 0 } && (DateTime.Now - newest.LastWriteTime).TotalSeconds < 30 ? newest : null;
     }
 
@@ -424,6 +493,12 @@ public sealed class RecordingService
     public static readonly List<RecordingService> Instances = new();
 
     public RecordingService() { lock (Instances) Instances.Add(this); }
+
+    /// <summary>The recordings running now (or wanted and about to be restarted after FFmpeg died).</summary>
+    public static List<RecordingService> Running()
+    {
+        lock (Instances) return Instances.Where(r => r.IsRecording || r.Wanted).ToList();
+    }
 
     /// <summary>
     /// Checks a running recording: ffmpeg must still be alive and the current file must keep growing.
@@ -444,7 +519,7 @@ public sealed class RecordingService
             }
             catch (Exception e) { return (true, "Recording stopped unexpectedly and restarting failed: " + e.Message); }
         }
-        var newest = new DirectoryInfo(l.Folder).EnumerateFiles("Recording_*.mp4").OrderByDescending(f => f.LastWriteTime).FirstOrDefault();
+        var newest = NewestRecording(l.Folder);
         var size = newest?.Length ?? 0;
         if (size != _lastSize) { _lastSize = size; _lastGrowth = DateTime.Now; return null; }
         if ((DateTime.Now - _lastGrowth).TotalSeconds > 120)
@@ -456,8 +531,22 @@ public sealed class RecordingService
     public void Stop()
     {
         _wanted = false;
-        if (!IsRecording)
-            return;
+        var session = _session;
+        _session = null;
+        try
+        {
+            if (IsRecording) StopFfmpeg();
+        }
+        finally
+        {
+            if (session != null)
+                try { Finished?.Invoke(session, DateTime.Now); }
+                catch (Exception e) { AppPaths.Log("After the recording stopped: " + e.Message); }
+        }
+    }
+
+    private void StopFfmpeg()
+    {
         try
         {
             _ffmpeg!.StandardInput.WriteLine("q");

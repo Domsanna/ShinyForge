@@ -94,15 +94,20 @@ public sealed class MainWindow : Window
             await StartupChecks();
             StartRecheckTimer();
         };
+        // Closing ShinyForge stops everything it runs (the hunter used to keep pressing buttons on the Switch on its own) -
+        // after asking, when something is running.
         Closing += async (_, e) =>
         {
-            if (_closeConfirmed || _content.Content is not GamePage { IsRecording: true }) return;
+            if (_closeConfirmed) return;
+            var parts = RunningParts.Find();
+            if (parts.Count == 0) return;
             e.Cancel = true;
-            if (await Dialogs.YesNo(this, "A recording is in progress. Stop it and exit?"))
-            {
-                _closeConfirmed = true;
-                Close();
-            }
+            if (!await Dialogs.YesNo(this, RunningParts.Question(parts), "ShinyForge is still running")) return;
+            SetStatus("Stopping " + string.Join(", ", parts.Select(p => p.Name.ToLowerInvariant())) + "...");
+            Cursor = new Cursor(StandardCursorType.Wait);
+            await Task.Run(() => RunningParts.StopAll(parts));
+            _closeConfirmed = true;
+            Close();
         };
     }
 

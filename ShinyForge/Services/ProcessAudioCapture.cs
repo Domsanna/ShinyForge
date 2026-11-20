@@ -15,7 +15,7 @@ public sealed class ProcessAudioCapture : IDisposable
     public const int Rate = 48000, Channels = 2, BytesPerFrame = 4;
     public string PipePath => @"\\.\pipe\" + _pipeName;
     /// <summary>FFmpeg input arguments that read this capture.</summary>
-    public string FfmpegInput => $"-f s16le -ar {Rate} -ac {Channels} -thread_queue_size 1024 -i \"{PipePath}\"";
+    public string FfmpegInput => $"-f s16le -ar {Rate} -ac {Channels} {RecordingService.InputQueue(1024)}-i \"{PipePath}\"";
     public string? Error { get; private set; }
 
     private readonly string _processName;
