@@ -140,6 +140,8 @@ public sealed class AppSettings
     public bool RemoteEnabled { get; set; }
     public int WebPort { get; set; } = 8765;
     public string RemotePin { get; set; } = "";
+    /// <summary>The game each bot last hunted ("python" / "sysbot" -> game id): a hunt still running after a restart gets its hunt profile.</summary>
+    public Dictionary<string, string> LastHuntGames { get; set; } = new();
     public Dictionary<string, GameSettings> Games { get; set; } = new();
 
     public GameSettings For(string gameId)

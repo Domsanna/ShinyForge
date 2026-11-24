@@ -85,21 +85,16 @@ if (Directory.Exists(savesSrc))
     else Console.WriteLine("   (no Ultra Sun save in " + savesSrc + ")");
 }
 
-// ---- Pokédex data
-var dex = DexData.Build(GameCatalog.Get("gba_firered"), true);
-Check(dex.Count > 380, $"FireRed Pokédex built: {dex.Count} entries");
-
-// ---- trackers from GitHub
+// ---- DexTracker (Living Dex / Pokédex): its files are there and its server answers on this OS
+Check(DexTrackerService.Installed && File.Exists(Path.Combine(DexTrackerService.AppDir, "data", "reference_data.json")), "DexTracker files present: " + DexTrackerService.Version);
 try
 {
-    var entries = SheetsDownloadService.ManifestAsync().GetAwaiter().GetResult();
-    var small = entries.OrderBy(e => e.Size).First();
-    var root = Path.Combine(work, "sheets");
-    if (Directory.Exists(root)) Directory.Delete(root, true);
-    var path = SheetsDownloadService.DownloadAsync(small, _ => { }, root).GetAwaiter().GetResult();
-    Check(File.Exists(path) && path.Contains(Path.Combine("Gen 1", "(3) Yellow")), "tracker downloaded with this OS's folder separators: " + Path.GetRelativePath(root, path));
+    DexTrackerService.EnsureRunning();
+    using var http = new System.Net.Http.HttpClient();
+    var page = http.GetStringAsync(DexTrackerService.Url).GetAwaiter().GetResult();
+    Check(page.Contains("shinyforge-dextracker.js"), "DexTracker served on " + DexTrackerService.Url);
 }
-catch (Exception e) { Check(false, "tracker download: " + e.Message); }
+catch (Exception e) { Check(false, "DexTracker server: " + e.Message); }
 
 // ---- update check
 try
@@ -140,14 +135,7 @@ if (live)
     if (!had) foreach (var d in new[] { PokeldnService.AppDir, PokeldnService.FirmwareDir, PokeldnService.EsptoolDir }) try { Directory.Delete(d, true); } catch { }
 }
 
-// ---- Living Dex, Pokédex info, Checkpoint matching and reading a console's SD card over FTP
-var ld = LivingDex.Load();
-Check(ld.Count == 1391 && ld.Count(e => e.Female) > 100 && ld.Count(e => e.Species == 869) == 63, $"Living Dex: {ld.Count} Pokémon HOME box slots");
-Check(ld.All(e => !e.Sprite.Contains('\\') && e.Sprite.StartsWith("Home")), "Living Dex picture paths use this OS's separator");
-var leafGreen = GameCatalog.Get("gba_leafgreen");
-var pidgeot = DexData.Build(leafGreen, false).First(x => x.Species == 18);
-Check(DexData.Evolution(leafGreen, pidgeot) == "Pidgey at Lv. 18 > Pidgeotto at Lv. 36 > [Pidgeot]", "evolution chain: " + DexData.Evolution(leafGreen, pidgeot));
-Check(DexData.SerebiiUrl(leafGreen, pidgeot).EndsWith("/pokedex-rs/018.shtml"), "Serebii link goes to the game's own Pokédex");
+// ---- Checkpoint matching and reading a console's SD card over FTP
 Check(CheckpointService.Matches(GameCatalog.Get("sw_za"), "0x0100F43008C44000 0x0100F43008C44000") &&
       CheckpointService.Matches(GameCatalog.Get("nds_black"), "IRBO POKEMON B"), "Checkpoint folder names matched");
 if (savesSrc.Length > 0 && Directory.Exists(savesSrc))

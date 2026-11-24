@@ -38,32 +38,6 @@ if (Test-Path $keptBackup) {
     Move-Item $keptBackup (Join-Path $portable "Backup Tools")
 }
 
-# Pokédex tracker spreadsheets (Gen N\(n) Name\Name Pokedex Tracker.xlsm). They are NOT inside the installer (together
-# they're over GitHub's 2 GB file limit): each one is published as its own file, tracker-<n>.xlsm, in the
-# "spreadsheets-1" release, listed in spreadsheets.json. The installer downloads the ones the user doesn't have yet,
-# and ShinyForge downloads a single tracker on demand. dist\sheets holds hard links to the originals (no copies).
-# Source: $env:SHINYFORGE_SHEETS, D:\ShinyForge Files\Bot Spreadsheets or Desktop\Bot Spreadsheets.
-$sheetsSrc = if ($env:SHINYFORGE_SHEETS) { $env:SHINYFORGE_SHEETS } elseif (Test-Path "D:\ShinyForge Files\Bot Spreadsheets") { "D:\ShinyForge Files\Bot Spreadsheets" } else { Join-Path ([Environment]::GetFolderPath("Desktop")) "Bot Spreadsheets" }
-$sheetsOut = New-Item -ItemType Directory -Force (Join-Path $dist "sheets")
-$manifest = @()
-$pascal = @("procedure AddSheets;", "begin")
-if (Test-Path $sheetsSrc) {
-    foreach ($f in Get-ChildItem $sheetsSrc -Recurse -File -Include *.xlsm, *.xlsx | Where-Object { -not $_.Name.StartsWith('~$') } | Sort-Object FullName) {
-        if ($f.Directory.Name -notmatch '^\((\d+)\)') { Write-Warning "Skipping $($f.FullName) (folder isn't named '(n) Game')"; continue }
-        $asset = "tracker-{0:00}{1}" -f [int]$Matches[1], $f.Extension.ToLowerInvariant()
-        $rel = $f.FullName.Substring($sheetsSrc.TrimEnd('\').Length + 1)
-        $link = Join-Path $sheetsOut $asset
-        try { New-Item -ItemType HardLink -Path $link -Target $f.FullName | Out-Null } catch { Copy-Item $f.FullName $link }
-        $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $manifest += [pscustomobject]@{ Asset = $asset; Path = $rel; Sha256 = $sha; Size = $f.Length }
-        $pascal += "  AddSheet('$asset', '$($rel.Replace("'", "''"))', '$sha');"
-    }
-} else { Write-Warning "Spreadsheet folder $sheetsSrc not found - no tracker list for the installer." }
-$pascal += "end;"
-[IO.File]::WriteAllText((Join-Path $sheetsOut "spreadsheets.json"), (ConvertTo-Json @($manifest) -Depth 3), (New-Object Text.UTF8Encoding $false))
-Set-Content (Join-Path $dist "sheets_files.iss") $pascal -Encoding utf8
-Write-Host ("{0} trackers listed ({1:N0} MB)" -f $manifest.Count, (($manifest | Measure-Object -Property Size -Sum).Sum / 1MB))
-
 # Installer.
 $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {

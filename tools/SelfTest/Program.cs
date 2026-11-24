@@ -737,92 +737,6 @@ if (tests.Contains("sheets"))
     Console.WriteLine("   bundled root: " + SpreadsheetService.BundledRoot);
 }
 
-if (tests.Contains("dex"))
-{
-    foreach (var g in GameCatalog.All)
-    {
-        var withForms = DexData.Build(g, true);
-        var plain = DexData.Build(g, false);
-        var noSprite = withForms.Where(e => e.Sprite.Length == 0 || !File.Exists(Path.Combine(AppPaths.AssetsDir, e.Sprite))).ToList();
-        var generic = withForms.Where(e => !e.GameSprite).ToList();
-        var basesGeneric = plain.Count(e => !e.GameSprite);
-        // A few Pokémon are missing from some sprite sets (e.g. Poipole..Zeraora in Ultra Sun/Moon) - those use the generic sprite.
-        Check(plain.Count > 100 && noSprite.Count == 0 && basesGeneric <= 6,
-            $"{g.Id,-16} [{DexData.SpriteSet(g)}] {plain.Count} species, {withForms.Count} entries ({withForms.Count(e => e.Female)} F, {withForms.Count(e => e.Form > 0)} forms), " +
-            $"game sprites {withForms.Count - generic.Count}/{withForms.Count}" +
-            (generic.Count > 0 ? " generic: " + string.Join(", ", generic.Take(10).Select(e => e.Display)) + (generic.Count > 10 ? "..." : "") : "") +
-            (noSprite.Count > 0 ? " NO SPRITE: " + string.Join(", ", noSprite.Take(8).Select(e => e.Display)) : ""));
-    }
-    var sw = GameCatalog.Get("sw_sword");
-    var sword = DexData.Build(sw, true);
-    Console.WriteLine("   Sword sample: " + string.Join(" | ", sword.Where(e => e.Species is 52 or 77 or 122 or 554 or 555 or 25 or 849 or 892).Select(e => $"{e.Display}={e.Sprite}")));
-    var fr = GameCatalog.Get("gba_firered");
-    var frDex = DexData.Build(fr, true);
-    Check(frDex.Count(e => e.Species == 201) == 28 && frDex.All(e => e.Species <= 386), $"FireRed: {frDex.Count} entries, Unown forms {frDex.Count(e => e.Species == 201)}, max #{frDex.Max(e => e.Species)}");
-    var hg = DexData.Build(GameCatalog.Get("nds_heartgold"), true);
-    Check(hg.Any(e => e.Species == 3 && e.Female) && hg.Any(e => e.Species == 25 && e.Female), $"HeartGold has female Venusaur/Pikachu entries ({hg.Count(e => e.Female)} ♀)");
-    void Info(Game g, ushort sp, byte form = 0)
-    {
-        var e = DexData.Build(g, true).First(x => x.Species == sp && x.Form == form && !x.Female);
-        var where = DexData.WhereToFind(g, e);
-        Console.WriteLine($"   [{g.Title}] {e.Display}\n      where: {string.Join("\n             ", where.Take(6))}\n      evo: {DexData.Evolution(g, e).Replace("\n", " / ")}\n      events: {string.Join("; ", DexData.Events(g, e).Take(4))}");
-        Check(where.Count > 0 && !where[0].StartsWith("Encounter data unavailable"), $"info for {e.Display} in {g.Title}");
-    }
-    Info(fr, 386);                                   // Deoxys - Birth Island static
-    Info(fr, 16);                                    // Pidgey - wild
-    Info(fr, 133);                                   // Eevee - gift, evolutions by stone
-    Info(GameCatalog.Get("3ds_umoon"), 19, 1);       // Alolan Rattata
-    Info(sw, 52, 2);                                 // Galarian Meowth
-    Info(GameCatalog.Get("sw_violet"), 1007);        // Miraidon
-    // Owned data rendered through the real save
-    var desk = devFiles;
-    var frSave = Path.Combine(desk, @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav");
-    if (File.Exists(frSave) && SaveUtil.TryGetSaveFile(frSave, out var frs) && frs != null)
-    {
-        var col = Collection.FromSave(frs, frSave);
-        Check(col.Mons.Count == col.Total && col.Mons.All(m => m.Where.Length > 0), $"FireRed save: {col.Mons.Count} owned with locations, {col.DexCaught.Count} dex-caught");
-    }
-}
-
-if (tests.Contains("dexui"))
-{
-    InitUi();
-    var outDir = Path.Combine(work, "screens");
-    Directory.CreateDirectory(outDir);
-    var desk = devFiles;
-    foreach (var (id, save) in new[]
-             {
-                 ("gba_firered", @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav"),
-                 ("sw_shield", @"PKHeX (26.10.18)\shield\20210420-120931 Dom\main"),
-                 ("nds_heartgold", @"PKHeX (26.10.18)\Pokemon HeartGold.sav"),
-             })
-    {
-        var path = Path.Combine(desk, save);
-        var form = new DexForm(GameCatalog.Get(id), _ => SaveUtil.TryGetSaveFile(path, out var s) && s != null ? Collection.FromSave(s, path) : null)
-        { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
-        form.Show();
-        for (int i = 0; i < 60; i++) { Application.DoEvents(); Thread.Sleep(100); }
-        // click the first caught entry and the first missing entry
-        var grid = form.Controls.OfType<DexGrid>().First();
-        void Snap(string name)
-        {
-            for (int i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(100); }
-            using var bmp = new Bitmap(form.Width, form.Height);
-            form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
-            bmp.Save(Path.Combine(outDir, name + ".png"));
-            Console.WriteLine("   rendered " + name);
-        }
-        grid.Focus();
-        grid.GetType().GetMethod("OnMouseDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(grid, new object[] { new MouseEventArgs(MouseButtons.Left, 1, 50, 50, 0) });
-        Snap($"dex_{id}_1");
-        grid.GetType().GetMethod("OnMouseDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .Invoke(grid, new object[] { new MouseEventArgs(MouseButtons.Left, 1, 50 + 3 * 102, 50 + 118, 0) });
-        Snap($"dex_{id}_2");
-        form.Close();
-    }
-}
-
 if (tests.Contains("update"))
 {
     Console.WriteLine($"   this build: {ShinyForge.Core.AppInfo.Display}, repo {ShinyForge.Core.AppInfo.Repo}");
@@ -1223,173 +1137,6 @@ if (tests.Contains("switchftp"))
     }
 }
 
-if (tests.Contains("homedex"))
-{
-    // BUILD STEP for the Living Dex: SelfTest <work> homedex <serebii depositablepokemon.shtml> <"...\Detailed" HOME renders folder>
-    // Every boxable slot from Serebii's Pokémon HOME list → PKHeX species/form/gender/sweet → the HOME render files.
-    // Writes <work>\home_dex.json (then tools\make_home_sprites.py makes Assets\Home from it).
-    var a = args.Skip(1).Where(x => x != "homedex").ToList();
-    var html = File.ReadAllText(a[0], System.Text.Encoding.Latin1);
-    var renders = a[1];
-    var normal = Directory.GetFiles(Path.Combine(renders, "Normal"), "poke_capture_*.png").Select(Path.GetFileName).ToHashSet()!;
-    var shiny = Directory.GetFiles(Path.Combine(renders, "Shiny"), "poke_capture_*.png").Select(Path.GetFileName).ToHashSet()!;
-    // Some shiny renders are named by hand: "(19) Rattata (F).png", "(19.1) Alolan Rattata.png", "(1) Bulbasaur.png".
-    var named = Directory.GetFiles(Path.Combine(renders, "Shiny"), "(*.png").Select(Path.GetFileName).ToList();
-    string? NamedShiny(int sp, string alt, bool female)
-    {
-        var mine = named.Where(f => System.Text.RegularExpressions.Regex.IsMatch(f!, $@"^\({sp}(\.\d+)?\) ")).ToList();
-        string Label(string f) => System.Text.RegularExpressions.Regex.Replace(f[(f.IndexOf(')') + 2)..^4], @"\s*\((F|M)\)$", "");
-        var want = N(alt.Replace("(Female)", ""));
-        var cands = mine.Where(f => N(Label(f!)) == want && !f!.Contains("G-") && !f.Contains("Mega")).ToList();
-        // cap Pikachu: "(25) Ash Hat Pikachu (Orginal).png" (sic)
-        if (cands.Count == 0 && sp == 25 && alt.EndsWith(" Cap"))
-        {
-            var region = N(alt[8..^4]).Replace("original", "orginal");
-            cands = mine.Where(f => f!.Contains("Ash Hat") && N(f).Contains(region)).ToList();
-        }
-        // typos in the hand-made names ("Squritle", "Cartipie"): the species' only plain file
-        if (cands.Count == 0 && N(alt) == N(SpeciesName.GetSpeciesName((ushort)sp, 2)))
-            cands = mine.Where(f => f!.StartsWith($"({sp}) ") && !f.Contains("G-") && !f.Contains("Mega")).ToList();
-        if (cands.Count == 0) return null;
-        return cands.FirstOrDefault(f => f!.EndsWith(female ? "(F).png" : "(M).png")) ?? cands.FirstOrDefault(f => !f!.EndsWith("(F).png")) ?? cands[0];
-    }
-    var std = html[html.IndexOf("<div id=\"normal\"")..html.IndexOf("<div id=\"shiny\"")];
-    var slots = System.Text.RegularExpressions.Regex.Matches(std, "<img src=\"/pokemonhome/pokemon/80/([^\"]+)\\.png\"[^>]*alt=\"([^\"]*)\"")
-        .Select(m => (Code: m.Groups[1].Value, Alt: System.Net.WebUtility.HtmlDecode(m.Groups[2].Value))).ToList();
-    string N(string s) => new string(s.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD).Where(char.IsLetterOrDigit).ToArray());
-    string[] creams = { "vanillacream", "rubycream", "matchacream", "mintcream", "lemoncream", "saltedcream", "rubyswirl", "caramelswirl", "rainbowswirl" };
-    string[] sweets = { "", "berry", "love", "star", "clover", "flower", "ribbon" };
-    var outList = new List<object>();
-    var problems = new List<string>();
-    foreach (var (code, alt) in slots)
-    {
-        var parts = code.Split('-', 2);
-        var sp = ushort.Parse(parts[0]);
-        var suffix = parts.Length > 1 ? parts[1] : "";
-        // "-f" is not always female on Serebii (Maushold Family of Four, Polteageist Authentic): use the label
-        var female = alt.Contains("(Female)") || alt.EndsWith(" Female");
-        var species = SpeciesName.GetSpeciesName(sp, 2).Replace('’', '\'');
-        var label = alt.Replace("(Female)", "").Replace('’', '\'').Trim();
-        if (label.EndsWith(" Female")) label = label[..^7].Trim();
-        if (label.StartsWith(species + " ")) label = label[(species.Length + 1)..];
-        else if (label == species) label = "";
-        else if (label.EndsWith(" " + species)) label = label[..^(species.Length + 1)];
-        label = label.Trim();
-        // "215-h-f" = Hisuian Sneasel (female), labelled just "Sneasel (Female)": the regional letter is in the code
-        if (label.Length == 0 && female && suffix.Length == 3 && suffix.EndsWith("-f"))
-            label = suffix[0] switch { 'a' => "Alolan", 'g' => "Galarian", 'h' => "Hisuian", 'p' => "Paldean", _ => "" };
-        byte form = 0; int sweet = 0; byte? renderForm = null;
-        var names = FormConverter.GetFormList(sp, GameInfo.Strings.types, GameInfo.Strings.forms, new[] { "♂", "♀", "-" }, EntityContext.Gen9);
-        var nl = N(label);
-        string[] minior = { "red", "orange", "yellow", "green", "blue", "indigo", "violet" };
-        // Forms whose Serebii label doesn't match PKHeX's form name (checked one by one).
-        int? fixedForm = sp switch
-        {
-            128 => nl.Contains("blaze") ? 2 : nl.Contains("aqua") ? 3 : nl.Length > 0 ? 1 : 0,       // Paldean Tauros: Combat, Blaze, Aqua
-            201 when label is "!" or "?" => label == "!" ? 26 : 27,
-            658 => nl.Contains("battlebond") ? 1 : 0,                                            // Battle Bond Greninja is form 1
-            666 when nl.Length == 0 => 6,                                                        // plain Vivillon = Meadow
-            670 when nl.Contains("eternal") => 5,
-            676 when nl.Contains("deputante") => 4,                                              // Serebii's spelling of Debutante
-            710 or 711 => nl.Contains("super") ? 3 : nl.Contains("large") ? 2 : nl.Contains("small") ? 1 : 0,
-            718 => nl.Contains("powerconstruct") ? (code.EndsWith("-10") ? 2 : 3) : nl.Contains("10") ? 1 : 0,
-            744 => nl.Contains("owntempo") ? 1 : 0,                                              // Own Tempo Rockruff
-            774 => Math.Max(0, Array.FindIndex(minior, c => nl.StartsWith(c))),                  // boxed Minior: the core colour
-            _ => null,
-        };
-        if (sp == 774) renderForm = (byte)(form + 7); // shown with its coloured core (renders 7-13), not the brown shell
-        if (fixedForm != null) { form = (byte)fixedForm; if (sp == 774) renderForm = (byte)(form + 7); }
-        else if (sp == 869)
-        {
-            var cream = label.Length == 0 ? 0 : Array.IndexOf(creams, N(label));
-            if (cream < 0) { problems.Add($"unknown Alcremie cream {code} \"{alt}\""); continue; }
-            form = (byte)cream;
-            var s = suffix;
-            foreach (var c in new[] { "rc", "mac", "mic", "lc", "sc", "rs", "cs", "ras" }) if (s.StartsWith(c)) { s = s[c.Length..]; break; }
-            sweet = Math.Max(0, Array.IndexOf(sweets, s));
-        }
-        else if (female && names.Contains("♀"))
-            form = (byte)Array.IndexOf(names, "♀");    // Meowstic, Indeedee, Basculegion, Oinkologne: the female is a form
-        else if (label.Length > 0)
-        {
-            var want = N(label).Replace("authentic", "antique").Replace("alolan", "alola").Replace("galarian", "galar").Replace("hisuian", "hisui").Replace("paldean", "paldea")
-                               .Replace("pattern", "").Replace("cap", "").Replace("form", "").Replace("rotom", "");
-            var best = -1;
-            for (var i = names.Length > 0 && names[0] is not ("" or "Normal") ? 0 : 1; i < names.Length; i++)
-            {
-                var n = N(names[i]).Replace("alolan", "alola").Replace("galarian", "galar").Replace("hisuian", "hisui").Replace("paldean", "paldea").Replace("form", "");
-                if (n.Length > 0 && (n == want || (want.Length > 2 && n.Contains(want)) || (n.Length > 2 && want.Contains(n)))) { best = i; if (n == want) break; }
-            }
-            if (best < 0) { problems.Add($"no form for {code} \"{alt}\" (forms: {string.Join(", ", names)})"); continue; }
-            form = (byte)best;
-        }
-        string? Find(HashSet<string> set, string end, byte fm, int sw)
-        {
-            // female look: fd; otherwise the male/neutral look - female-only species (Enamorus, Tinkatink) only have fd/fo
-            // (genderless "uk" and female-only "fo" before the stray "mf" copies some of those species also have)
-            foreach (var g in female ? new[] { "fd", "fo", "uk", "mf" } : new[] { "md", "mo", "uk", "fo", "mf", "fd" })
-            {
-                var f = $"poke_capture_{sp:0000}_{fm:000}_{g}_n_{sw:00000000}_f_{end}.png";
-                if (set.Contains(f)) return f;
-            }
-            return null;
-        }
-        // forms that look the same as form 0 have no render of their own (Artisan Poltchageist, Masterpiece Sinistcha);
-        // every shiny Alcremie looks the same whatever the cream (only the sweet differs)
-        var rf = renderForm ?? form;
-        var nf = Find(normal, "n", rf, sweet) ?? Find(normal, "n", 0, sweet);
-        var sf = Find(shiny, "r", rf, sweet) ?? NamedShiny(sp, alt, female) ?? Find(shiny, "r", 0, sweet)
-                 // look-alike forms: shiny Greninja = Battle Bond's render; Zygarde 50% / 10% = their Power Construct renders
-                 ?? (sp == 658 && rf == 0 ? Find(shiny, "r", 1, 0) : null)
-                 ?? (sp == 718 && rf <= 1 ? Find(shiny, "r", (byte)(3 - rf), 0) : null);
-        if (nf == null) problems.Add($"no normal render for {code} \"{alt}\" (form {form}, sweet {sweet})");
-        if (sf == null) problems.Add($"no shiny render for {code} \"{alt}\" (form {form}, sweet {sweet})");
-        var formName = sp == 869 ? $"{names[Math.Max(0, (int)form)]}, {(sweet == 0 ? "Strawberry" : char.ToUpper(sweets[sweet][0]) + sweets[sweet][1..])} Sweet" : label;
-        var pkhexForm = form < names.Length ? names[form] : "?";
-        if (formName.Length == 0 && form > 0 && pkhexForm is not ("♀" or "♂" or "?")) formName = pkhexForm; // plain Vivillon = Meadow
-        outList.Add(new { species = sp, form, female, sweet, name = DexEntry.Plain(species), formName = DexEntry.Plain(formName), pkhexForm, serebii = code, normal = nf ?? "", shiny = sf ?? "" });
-    }
-    // renders of boxable-looking forms Serebii doesn't list (should only be battle-only forms, Gigantamax is skipped already)
-    var used = outList.Select(o => (string)o.GetType().GetProperty("normal")!.GetValue(o)!).ToHashSet();
-    var extra = normal.Where(f => f!.Contains("_n_") && f.EndsWith("_f_n.png") && !used.Contains(f) && !f.Contains("_mf1_") && !f.Contains("_mfx_") && !f.Contains("_mfy_")).OrderBy(f => f).ToList();
-    File.WriteAllText(Path.Combine(work, "home_dex.json"), System.Text.Json.JsonSerializer.Serialize(outList, new System.Text.Json.JsonSerializerOptions { WriteIndented = false }));
-    File.WriteAllLines(Path.Combine(work, "home_dex_not_listed.txt"), extra!);
-    Console.WriteLine($"   {slots.Count} Serebii slots, {outList.Count} mapped, {problems.Count} problem(s), {extra.Count} render(s) not on Serebii's list");
-    foreach (var p in problems) Console.WriteLine("   ! " + p);
-    Check(problems.Count == 0 && outList.Count == slots.Count, "every boxable slot has a form and both renders");
-}
-
-if (tests.Contains("dexinfo"))
-{
-    // Evolution text and Serebii links for a set of tricky families in several games, plus a check that EVERY species in
-    // EVERY game gets readable evolution text (no raw method names, no errors).
-    var g = (string id) => GameCatalog.All.First(x => x.Id == id);
-    foreach (var (game, sp, form) in new (string, ushort, byte)[] {
-        ("gba_leafgreen", 18, 0), ("sw_frlg_lg", 133, 0), ("nds_platinum", 82, 0), ("nds_heartgold", 133, 0), ("nds_black", 290, 0),
-        ("3ds_usun", 25, 0), ("3ds_umoon", 26, 1), ("sw_sword", 133, 0), ("sw_shield", 349, 0), ("sw_pla", 215, 1), ("sw_scarlet", 133, 0),
-        ("sw_violet", 924, 0), ("sw_za", 133, 0), ("gb_red", 64, 0), ("gbc_crystal", 236, 0), ("3ds_x", 686, 0), ("sw_bd", 133, 0),
-        ("sw_pla", 215, 0), ("sw_pla", 234, 0), ("sw_pla", 550, 2), ("sw_pla", 217, 0), ("sw_scarlet", 206, 0), ("sw_sword", 891, 0) })
-    {
-        var e = DexData.Build(g(game), true).First(x => x.Species == sp && x.Form == form);
-        Console.WriteLine($"--- {g(game).Title}: {e.Display}   {DexData.SerebiiUrl(g(game), e)}");
-        foreach (var l in DexData.Evolution(g(game), e).Split(Environment.NewLine)) Console.WriteLine("   " + l);
-    }
-    var bad = new List<string>();
-    foreach (var game in GameCatalog.All)
-        foreach (var e in DexData.Build(game, true))
-        {
-            var t = DexData.Evolution(game, e);
-            if (t.Contains("unavailable") || t.Contains("when it levels up  ") || System.Text.RegularExpressions.Regex.IsMatch(t, "LevelUp|UseItem|Trade[A-Z]"))
-                bad.Add($"{game.Id} {e.Display}: {t}");
-        }
-    Check(bad.Count == 0, $"evolution text for every species in every game ({bad.Count} problem(s))" + (bad.Count > 0 ? ": " + string.Join(" | ", bad.Take(5)) : ""));
-    var links = GameCatalog.All.Select(x => (x.Title, Url: DexData.SerebiiUrl(x, new DexEntry { Species = 18 }))).ToList();
-    Check(links.First(l => l.Title == "LeafGreen").Url.Contains("/pokedex-rs/018") && links.First(l => l.Title == "LeafGreen (Switch)").Url.Contains("/pokedex-rs/")
-          && links.First(l => l.Title == "Let's Go, Pikachu!").Url.Contains("/pokedex-sm/") && links.First(l => l.Title == "Legends: Arceus").Url.Contains("/pokedex-swsh/")
-          && links.First(l => l.Title == "Red").Url.Contains("/pokedex/018"), "Serebii links go to each game's own Pokédex");
-    foreach (var l in links) Console.WriteLine($"   {l.Title,-22} {l.Url}");
-}
-
 if (tests.Contains("homemenu"))
 {
     // Offline: SelfTest <work> homemenu <folder with Switch HOME screenshots> - frame, icon, user-count and All Software checks
@@ -1574,7 +1321,7 @@ if (tests.Contains("stoptargets"))
     if (tests.Contains("debug"))
         foreach (var (g, sp, form) in new[] { (sword, (ushort)888, (byte)0), (sword, (ushort)52, (byte)1), (sword, (ushort)52, (byte)2), (lg, (ushort)201, (byte)5) })
         {
-            var pk = PKHeX.Core.EntityBlank.GetBlank(DexData.Context(g), PKHeX.Core.LanguageID.English);
+            var pk = PKHeX.Core.EntityBlank.GetBlank(g.Versions[0].Context, PKHeX.Core.LanguageID.English);
             pk.Species = sp; pk.Form = form;
             var encs = PKHeX.Core.EncounterMovesetGenerator.GenerateEncounters(pk, ReadOnlyMemory<ushort>.Empty, g.Versions).Take(12).ToList();
             Console.WriteLine($"   {g.Title} #{sp} form {form}: {encs.Count} encounters: " + string.Join("; ", encs.Select(e => $"{e.GetType().Name} shiny={e.Shiny} form={e.Form}")));
@@ -1807,23 +1554,6 @@ if (tests.Contains("switchgame"))
     }
 }
 
-if (tests.Contains("sheetsdl"))
-{
-    // The published tracker list and a real download (the smallest tracker) into a test folder.
-    var entries = await SheetsDownloadService.ManifestAsync();
-    Check(entries.Count >= 38, $"tracker list on GitHub: {entries.Count} trackers, {entries.Sum(e => e.Size) / 1048576} MB");
-    var missingGames = GameCatalog.All.Where(g => !string.IsNullOrWhiteSpace(g.Spreadsheet) && SheetsDownloadService.EntryFor(g, entries) == null).Select(g => g.Id).ToList();
-    Check(missingGames.Count == 0, "every game with a tracker name has a published tracker" + (missingGames.Count > 0 ? ": missing " + string.Join(", ", missingGames) : ""));
-    var smallest = entries.OrderBy(e => e.Size).First();
-    var root = Path.Combine(work, "sheets_dl");
-    if (Directory.Exists(root)) Directory.Delete(root, true);
-    var path = await SheetsDownloadService.DownloadAsync(smallest, _ => { }, root);
-    Check(File.Exists(path) && new FileInfo(path).Length == smallest.Size, $"downloaded and checksum-verified: {Path.GetRelativePath(root, path)} ({smallest.Size / 1024} KB)");
-    File.WriteAllText(path, "my progress");
-    var again = await SheetsDownloadService.DownloadAsync(smallest, _ => { }, root);
-    Check(File.ReadAllText(again) == "my progress", "an existing tracker is never overwritten");
-}
-
 if (tests.Contains("updatelive"))
 {
     var rel = await AppUpdateService.CheckAsync();
@@ -1960,6 +1690,261 @@ if (tests.Contains("health"))
     rec.Stop();
     Check(rec.CheckHealth() == null, "stopped by the user -> not restarted");
     win.Close();
+}
+
+if (tests.Contains("dextracker"))
+{
+    // DexTracker: the local server (page + bridge script, savefile API and its guards) and marking a real save's Pokémon.
+    // Works on ShinyForge's data folder - the savefile there is backed up first and put back at the end.
+    var saveFile = DexTrackerService.SavePath;
+    var keep = File.Exists(saveFile) ? File.ReadAllBytes(saveFile) : null;
+    try
+    {
+        if (File.Exists(saveFile)) File.Delete(saveFile);
+        DexTrackerService.EnsureRunning();
+        var port = DexTrackerService.Port;
+        async Task<(int Code, string Body)> Http(string method, string path, string? body = null, string host = "", bool sf = true, string? rev = null, string? origin = null)
+        {
+            using var c = new System.Net.Sockets.TcpClient("127.0.0.1", port);
+            var s = c.GetStream();
+            var bytes = body == null ? Array.Empty<byte>() : System.Text.Encoding.UTF8.GetBytes(body);
+            var head = $"{method} {path} HTTP/1.1\r\nHost: {(host.Length > 0 ? host : $"127.0.0.1:{port}")}\r\n" + (sf ? "X-ShinyForge: 1\r\n" : "") +
+                       (rev != null ? $"X-Base-Rev: {rev}\r\n" : "") + (origin != null ? $"Origin: {origin}\r\n" : "") +
+                       $"Content-Length: {bytes.Length}\r\nConnection: close\r\n\r\n";
+            await s.WriteAsync(System.Text.Encoding.ASCII.GetBytes(head));
+            await s.WriteAsync(bytes);
+            var text = await new StreamReader(s).ReadToEndAsync();
+            var code = int.Parse(text.Split(' ')[1]);
+            return (code, text[(text.IndexOf("\r\n\r\n") + 4)..]);
+        }
+        var page = await Http("GET", "/", sf: false);
+        Check(page.Code == 200 && page.Body.Contains("shinyforge-dextracker.js") && !page.Body.Contains("registerSW") && page.Body.Contains("/assets/index-"),
+              "page served with ShinyForge's script, without the offline service worker");
+        var js = System.Text.RegularExpressions.Regex.Match(page.Body, "src=\"(/assets/index-[^\"]+\\.js)\"").Groups[1].Value;
+        Check((await Http("GET", js, sf: false)).Code == 200, "DexTracker's code is served: " + js);
+        Check((await Http("GET", "/data/reference_data.json", sf: false)).Body.Contains("\"species\""), "reference data served");
+        Check((await Http("GET", "/../../settings.json", sf: false)).Code == 404, "no files outside DexTracker's folder");
+        Check((await Http("GET", "/", host: "evil.example:" + port, sf: false)).Code == 403, "other host names refused (DNS rebinding)");
+        Check((await Http("GET", "/shinyforge/savefile", sf: false)).Code == 403, "savefile API needs ShinyForge's header");
+        Check((await Http("GET", "/shinyforge/savefile", origin: "https://evil.example")).Code == 403, "savefile API refuses other web sites");
+        var first = System.Text.Json.Nodes.JsonNode.Parse((await Http("GET", "/shinyforge/savefile")).Body)!;
+        Check(first["data"] == null && first["rev"]!.GetValue<string>() == "0", "no savefile yet: empty, revision 0");
+        var put = await Http("PUT", "/shinyforge/savefile", DexTrackerService.Empty().ToJsonString(), rev: "0");
+        var rev1 = System.Text.Json.Nodes.JsonNode.Parse(put.Body)!["rev"]!.GetValue<string>();
+        Check(put.Code == 200 && File.Exists(saveFile) && rev1 != "0", "page saves the savefile to disk (revision " + rev1 + ")");
+        Check((await Http("PUT", "/shinyforge/savefile", DexTrackerService.Empty().ToJsonString(), rev: "0")).Code == 409, "an outdated page can't overwrite a newer savefile (409)");
+        Check((await Http("PUT", "/shinyforge/savefile", "not json", rev: rev1)).Code != 200 && DexTrackerService.Revision() == rev1, "junk is refused, the file stays");
+
+        var frSave = Path.Combine(devFiles, @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav");
+        if (File.Exists(frSave) && SaveUtil.TryGetSaveFile(frSave, out var frs) && frs != null)
+        {
+            var col = Collection.FromSave(frs, frSave);
+            var game = GameCatalog.Get("sw_frlg_fr");
+            var r = DexTrackerService.MarkCollection(col, game, s => Console.WriteLine("   " + s));
+            var saved = DexTrackerService.Load()!;
+            var frlg = saved["per_game_ownership"]!["FRLG Dex"]!.AsArray();
+            Check(r.Species > 0 && r.NewTrainers > 0 && frlg.Count > 0 && saved["ot_registry"]!.AsArray().Any(o => o!["game"]!.GetValue<string>() == "FireRed"),
+                  $"FireRed save marked: {r.Species} species, {r.Shiny} shiny, {r.Forms} forms, {r.GameDex} in the FRLG Dex, {r.NewTrainers} trainer(s)");
+            Check(frlg.All(x => x!["regional_no"] != null && x["ot_id"] != null), "FRLG Dex rows have a regional number and an OT");
+            Check(DexTrackerService.Revision() != rev1, "the page notices the change (revision moved)");
+            var again = DexTrackerService.MarkCollection(col, game);
+            Check(again.Species + again.Shiny + again.Forms + again.GameDex + again.NewTrainers == 0, "a second sync changes nothing");
+            Check(File.Exists(saveFile + ".bak") && Directory.GetFiles(DexTrackerService.BackupDir).Length > 0, "backups kept (.bak + daily copy)");
+        }
+        else Console.WriteLine("   (FireRed test save not found - mark test skipped)");
+        var swSave = Path.Combine(devFiles, @"PKHeX (26.10.18)\shield\20210420-120931 Dom\main");
+        if (File.Exists(swSave) && SaveUtil.TryGetSaveFile(swSave, out var sws) && sws != null)
+        {
+            var r = DexTrackerService.MarkCollection(Collection.FromSave(sws, swSave), GameCatalog.Get("sw_shield"), s => Console.WriteLine("   " + s));
+            Check(r.Species + r.Forms + r.GameDex > 0, $"Shield save marked: {r.Species} species, {r.Forms} forms, {r.GameDex} in SwSh dexes");
+        }
+        Console.WriteLine("   DexTracker: " + DexTrackerService.Url + " (version " + DexTrackerService.Version + ")");
+    }
+    finally
+    {
+        if (keep != null) File.WriteAllBytes(saveFile, keep);
+        else if (File.Exists(saveFile) && !tests.Contains("keepdex")) File.Delete(saveFile);
+    }
+}
+
+if (tests.Contains("dexgames"))
+{
+    // Which DexTracker Pokédex each game opens on, and that a game only adds its OWN save (another game's save is skipped).
+    var refDexes = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(DexTrackerService.AppDir, "data", "reference_data.json")))!["dexes"]!
+        .AsArray().Select(d => d!["id"]!.GetValue<string>()).ToHashSet();
+    foreach (var g in GameCatalog.All)
+    {
+        var dex = DexTrackerService.DexFor(g);
+        Console.WriteLine($"   {g.Title,-22} -> {dex ?? "National Dex"}   (game dexes: {string.Join(", ", DexTrackerService.GameDexes(g))})");
+        Check(DexTrackerService.GameDexes(g).All(refDexes.Contains), $"{g.Title}: every Pokédex it fills exists in DexTracker");
+    }
+    Check(DexTrackerService.DexFor(GameCatalog.Get("sw_frlg_lg")) == "FRLG Dex" && DexTrackerService.DexFor(GameCatalog.Get("gba_leafgreen")) == "FRLG Dex" &&
+          DexTrackerService.DexFor(GameCatalog.Get("sw_shield")) == "SwSh Dex" && DexTrackerService.DexFor(GameCatalog.Get("sw_lgp")) == "LGPE Dex" &&
+          DexTrackerService.DexFor(GameCatalog.Get("sw_scarlet")) == "SV Dex" && DexTrackerService.DexFor(GameCatalog.Get("3ds_x")) == null,
+          "LeafGreen -> FRLG Dex, Shield -> SwSh Dex, Let's Go -> LGPE Dex, Scarlet -> SV Dex, X -> National Dex");
+    var saveFile = DexTrackerService.SavePath;
+    var keep = File.Exists(saveFile) ? File.ReadAllBytes(saveFile) : null;
+    try
+    {
+        if (File.Exists(saveFile)) File.Delete(saveFile);
+        var frSave = Path.Combine(devFiles, @"RoCs-PC-master\RoCs-PC-master\06 - Gen III - FRLG Collection\Save Data\Pokemon Fire Red.sav");
+        if (SaveUtil.TryGetSaveFile(frSave, out var frs) && frs != null)
+        {
+            var log = new List<string>();
+            DexTrackerService.AddGameSave(new FoundSave(frSave, frs), GameCatalog.Get("sw_frlg_lg"), log.Add);
+            Check(!File.Exists(saveFile) && log.Any(l => l.Contains("not LeafGreen")), "a FireRed save on the LeafGreen page is NOT added: " + log.Last());
+            log.Clear();
+            DexTrackerService.AddGameSave(new FoundSave(frSave, frs), GameCatalog.Get("sw_frlg_fr"), log.Add);
+            Check(File.Exists(saveFile) && DexTrackerService.Load()!["per_game_ownership"]!["FRLG Dex"]!.AsArray().Count > 0, "the FireRed page adds its FireRed save to the FRLG Dex");
+        }
+        var none = new List<string>();
+        DexTrackerService.AddGameSave(null, GameCatalog.Get("sw_shield"), none.Add);
+        Check(none.Single().Contains("no Shield save"), "no save: DexTracker opens without adding anything (" + none.Single() + ")");
+    }
+    finally
+    {
+        if (keep != null) File.WriteAllBytes(saveFile, keep); else if (File.Exists(saveFile)) File.Delete(saveFile);
+    }
+}
+
+if (tests.Contains("dexserve"))
+{
+    // Keeps the DexTracker server up for a browser test (ShinyForge's own data folder): mark.flag in the work folder marks the
+    // Shield test save (ShinyForge's side changing the savefile while the page is open); stop.flag ends it.
+    DexTrackerService.EnsureRunning();
+    Console.WriteLine("   serving " + DexTrackerService.Url + " - savefile " + DexTrackerService.SavePath);
+    var until = DateTime.Now.AddMinutes(30);
+    while (DateTime.Now < until && !File.Exists(Path.Combine(work, "stop.flag")))
+    {
+        if (File.Exists(Path.Combine(work, "mark.flag")))
+        {
+            File.Delete(Path.Combine(work, "mark.flag"));
+            var swSave = Path.Combine(devFiles, @"PKHeX (26.10.18)\shield\20210420-120931 Dom\main");
+            if (SaveUtil.TryGetSaveFile(swSave, out var sws) && sws != null)
+                DexTrackerService.MarkCollection(Collection.FromSave(sws, swSave), GameCatalog.Get("sw_shield"), s => Console.WriteLine("   " + s));
+        }
+        Thread.Sleep(500);
+    }
+}
+
+if (tests.Contains("huntprofiles"))
+{
+    // Hunt profiles + timer on a copy: ShinyForge's hunt_profiles.json is backed up first and put back at the end.
+    var file = HuntProfiles.FilePath;
+    var keep = File.Exists(file) ? File.ReadAllBytes(file) : null;
+    try
+    {
+        foreach (var p in HuntProfiles.All) HuntProfiles.Delete(p.Id);
+        var lg = GameCatalog.Get("sw_frlg_lg");
+        var fr = GameCatalog.Get("sw_frlg_fr");
+        var a = HuntProfiles.Create("Deoxys", lg, "Deoxys", activate: true);
+        Check(a.State == HuntState.Active && a.Started != null && a.Segments.Count == 1, "new hunt is active and started");
+        var b = HuntProfiles.Create("Mewtwo", fr, "Mewtwo", activate: true);
+        Check(HuntProfiles.Get(a.Id)!.State == HuntState.Paused && HuntProfiles.ActiveFor(lg)!.Id == b.Id,
+              "making a FireRed hunt active pauses the LeafGreen one (same Python hunter)");
+        var c = HuntProfiles.Create("Shiny Pikachu", GameCatalog.Get("3ds_x"), "", activate: true);
+        Check(HuntProfiles.Get(b.Id)!.State == HuntState.Active, "a hunt on another console doesn't pause it");
+        HuntProfiles.Tick(_ => true);
+        Thread.Sleep(1500);
+        HuntProfiles.Tick(g => g.Id == fr.Id);
+        Check(HuntProfiles.Get(b.Id)!.Seconds is > 1 and < 5 && HuntProfiles.Get(c.Id)!.Seconds == 0,
+              $"timer counts only while the hunt's bot hunts ({HuntProfiles.Get(b.Id)!.Seconds:0.0} s)");
+        HuntProfiles.SetTimer(c.Id, true);
+        Thread.Sleep(1200);
+        HuntProfiles.Tick(_ => false);
+        Check(HuntProfiles.Get(c.Id)!.Seconds > 1, "a timer started by hand counts without a bot");
+        HuntProfiles.Activate(a.Id);
+        Thread.Sleep(1100);
+        HuntProfiles.Tick(_ => true);
+        Check(HuntProfiles.Get(b.Id)!.Seconds < 5 && HuntProfiles.Get(a.Id)!.Seconds > 0.5, "after switching back, only the active hunt's timer moves");
+        Check(HuntProfiles.OnFound("python", "Pidgey", true) == null && HuntProfiles.Get(a.Id)!.State == HuntState.Active, "a shiny that isn't the target doesn't finish the hunt");
+        var done = HuntProfiles.OnFound("python", "Deoxys", true);
+        Check(done?.State == HuntState.Finished && done.Finished != null && done.FoundSpecies == "Deoxys",
+              $"shiny Deoxys finishes the hunt: {HuntProfiles.Format(done!.Time)} hunting, {HuntProfiles.Format(done.Calendar!.Value)} start to finish");
+        HuntProfiles.Activate(a.Id);
+        Check(HuntProfiles.Get(a.Id)!.State == HuntState.Active && HuntProfiles.Get(a.Id)!.Finished == null, "a finished hunt can be reopened");
+        HuntProfiles.Edit(c.Id, p => p.ManualEncounters += 3);
+        Check(HuntProfiles.Encounters(HuntProfiles.Get(c.Id)!, out _) == 3, "encounters counted by hand");
+        var csv = HuntStats.SourceFor(lg);
+        Console.WriteLine("   Python hunter log: " + (csv?.CsvPath ?? "none"));
+        if (csv != null)
+        {
+            var rows = HuntStats.ReadRows(csv.CsvPath, null, out _);
+            if (rows.Count > 10)
+            {
+                var from = rows[^10].Time;
+                HuntProfiles.Edit(a.Id, p => { p.Segments.Clear(); p.Segments.Add(new HuntSegment { From = from, To = rows[^1].Time }); });
+                var n = HuntProfiles.Encounters(HuntProfiles.Get(a.Id)!, out _);
+                var stats = HuntStats.Compute(csv, false, include: HuntProfiles.Get(a.Id)!.Covers);
+                Check(n >= 10 && stats.Total == n, $"the hunt's encounters are the log rows in its active spans ({n}), statistics agree ({stats.Total})");
+            }
+        }
+        // ---- the hunt is found by itself when a bot hunts: from the real Python hunter log (only read)
+        var realBot = Path.Combine(devFiles, "Switch 1 Pokemon Bot");
+        if (File.Exists(Path.Combine(realBot, "encounters.csv")))
+        {
+            var oldFolder = AppSettings.Current.PythonBotFolder;
+            AppSettings.Current.PythonBotFolder = realBot; // in memory only
+            try
+            {
+                foreach (var p in HuntProfiles.All) HuntProfiles.Delete(p.Id);
+                var auto = HuntProfiles.AutoStart(lg)!;
+                var n = HuntProfiles.Encounters(auto, out _);
+                var rows = HuntStats.ReadRows(Path.Combine(realBot, "encounters.csv"), null, out _);
+                var phase = rows.Skip(rows.FindLastIndex(r => r.Shiny) + 1).ToList();
+                Console.WriteLine($"   auto hunt: \"{auto.Name}\" target {auto.Target}, started {auto.Started:yyyy-MM-dd HH:mm}, {n:N0} encounters, {HuntProfiles.Format(auto.Time)} hunting");
+                Check(auto.State == HuntState.Active && auto.Target.Length > 0 && n == phase.Count && auto.Started == phase.First().Time && auto.Seconds > 0,
+                      $"a running hunt with no profile gets one from the log: target {auto.Target}, {n:N0} encounters since the last shiny, start date and hunting time filled in");
+                Check(HuntProfiles.AutoStart(lg) == null, "with an active hunt nothing new is made");
+                HuntProfiles.Pause(auto.Id);
+                var again = HuntProfiles.AutoStart(fr);
+                Check(again?.Id == auto.Id && again.State == HuntState.Active && HuntProfiles.All.Count == 1,
+                      "starting the same Pokémon's hunt again (even from FireRed) continues the paused hunt instead of making a new one");
+                var t0 = HuntProfiles.Get(auto.Id)!.Seconds;
+                HuntProfiles.Tick(_ => true, () => new[] { lg });
+                Thread.Sleep(1200);
+                HuntProfiles.Tick(_ => true, () => new[] { lg });
+                Check(HuntProfiles.Get(auto.Id)!.Seconds > t0, "its timer keeps counting while the hunter runs");
+            }
+            finally { AppSettings.Current.PythonBotFolder = oldFolder; }
+        }
+        else Console.WriteLine("   (real Python hunter log not found - auto-hunt test skipped)");
+        Check(HuntProfiles.Format(TimeSpan.FromSeconds(3725)) == "1h 02m 05s" && HuntProfiles.Format(TimeSpan.FromHours(50)) == "2d 2h 00m", "time format");
+        HuntProfiles.Flush();
+        var reread = System.Text.Json.JsonSerializer.Deserialize<List<HuntProfile>>(File.ReadAllText(file))!;
+        Check(reread.Count >= 1, "saved to hunt_profiles.json");
+    }
+    finally
+    {
+        if (keep != null) File.WriteAllBytes(file, keep);
+        else if (File.Exists(file)) File.Delete(file);
+    }
+}
+
+if (tests.Contains("tppflush"))
+{
+    // The TPPFLUSH bridge: every command type is accepted (sent as UDP to a local port - no 3DS needed).
+    using var udp = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 4950));
+    var got = 0;
+    _ = Task.Run(async () => { while (true) { await udp.ReceiveAsync(); Interlocked.Increment(ref got); } });
+    var lines = new List<string>();
+    using (var ctl = new ShinyForge.Services.ThreeDS.TppflushController("127.0.0.1"))
+    {
+        ctl.Output += l => { lock (lines) lines.Add(l); };
+        ctl.Start();
+        ctl.Press("A", 0.05); ctl.Press("ZL", 0.05); ctl.Press("HOME", 0.05); ctl.Hold("DPADUP"); ctl.Release("DPADUP");
+        ctl.Touch(160, 120, 0.05); ctl.CirclePad(0.5, -1); ctl.CStick(1, 0); ctl.Send("clear"); ctl.Send("press Q");
+        Thread.Sleep(2500);
+    }
+    Thread.Sleep(500);
+    lock (lines)
+    {
+        Console.WriteLine("   " + string.Join(" | ", lines));
+        Check(lines.FirstOrDefault() == "ready" && lines.Count(l => l.StartsWith("ok ")) == 9, "all 9 commands accepted");
+        Check(lines.Any(l => l.StartsWith("error: bad command 'press Q'")), "an unknown button is reported, not sent");
+        Check(lines.LastOrDefault() == "stopped", "closing gives the buttons back to the 3DS");
+    }
+    Check(got >= 14, $"input packets sent to the 3DS port ({got})");
 }
 
 if (tests.Contains("features"))
@@ -2168,7 +2153,6 @@ if (tests.Contains("featuresui"))
     Snap(new HuntStatsForm("Python"), "hunt_stats", 2000);
     Snap(new SettingsForm(), "settings");
     Snap(new BackupsForm(), "backups");
-    Snap(new LivingDexForm(), "living_dex", 40000);
     Snap(new GamePage(GameCatalog.Get("sw_frlg_lg")) is var gp ? new Form { Size = new Size(1320, 1200), Controls = { gp } } : null!, "game_page_frlg", 1500);
 }
 
@@ -2271,41 +2255,6 @@ if (tests.Contains("render"))
     using (var bmp = new Bitmap(main.Width, main.Height)) { main.DrawToBitmap(bmp, new Rectangle(Point.Empty, main.Size)); bmp.Save(Path.Combine(outDir, "0_mainform.png")); }
     main.Dispose(); // not Close(): closing asks to stop the user's own running hunt
     Console.WriteLine("   rendered 0_mainform");
-}
-
-if (tests.Contains("livingdex"))
-{
-    // Renders the Living Dex window (reads the real saves set up in ShinyForge - only reads) with a few searches selected.
-    InitUi();
-    var outDir = Path.Combine(work, "screens");
-    Directory.CreateDirectory(outDir);
-    var f = new LivingDexForm { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
-    f.Show();
-    T Field<T>(string n) => (T)typeof(LivingDexForm).GetField(n, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(f)!;
-    var status = Field<Label>("_status");
-    var until = DateTime.Now.AddSeconds(240);
-    while (DateTime.Now < until && !(status.Text.StartsWith("Read ") || status.Text.StartsWith("No saves"))) { Application.DoEvents(); Thread.Sleep(50); }
-    Console.WriteLine("   " + status.Text);
-    Console.WriteLine("   " + Field<Label>("_counts").Text);
-    var grid = Field<DexGrid>("_grid");
-    var show = typeof(LivingDexForm).GetMethod("ShowInfo", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-    foreach (var (q, name) in new[] { ("", "ld_all"), ("Unown", "ld_unown"), ("Rattata", "ld_rattata"), ("Alcremie", "ld_alcremie"), ("Pikachu", "ld_pikachu"), ("Pidgeot", "ld_pidgeot") })
-    {
-        Field<TextBox>("_search").Text = q;
-        Application.DoEvents();
-        var items = (System.Collections.IList)typeof(DexGrid).GetField("_items", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(grid)!;
-        if (items.Count > 0)
-        {
-            var first = ((ValueTuple<DexEntry, DexState>)items[Math.Min(1, items.Count - 1)]!).Item1;
-            show.Invoke(f, new object[] { first });
-        }
-        for (var i = 0; i < 40; i++) { Application.DoEvents(); Thread.Sleep(50); }
-        using var bmp = new Bitmap(f.Width, f.Height);
-        f.DrawToBitmap(bmp, new Rectangle(Point.Empty, f.Size));
-        bmp.Save(Path.Combine(outDir, name + ".png"));
-        Console.WriteLine($"   rendered {name} ({items.Count} entries)");
-    }
-    f.Close();
 }
 
 if (tests.Contains("installall"))

@@ -77,7 +77,7 @@ public sealed class PlatformPage : UserControl
         Dock = DockStyle.Fill;
         var title = Theme.Label("Which system are you playing on?", Theme.Title);
         title.Location = new Point(40, 28);
-        var sub = Theme.Label("ShinyForge hunts shinies, records your gameplay, tracks your collection in your Pokédex spreadsheets and backs up your Pokémon.", Theme.Body, Theme.Muted);
+        var sub = Theme.Label("ShinyForge hunts shinies, records your gameplay, tracks your collection in DexTracker and backs up your Pokémon.", Theme.Body, Theme.Muted);
         sub.Location = new Point(44, 76);
 
         var flow = new FlowLayoutPanel { Location = new Point(20, 120), AutoSize = true, BackColor = Theme.Bg };

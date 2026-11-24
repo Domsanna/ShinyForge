@@ -1,0 +1,55 @@
+{
+    "games": [
+        {
+            "id": "legends-za",
+            "name": "Pokémon Legends: Z-A",
+            "icon_url": "tools/legends-za/Legends_Z-A_Icon.jpg"
+        },
+        {
+            "id": "gen4",
+            "name": "Pokémon Generation 4",
+            "icon_url": [
+                "tools/gen4/SoulSilver_EN_boxart.jpg",
+                "tools/gen4/Pearl_EN_boxart.jpg",
+                "tools/gen4/Platinum_EU_boxart.jpg",
+                "tools/gen4/Diamond_EN_boxart.jpg",
+                "tools/gen4/HeartGold_EN_boxart.jpg"
+            ]
+        },
+        {
+            "id": "pla",
+            "name": "Pokémon Legends: Arceus",
+            "icon_url": "tools/pla/Legends_Arceus_Icon.jpg"
+        }
+    ],
+    "tools": [
+        {
+            "id": "donut-maker",
+            "game_id": "legends-za",
+            "name": "Donut Maker",
+            "icon_url": "tools/legends-za/donut-maker/donut.png",
+            "view": "cooking"
+        },
+        {
+            "id": "hyperspace-searcher",
+            "game_id": "legends-za",
+            "name": "Searcher",
+            "icon_url": "tools/legends-za/hyperspace-searcher/Mega_Dimension.png",
+            "view": "hyperspace"
+        },
+        {
+            "id": "palpark",
+            "game_id": "gen4",
+            "name": "PalPark - Pokéfinder",
+            "icon_url": "tools/gen4/palpark/palpark-map.png",
+            "view": "palpark"
+        },
+        {
+            "id": "pokedex-research",
+            "game_id": "pla",
+            "name": "Hisui Pokédex Research",
+            "icon_url": "tools/pla/pokedex-research/LA_Pokedex.png",
+            "view": "pla-research"
+        }
+    ]
+}

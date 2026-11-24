@@ -132,11 +132,22 @@ public static class HuntStats
         return 1 - Math.Pow(1 - p, rolls);
     }
 
-    public static HuntStatsResult Compute(Source src, bool charm, DateTime? now = null)
+    /// <summary>The log a game's hunts write: the Python hunter's (FireRed / LeafGreen on Switch) or the 3DS bot's rows for that game.</summary>
+    public static Source? SourceFor(Game game)
+    {
+        var all = Sources();
+        if (game.Bot == BotKind.FrlgSwitch) return all.FirstOrDefault(s => s.GameFilter == null);
+        var name = ThreeDS.Games3DS.All.FirstOrDefault(g => g.ShinyForgeId == game.Id)?.Name;
+        return name == null ? null : all.FirstOrDefault(s => s.GameFilter == name);
+    }
+
+    /// <summary>Statistics of a log - only the rows <paramref name="include"/> keeps when given (a hunt profile's own encounters).</summary>
+    public static HuntStatsResult Compute(Source src, bool charm, DateTime? now = null, Func<DateTime, bool>? include = null, string? name = null)
     {
         var t = now ?? DateTime.Now;
         var rows = ReadRows(src.CsvPath, src.GameFilter, out var repeats);
-        var r = new HuntStatsResult { Source = src.Name, Gen = src.Gen, ShinyCharm = charm, Total = rows.Count, Repeats = repeats };
+        if (include != null) rows = rows.Where(x => include(x.Time)).ToList();
+        var r = new HuntStatsResult { Source = name ?? src.Name, Gen = src.Gen, ShinyCharm = charm, Total = rows.Count, Repeats = include == null ? repeats : 0 };
         r.Odds = BaseOdds(src.Gen, charm);
         r.Shinies = rows.Where(x => x.Shiny).ToList();
         r.ShiniesFound = r.Shinies.Count;
@@ -196,5 +207,8 @@ public static class HuntStats
         ["last"] = r.Last == null ? "" : $"{r.Last.Species} - {r.Last.Nature} - IVs {r.Last.IvTotal}/186",
         ["phase_time"] = r.PhaseStart is { } ps ? $"{(int)(DateTime.Now - ps).TotalHours}h {(DateTime.Now - ps).Minutes:00}m" : "",
         ["milestone"] = r.Milestone,
+        // the active hunt profile's timer (time spent hunting) - empty when no hunt profile is active
+        ["hunt_timer"] = HuntProfiles.All.FirstOrDefault(p => p.State == HuntState.Active) is { } hp ? HuntProfiles.Format(hp.Time) : "",
+        ["hunt_name"] = HuntProfiles.All.FirstOrDefault(p => p.State == HuntState.Active)?.Name ?? "",
     };
 }

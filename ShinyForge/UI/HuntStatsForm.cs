@@ -14,10 +14,11 @@ public sealed class HuntStatsForm : Form
     private readonly Label _side = new() { AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Body, MaximumSize = new Size(330, 0) };
     private readonly Panel _chart = new() { Height = 170, Dock = DockStyle.Bottom };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 10_000 };
-    private List<HuntStats.Source> _sources = new();
+    /// <summary>The logs, then one entry per hunt profile (its own encounters only).</summary>
+    private List<(string Name, HuntStats.Source Source, string? ProfileId)> _sources = new();
     private HuntStatsResult? _r;
 
-    public HuntStatsForm(string? preferSource = null)
+    public HuntStatsForm(string? preferSource = null, string? profileId = null)
     {
         Text = "ShinyForge - hunt statistics";
         BackColor = Theme.Bg;
@@ -51,11 +52,15 @@ public sealed class HuntStatsForm : Form
         Controls.Add(_chart);
         Controls.Add(top);
 
-        _sources = HuntStats.Sources();
+        _sources = HuntStats.Sources().Select(s => (s.Name, s, (string?)null)).ToList();
+        foreach (var p in HuntProfiles.All)
+            if (p.Game is { } g && HuntStats.SourceFor(g) is { } ps)
+                _sources.Add(($"Hunt: {p.Name} ({p.GameTitle})", ps, p.Id));
         foreach (var s in _sources) _source.Items.Add(s.Name);
         if (_sources.Count == 0) _source.Items.Add("No hunt logs yet - start a hunt first");
-        var idx = preferSource == null ? -1 : _sources.FindIndex(s => s.Name.Contains(preferSource, StringComparison.OrdinalIgnoreCase));
-        if (idx < 0 && HuntStats.Active() is { } a) idx = _sources.FindIndex(s => s.Name == a.Name);
+        var idx = profileId != null ? _sources.FindIndex(s => s.ProfileId == profileId)
+                : preferSource == null ? -1 : _sources.FindIndex(s => s.ProfileId == null && s.Name.Contains(preferSource, StringComparison.OrdinalIgnoreCase));
+        if (idx < 0 && profileId == null && HuntStats.Active() is { } a) idx = _sources.FindIndex(s => s.Name == a.Name);
         _source.SelectedIndex = Math.Max(0, idx);
 
         _source.SelectedIndexChanged += (_, _) => Fill();
@@ -63,7 +68,7 @@ public sealed class HuntStatsForm : Form
         refresh.Click += (_, _) => Fill();
         log.Click += (_, _) =>
         {
-            if (Current() is { } s) try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(s.CsvPath) { UseShellExecute = true }); } catch { }
+            if (Current() is { } s) try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(s.Source.CsvPath) { UseShellExecute = true }); } catch { }
         };
         _timer.Tick += (_, _) => Fill();
         _timer.Start();
@@ -71,19 +76,23 @@ public sealed class HuntStatsForm : Form
         Shown += (_, _) => Fill();
     }
 
-    private HuntStats.Source? Current() => _source.SelectedIndex >= 0 && _source.SelectedIndex < _sources.Count ? _sources[_source.SelectedIndex] : null;
+    private (string Name, HuntStats.Source Source, string? ProfileId)? Current() => _source.SelectedIndex >= 0 && _source.SelectedIndex < _sources.Count ? _sources[_source.SelectedIndex] : null;
 
     private void Fill()
     {
-        if (Current() is not { } src) { _big.Text = "No hunt yet"; return; }
+        if (Current() is not { } cur) { _big.Text = "No hunt yet"; return; }
         HuntStatsResult r;
-        try { r = HuntStats.Compute(src, _charm.Checked); }
+        var profile = cur.ProfileId != null ? HuntProfiles.Get(cur.ProfileId) : null;
+        try { r = HuntStats.Compute(cur.Source, _charm.Checked, include: profile == null ? null : profile.Covers, name: cur.Name); }
         catch (Exception ex) { _big.Text = "Can't read the log"; _details.Text = ex.Message; return; }
         _r = r;
         _big.Text = $"{r.Phase:N0} encounters";
         _sub.Text = r.Milestone;
         var eta = r.Eta90 is { } e ? $"{(int)e.TotalHours}h {e.Minutes:00}m" : r.Phase >= r.To90 ? "already past 90 %" : "-";
         _details.Text =
+            (profile != null ? $"Hunt profile \"{profile.Name}\": {HuntProfiles.Format(profile.Time)} spent hunting" +
+                               (profile.Started is { } st ? $", started {st:yyyy-MM-dd HH:mm}" : "") +
+                               (profile.Finished is { } fin ? $", finished {fin:yyyy-MM-dd HH:mm}" : "") + "\n" : "") +
             $"Current hunt (since the last shiny{(r.PhaseStart is { } ps ? $", started {ps:yyyy-MM-dd HH:mm}" : "")})\n\n" +
             $"Shiny odds per encounter:  1 in {Math.Round(1 / r.Odds):N0}{(r.ShinyCharm ? " (Shiny Charm)" : "")}  (Generation {r.Gen})\n" +
             $"Chance you'd have found one by now:  {r.ChanceByNow:P1}\n" +

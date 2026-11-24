@@ -1,3 +1,9 @@
 [submodule "external/pokeldn"]
 	path = external/pokeldn
 	url = https://github.com/Decryptu/pokeldn.git
+[submodule "external/DexTracker"]
+	path = external/DexTracker
+	url = https://github.com/TheNinjask/DexTracker
+[submodule "external/TPPFLUSH"]
+	path = external/TPPFLUSH
+	url = https://github.com/u93132/TPPFLUSH

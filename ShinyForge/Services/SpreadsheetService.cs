@@ -43,10 +43,9 @@ public static class SpreadsheetService
     /// <summary>Text for the UI: where the tracker came from.</summary>
     public static string Describe(Game game, string? wb)
     {
+        // DexTracker replaced the spreadsheets: they are no longer downloaded, but one you already have is still kept up to date.
         if (wb == null)
-            return string.IsNullOrWhiteSpace(game.Spreadsheet)
-                ? "No Pokédex tracker spreadsheet exists for this game yet - use 'Choose spreadsheet' if you have one."
-                : $"No \"{game.Spreadsheet}\" tracker found (looked in {AppSettings.Current.SpreadsheetRoot} and the bundled Spreadsheets folder).";
+            return "Spreadsheet (optional): none - DexTracker is used. If you already have a Pokédex tracker spreadsheet, 'Choose spreadsheet' keeps it updated too.";
         var full = Path.GetFullPath(wb);
         var where = !string.IsNullOrWhiteSpace(AppSettings.Current.For(game.Id).SpreadsheetPath) ? "chosen by you"
             : full.StartsWith(Path.GetFullPath(AppSettings.Current.SpreadsheetRoot), StringComparison.OrdinalIgnoreCase) ? "your spreadsheet folder"

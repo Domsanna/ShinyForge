@@ -312,6 +312,7 @@ public static class HuntService
     public static void Start(Game game, string key)
     {
         var s = AppSettings.Current;
+        HuntProfiles.NoteHuntStarted(game); // the hunt profile timer finds the hunt by itself from this game
         if (s.SwitchUsb)
             throw new InvalidOperationException((key == "python" ? "The Python hunter" : "SysBot.exe") + " talks to the Switch over WiFi, but " +
                 "sys-botbase is set to USB. Switch it back to WiFi (Shiny Hunt card → sys-botbase), restart the Switch and dock it.");

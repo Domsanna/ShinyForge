@@ -29,12 +29,11 @@ public sealed class GamePage : UserControl, IDisposable
     private LogView _trackLog = null!;
     private ComboBox? _source, _audio;
     private ComboBox _segments = null!, _trackSource = null!;
-    private FancyButton _recButton = null!, _downloadSheet = null!;
+    private FancyButton _recButton = null!, _openSheet = null!, _autoSheet = null!;
     private CheckBox _autoMonitor = null!;
     private FoundSave? _save;
     private volatile bool _trackLive;
     private volatile string? _trackError;
-    private DexWindow? _dex;
 
     public event Action<string>? StatusMessage;
     public bool IsRecording => _recorder.IsRecording;
@@ -49,7 +48,7 @@ public sealed class GamePage : UserControl, IDisposable
                 ? $"{game.PlatformLabel}\n\nSort your Pokémon HOME boxes automatically with Pokémon Automation's programs."
                 : $"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
                   (HuntService.OptionsFor(game).Count > 0 || Games3DS.All.Any(p => p.ShinyForgeId == game.Id) ? "★ Automatic shiny hunting available.\n" : "") +
-                  "Record gameplay in timed segments, keep your Pokédex tracker spreadsheet up to date, back up every Pokémon " +
+                  "Record gameplay in timed segments, keep your DexTracker Pokédex up to date, back up every Pokémon " +
                   "from your save into a 'Pokemon Home' folder and get a Game Info report.", 13, Skin.Muted);
         info.Margin = new Thickness(20, 24, 20, 0);
         info.MaxWidth = 640;
@@ -252,12 +251,13 @@ public sealed class GamePage : UserControl, IDisposable
     {
         var card = new Card(Skin.GlyphSparkle, "Shiny Hunt (automatic)");
         var profile3ds = Games3DS.All.FirstOrDefault(g => g.ShinyForgeId == _game.Id);
-        if (profile3ds != null) { Build3DSHunt(card, profile3ds); return card; }
+        if (profile3ds != null) { AddHuntProfileRow(card); Build3DSHunt(card, profile3ds); return card; }
         var options = HuntService.OptionsFor(_game);
         if (options.Count == 0)
         {
             card.Body.Children.Add(Info(HuntService.UnsupportedReason(_game)));
             if (_game.IsSwitch) AddSwitchTools(card);
+            AddHuntProfileRow(card);
             return card;
         }
         var radios = new List<RadioButton>();
@@ -305,9 +305,36 @@ public sealed class GamePage : UserControl, IDisposable
             stats.Click += (_, _) => new HuntStatsWindow("Python").Show(Dialogs.Owner(this)!);
             card.Body.Children.Add(Skin.Wrap(pause, opts, stats));
         }
+        AddHuntProfileRow(card);
         _huntStatus = Info("", Skin.Good);
         card.Body.Children.Add(_huntStatus);
         return card;
+    }
+
+    // ---------------------------------------------------------------- hunt profiles + timer
+    private TextBlock? _profileLabel;
+
+    /// <summary>The game's active hunt with its timer and the Hunt profiles button.</summary>
+    private void AddHuntProfileRow(Card card)
+    {
+        _profileLabel = Info("", Skin.Gold);
+        var profiles = new FancyButton("Hunt profiles", Skin.GlyphSparkle, Skin.PanelHi);
+        profiles.Click += (_, _) => new HuntProfilesWindow(_game.Id).Show(Dialogs.Owner(this)!);
+        card.Body.Children.Add(Skin.Wrap(profiles));
+        card.Body.Children.Add(_profileLabel);
+        RefreshProfileLabel();
+        _poll.Tick += (_, _) => RefreshProfileLabel();
+    }
+
+    private void RefreshProfileLabel()
+    {
+        if (_profileLabel == null) return;
+        var p = HuntProfiles.ActiveFor(_game);
+        var text = p == null
+            ? "No active hunt profile for this game - Hunt profiles keeps a timer and the encounters of each hunt."
+            : $"⏱ {p.Name}: {HuntProfiles.Format(p.Time)} hunting" + (p.Started is { } s ? $" since {s:yyyy-MM-dd}" : "") +
+              (p.GameId != _game.Id ? $" ({p.GameTitle})" : "") + (p.TimerRunning ? " - timer running" : "");
+        if (_profileLabel.Text != text) _profileLabel.Text = text;
     }
 
     // ---------------------------------------------------------------- 3DS hunting (Luma3DS)
@@ -378,6 +405,8 @@ public sealed class GamePage : UserControl, IDisposable
                 if (!isStop) return;
                 var name = SpeciesName.GetSpeciesName(pk.Species, 2);
                 OnFound(name, pk.IsShiny);
+                if (HuntProfiles.OnFound(HuntProfiles.BotGroup(_game), name, pk.IsShiny) is { } hunt)
+                    Dialogs.Ui(() => Status($"★ Hunt \"{hunt.Name}\" finished: shiny {name} after {HuntProfiles.Format(hunt.Time)} of hunting."));
                 if (AppSettings.Current.NotifyShiny)
                     NotifyService.Send((pk.IsShiny ? "✨ Shiny " : "Found ") + name + " on the 3DS!",
                         $"{_game.Title}: {name} Lv.{pk.CurrentLevel}, {(Nature)pk.Nature}, IVs {pk.IV_HP + pk.IV_ATK + pk.IV_DEF + pk.IV_SPA + pk.IV_SPD + pk.IV_SPE}/186. " +
@@ -396,6 +425,7 @@ public sealed class GamePage : UserControl, IDisposable
             _last3dsActivity = DateTime.Now;
             start.IsEnabled = false; stop.IsEnabled = true;
             Interlocked.Increment(ref _3dsHunts);
+            HuntProfiles.Set3DSHunting(_game.Id, true);
             var bot = _bot3ds;
             _ = Task.Run(() =>
             {
@@ -407,6 +437,7 @@ public sealed class GamePage : UserControl, IDisposable
                     bot.Close();
                     _hunt3ds = null;
                     Interlocked.Decrement(ref _3dsHunts);
+                    HuntProfiles.Set3DSHunting(_game.Id, false);
                     WebServer.RemoteAction = null;
                     WebServer.RemoteStatus = null;
                     Dialogs.Ui(() => { start.IsEnabled = true; stop.IsEnabled = false; _clips.Stop(); });
@@ -718,9 +749,16 @@ public sealed class GamePage : UserControl, IDisposable
     // ================================================================ collection tracker
     private Card BuildTrackerCard()
     {
-        var card = new Card(Skin.GlyphSheet, "Collection Tracker → Pokédex spreadsheet", Skin.Good);
+        var card = new Card(Skin.GlyphSheet, "Collection Tracker → DexTracker", Skin.Good);
+        var dexId = DexTrackerService.DexFor(_game);
+        card.Body.Children.Add(Info("DexTracker is your Living Dex and Pokédex. Sync marks every Pokémon in your party and boxes in it " +
+                                    (dexId != null ? $"(National Dex, Form Dex and the {dexId.Replace(" Dex", "")} Pokédex)" : "(National Dex and Form Dex)") +
+                                    " - only empty slots are filled, nothing you entered is changed."));
+        var dex = new FancyButton(dexId != null ? "Open Pokédex in DexTracker" : "Open DexTracker", Skin.GlyphSparkle, Skin.Accent2);
+        dex.Click += async (_, _) => { dex.IsEnabled = false; try { await OpenDexTrackerForGame(); } finally { dex.IsEnabled = true; } };
+        card.Body.Children.Add(Skin.Wrap(dex));
         var wb = SpreadsheetService.FindWorkbook(_game);
-        _sheetLabel = Info(SpreadsheetService.Describe(_game, wb), wb != null ? Skin.Text : Skin.Warn);
+        _sheetLabel = Info(SpreadsheetService.Describe(_game, wb), wb != null ? Skin.Text : Skin.Muted);
         card.Body.Children.Add(_sheetLabel);
         var change = new FancyButton("Choose spreadsheet", Skin.GlyphSheet, Skin.PanelHi);
         change.Click += async (_, _) =>
@@ -736,12 +774,10 @@ public sealed class GamePage : UserControl, IDisposable
         auto.Click += (_, _) => { _gs.SpreadsheetPath = ""; AppSettings.Current.Save(); RefreshSheetLabel(); };
         var open = new FancyButton("Open", Skin.GlyphSheet, Skin.PanelHi);
         open.Click += (_, _) => { if (SpreadsheetService.FindWorkbook(_game) is { } cur) OsInfo.Open(cur); };
+        _openSheet = open;
+        _autoSheet = auto;
+        _openSheet.IsVisible = _autoSheet.IsVisible = wb != null || !string.IsNullOrWhiteSpace(_gs.SpreadsheetPath);
         card.Body.Children.Add(Skin.Wrap(change, auto, open));
-        var dex = new FancyButton("Pokédex (pop-out)", Skin.GlyphSparkle, Skin.Accent2);
-        dex.Click += (_, _) => OpenDex();
-        _downloadSheet = new FancyButton("Download tracker", Skin.GlyphDownload, Skin.Accent) { IsVisible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet) };
-        _downloadSheet.Click += async (_, _) => await DownloadTracker();
-        card.Body.Children.Add(Skin.Wrap(dex, _downloadSheet));
 
         var sources = new List<string> { "Save file" };
         if (_game.Bot == BotKind.FrlgSwitch) sources.Insert(0, "Live from the Switch (party + PC boxes)");
@@ -758,16 +794,14 @@ public sealed class GamePage : UserControl, IDisposable
         card.Body.Children.Add(_trackSaveLabel);
         card.Body.Children.Add(Skin.Wrap(pickSave, autoSave));
 
-        var sync = new FancyButton("Sync now", Skin.GlyphSync, Skin.Accent) { IsEnabled = SpreadsheetService.CanUpdate };
+        var sync = new FancyButton("Sync now", Skin.GlyphSync, Skin.Accent);
         sync.Click += async (_, _) => await SyncTracker(manual: true);
         _autoMonitor = Skin.Check("Monitor automatically", false);
-        _autoMonitor.IsEnabled = SpreadsheetService.CanUpdate;
         _autoMonitor.IsCheckedChanged += (_, _) => SetMonitoring(_autoMonitor.IsChecked == true);
         card.Body.Children.Add(Skin.Wrap(sync, _autoMonitor));
-        card.Body.Children.Add(Info(SpreadsheetService.CanUpdate
-            ? "Marks 'In Box', 'OT' (caught by you) and 'Shiny' as Y for every Pokémon in your party and boxes. Only N → Y changes are made; your own marks are never removed."
-            : $"Updating the tracker uses Microsoft Excel on Windows (it keeps the trackers' macros and pictures intact), so Sync isn't available on {OsInfo.Name}. " +
-              "Open the tracker with Open, and see what you own in the Pokédex window."));
+        if (!SpreadsheetService.CanUpdate)
+            card.Body.Children.Add(Info($"A tracker spreadsheet is updated with Microsoft Excel on Windows (it keeps the trackers' macros and pictures intact), " +
+                                        $"so on {OsInfo.Name} Sync updates DexTracker only."));
         _trackLog = Skin.LogBox(110);
         card.Body.Children.Add(_trackLog);
         Dispatcher.UIThread.Post(UpdateTrackerSaveLabel);
@@ -780,68 +814,19 @@ public sealed class GamePage : UserControl, IDisposable
     {
         var wb = SpreadsheetService.FindWorkbook(_game);
         _sheetLabel.Text = SpreadsheetService.Describe(_game, wb);
-        _sheetLabel.Foreground = Skin.B(wb != null ? Skin.Text : Skin.Warn);
-        _downloadSheet.IsVisible = wb == null && !string.IsNullOrWhiteSpace(_game.Spreadsheet);
+        _sheetLabel.Foreground = Skin.B(wb != null ? Skin.Text : Skin.Muted);
+        _openSheet.IsVisible = _autoSheet.IsVisible = wb != null || !string.IsNullOrWhiteSpace(_gs.SpreadsheetPath);
     }
 
-    /// <summary>Downloads this game's Pokédex tracker from ShinyForge's GitHub page.</summary>
-    private async Task DownloadTracker()
+    /// <summary>Opens DexTracker for this game: adds this game's save first (never another game's), then opens its own Pokédex.</summary>
+    public async Task OpenDexTrackerForGame()
     {
-        _downloadSheet.IsEnabled = false;
-        try
+        if (!_game.AutomationOnly)
         {
-            _sheetLabel.Foreground = Skin.B(Skin.Muted);
-            _sheetLabel.Text = "Looking up the tracker on ShinyForge's GitHub page...";
-            var entry = SheetsDownloadService.EntryFor(_game, await SheetsDownloadService.ManifestAsync());
-            if (entry == null) { _sheetLabel.Text = $"No published tracker for Pokémon {_game.Title} was found."; return; }
-            if (!await Dialogs.YesNo(this, $"Download the Pokémon {_game.Title} tracker ({entry.Size / 1048576.0:N0} MB) into\n{SpreadsheetService.BundledRoot}?", "Pokédex tracker")) return;
-            var path = await SheetsDownloadService.DownloadAsync(entry, s => Dialogs.Ui(() => _sheetLabel.Text = s));
-            Status("Tracker downloaded: " + path);
+            var save = await Task.Run(ResolveTrackerSave);
+            await Task.Run(() => DexTrackerService.AddGameSave(save, _game, Log));
         }
-        catch (Exception ex) { await Dialogs.Info(this, "Couldn't download the tracker: " + ex.Message, "Pokédex tracker"); }
-        finally { _downloadSheet.IsEnabled = true; RefreshSheetLabel(); }
-    }
-
-    private void OpenDex()
-    {
-        if (_dex is { IsVisible: true }) { _dex.Activate(); return; }
-        _dex = new DexWindow(_game, LoadCollectionForDex);
-        _dex.Show();
-    }
-
-    /// <summary>What you own for the Pokédex window: the live Switch game if that source is selected, else the tracker's save file.</summary>
-    private Collection? LoadCollectionForDex(Action<string> progress)
-    {
-        if (_trackLive)
-        {
-            if (!HealthMonitor.SwitchReachable(2500))
-                throw new InvalidOperationException($"Can't reach the Switch at {AppSettings.Current.SwitchIP} - check its IP (Settings, or start a hunt).");
-            progress("Reading party and PC boxes from the Switch...");
-            var s = AppSettings.Current;
-            try
-            {
-                using var lf = new LiveFrlg(s.SwitchIP, s.SwitchPort);
-                return lf.ReadCollection(_game);
-            }
-            catch (Exception e) { return SaveInstead(e, progress); }
-        }
-        progress("Reading the save file...");
-        var save = ResolveTrackerSave();
-        return save == null ? null : Collection.FromSave(save.Save, save.Path);
-    }
-
-    /// <summary>
-    /// The live read failed (title screen, Switch busy...): use the save file instead of showing an empty Pokédex, and say so.
-    /// No save file either → the live error is shown.
-    /// </summary>
-    private Collection? SaveInstead(Exception live, Action<string> progress)
-    {
-        progress("The Switch game couldn't be read - using the save file...");
-        var save = ResolveTrackerSave();
-        if (save == null) throw live;
-        var c = Collection.FromSave(save.Save, save.Path);
-        c.Source = $"the save file (the Switch couldn't be read: {live.Message.TrimEnd('.')})";
-        return c;
+        await MainWindow.OpenDexTracker(this, DexTrackerService.DexFor(_game));
     }
 
     private FoundSave? ResolveTrackerSave()
@@ -914,9 +899,9 @@ public sealed class GamePage : UserControl, IDisposable
         _syncing = true;
         try
         {
-            var wb = SpreadsheetService.FindWorkbook(_game);
-            if (wb == null) { Log("No spreadsheet for this game - use 'Choose spreadsheet' or 'Download tracker'."); return; }
-            if (!await EnsureDependency("Microsoft Excel")) return;
+            // DexTracker always; a tracker spreadsheet only if you already have one (they are no longer downloaded) and Excel can update it
+            var wb = SpreadsheetService.CanUpdate ? SpreadsheetService.FindWorkbook(_game) : null;
+            if (wb != null && !await EnsureDependency("Microsoft Excel")) wb = null;
             Collection owned;
             if (_trackLive)
             {
@@ -940,13 +925,18 @@ public sealed class GamePage : UserControl, IDisposable
             Log($"{owned.Total} Pokémon, {owned.BySpecies.Count} species ({owned.BySpecies.Values.Count(e => e.Shiny)} shiny) - {owned.Source}");
             await Task.Run(() =>
             {
-                if (BackupService.Backup(wb, spreadsheet: true) is { } b) Log("Backup made: " + Path.GetFileName(b));
+                if (wb != null && BackupService.Backup(wb, spreadsheet: true) is { } b) Log("Backup made: " + Path.GetFileName(b));
                 if (File.Exists(owned.Source)) BackupService.Backup(owned.Source, spreadsheet: false);
             });
-            var result = await Task.Run(() => SpreadsheetService.Update(wb, owned, Log));
-            Log($"Done: {result.MarkedInBox} new 'In Box', {result.MarkedOT} new 'OT', {result.MarkedShiny} new 'Shiny' across {result.Sheets} sheet(s).");
+            // DexTracker keeps its own backups (savefile.json.bak + one copy per day in DexTracker/Backups)
+            var dt = await Task.Run(() => DexTrackerService.MarkCollection(owned, _game, Log));
+            if (wb != null)
+            {
+                var result = await Task.Run(() => SpreadsheetService.Update(wb, owned, Log));
+                Log($"Spreadsheet: {result.MarkedInBox} new 'In Box', {result.MarkedOT} new 'OT', {result.MarkedShiny} new 'Shiny' across {result.Sheets} sheet(s).");
+            }
             _trackError = null;
-            Status($"Tracker updated: {Path.GetFileName(wb)}");
+            Status($"DexTracker updated ({dt.Species + dt.Shiny + dt.Forms + dt.GameDex} new)" + (wb != null ? $" and {Path.GetFileName(wb)}" : ""));
         }
         catch (Exception ex)
         {

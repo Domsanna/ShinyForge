@@ -95,6 +95,7 @@ public sealed class FancyButton : Control
     protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
     protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
     protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+    protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); } // "Pause hunt" -> "Reopen" kept the old text
 
     protected override void OnPaint(PaintEventArgs e)
     {

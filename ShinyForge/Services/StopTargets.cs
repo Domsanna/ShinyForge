@@ -59,7 +59,7 @@ public static class StopTargets
     private static List<Option> Compute(Game game)
     {
         var version = game.Versions[0];
-        var context = DexData.Context(game);
+        var context = game.Versions[0].Context;
         var personal = GameData.GetPersonal(version);
         var strings = GameInfo.GetStrings("en");
         var list = new List<Option>();
@@ -94,7 +94,7 @@ public static class StopTargets
     /// <summary>PKHeX's encounters that give this species / form in the game (any of its versions), evolutions included.</summary>
     private static IEnumerable<IEncounterable> Encounters(Game game, ushort species, byte form)
     {
-        var pk = EntityBlank.GetBlank(DexData.Context(game), LanguageID.English);
+        var pk = EntityBlank.GetBlank(game.Versions[0].Context, LanguageID.English);
         pk.Species = species;
         pk.Form = form;
         pk.SetGender(pk.GetSaneGender());

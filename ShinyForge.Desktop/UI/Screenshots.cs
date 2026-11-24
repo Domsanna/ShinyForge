@@ -32,16 +32,14 @@ public static class Screenshots
                 await Settle(3000);
                 await Snap(main, Path.Combine(dir, $"3_game_{id}.png"), log);
             }
-            await Window(new DexWindow(GameCatalog.Get("gba_firered"), _ => null), Path.Combine(dir, "4_dex_firered.png"), log, 4000);
-            await Window(new DexWindow(GameCatalog.Get("sw_shield"), _ => null), Path.Combine(dir, "4_dex_shield.png"), log, 4000);
             await Window(new SettingsWindow(), Path.Combine(dir, "5_settings.png"), log);
             await Window(new ToolsWindow(true), Path.Combine(dir, "5_tools.png"), log);
             await Window(new HuntOptionsWindow(GameCatalog.Get("sw_frlg_lg"), true), Path.Combine(dir, "5_hunt_options.png"), log);
             await Window(new HuntStatsWindow(), Path.Combine(dir, "5_hunt_stats.png"), log, 2000);
+            await Window(new HuntProfilesWindow(), Path.Combine(dir, "5_hunt_profiles.png"), log, 2000);
             await Window(new HealthWindow(), Path.Combine(dir, "5_health.png"), log);
             await Window(new BackupsWindow(), Path.Combine(dir, "5_backups.png"), log);
             await Window(new PokeldnWindow(), Path.Combine(dir, "5_pokeldn.png"), log, 8000);
-            await Window(new LivingDexWindow(), Path.Combine(dir, "5_living_dex.png"), log, 30000);
             log.Add("ALL SCREENS RENDERED");
         }
         catch (Exception e) { log.Add("FAILED: " + e); }

@@ -43,10 +43,15 @@ public sealed class MainForm : Form
         _crumb.AutoEllipsis = true;  // grow over the Guide button on long game names
         var settings = new FancyButton("Settings", Theme.GlyphSettings, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
         _updates.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        var livingDex = new FancyButton("Living Dex", Theme.GlyphSparkle, Theme.Accent2) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        livingDex.Click += (_, _) => new LivingDexForm().Show(this);
-        var stats = new FancyButton("Hunt stats", Theme.GlyphInfo, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
-        stats.Click += (_, _) => new HuntStatsForm().Show(this);
+        var livingDex = new FancyButton("DexTracker", Theme.GlyphSparkle, Theme.Accent2) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        // on a game's page: that game's save and Pokédex; elsewhere the National Dex
+        livingDex.Click += async (_, _) =>
+        {
+            if (_content.Controls.Count > 0 && _content.Controls[0] is GamePage gp) await gp.OpenDexTrackerForGame();
+            else OpenDexTracker(this, null);
+        };
+        var stats = new FancyButton("Hunts", Theme.GlyphInfo, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        stats.Click += (_, _) => new HuntProfilesForm().Show(this);
         var guide = new FancyButton("Guide", "" /* Help (question mark) */, Theme.PanelHi) { Anchor = AnchorStyles.Top | AnchorStyles.Right };
         guide.Click += (_, _) => OpenUserGuide();
         header.Controls.AddRange(new Control[] { settings, _updates, livingDex, stats, guide, logo, name, _back, _crumb }); // buttons on top
@@ -86,6 +91,25 @@ public sealed class MainForm : Form
         FormClosed += (_, _) => DependencyService.UpdatesChanged -= updatesChanged;
         UpdateHealthLabel();
 
+        // ---- hunt timer: counts each active hunt's time while its bot hunts (or its timer was started by hand)
+        _huntClock.Tick += (_, _) =>
+        {
+            if (_huntTicking) return;
+            _huntTicking = true;
+            _ = Task.Run(() =>
+            {
+                try { HuntProfiles.Tick(); }
+                catch (Exception ex) { AppPaths.Log("Hunt timer: " + ex.Message); }
+                finally { _huntTicking = false; }
+            });
+        };
+        _huntClock.Start();
+        HuntService.Found += OnHunterFound;
+        Action<HuntProfile> autoHunt = p => UiSafe(() => SetStatus($"⏱ Hunt \"{p.Name}\" is counting: {HuntProfiles.Format(p.Time)} of hunting so far (Hunts shows it)."));
+        HuntProfiles.AutoStarted += autoHunt;
+        FormClosed += (_, _) => HuntProfiles.AutoStarted -= autoHunt;
+        FormClosed += (_, _) => { HuntService.Found -= OnHunterFound; _huntClock.Dispose(); HuntProfiles.Flush(); };
+
         Controls.Add(_content);
         Controls.Add(_banner);
         _banner.Resize += (_, _) => _bannerLayout?.Invoke();
@@ -119,6 +143,23 @@ public sealed class MainForm : Form
             Refresh();
             RunningParts.StopAll(parts);
         };
+    }
+
+    private readonly System.Windows.Forms.Timer _huntClock = new() { Interval = 5000 };
+    private volatile bool _huntTicking;
+
+    /// <summary>The Python hunter found a shiny: the active FireRed / LeafGreen hunt is finished if it was its target.</summary>
+    private void OnHunterFound(string species, bool shiny)
+    {
+        if (HuntProfiles.OnFound("python", species, shiny) is { } p)
+            UiSafe(() => SetStatus($"★ Hunt \"{p.Name}\" finished: shiny {species} after {HuntProfiles.Format(p.Time)} of hunting."));
+    }
+
+    /// <summary>Opens DexTracker (the Living Dex / Pokédex) - on a game's own Pokédex when DexTracker has one.</summary>
+    public static void OpenDexTracker(IWin32Window owner, string? dexId)
+    {
+        try { DexTrackerService.Open(dexId); }
+        catch (Exception ex) { MessageBox.Show(owner, "Couldn't open DexTracker:\n\n" + ex.Message, "DexTracker", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
     public void SetStatus(string text)

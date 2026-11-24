@@ -26,7 +26,7 @@ public sealed class PlatformPage : UserControl
                 Children =
                 {
                     Skin.Title("Which system are you playing on?"),
-                    Skin.MutedText("ShinyForge hunts shinies, records your gameplay, tracks your collection in your Pokédex spreadsheets and backs up your Pokémon."),
+                    Skin.MutedText("ShinyForge hunts shinies, records your gameplay, tracks your collection in DexTracker and backs up your Pokémon."),
                     new WrapPanel { Margin = new Thickness(-20, 10, 0, 0), Children = { ds, sw } },
                 },
             },

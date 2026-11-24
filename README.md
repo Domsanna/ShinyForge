@@ -29,18 +29,19 @@
 | 🎯 **Stop rules** | Also stop on chosen species, natures or IVs. |
 | 🧪 **Optional extras** | Auto-catch and shiny RNG manipulation (FRLG). Both are **off by default** and only run when you turn them on. |
 | 🎥 **Recording & shiny clips** | Gap-free recordings in numbered segments, plus an automatic clip and screenshot of every shiny. |
-| 📋 **Pokédex tracker** | Updates your Excel Pokédex spreadsheet from your save. The Pokédex window uses each game's own sprites, forms and silhouettes. |
+| 📋 **Collection tracker** | Marks every Pokémon in your save in DexTracker (National, Shiny, Form and the game's own Pokédex), and in your Excel Pokédex spreadsheet if you already have one. |
 | 📡 **Wireless trades & Mystery Gift** | Trade with and send Mystery Gifts to Switch games over local wireless through an **ESP32-S3** board, powered by [pokeldn](https://github.com/Decryptu/pokeldn). ShinyForge checks the board, installs pokeldn and its firmware, and asks for your `prod.keys`. |
 | 🗂️ **Checkpoint saves** | Finds your Checkpoint backups on the SD card by title ID, or reads them over WiFi from the SD card inside the Switch / 3DS (Checkpoint's FTP server or ftpd; on the Switch ShinyForge starts the FTP app itself through sys-botbase, then finds your game on the HOME menu / All Software by its icon, opens it and starts the hunt). Lets you pick a backup and copies it to the PC before using it. |
 | 💾 **Saves & Game Info** | Reads saves from Red/Blue to Legends: Z-A and exports every Pokémon into a Pokémon HOME-ready folder. Also writes a readable Game Info report. |
-| 🧬 **Living Dex planner** | Every Pokémon HOME box slot (1,391: species, regional forms, other forms, female looks, Alcremie sweets) with Pokémon HOME pictures. Combines all your saves to show what you own, where, and what's missing. |
-| 📈 **Hunt statistics** | Odds, the chance you'd have found a shiny by now, encounters per hour, ETA and a 24-hour chart. |
+| 🧬 **DexTracker** | [TheNinjask's DexTracker](https://github.com/TheNinjask/DexTracker) is built in as the Living Dex and Pokédex: HOME-style boxes, Shiny and Form Dexes, each Switch game's Pokédex, OT Registry and Hall of Fame. Your dex is kept in a file on your PC and filled in from your saves. |
+| ⏱️ **Hunt profiles & timer** | Several hunts side by side, each with its own timer (time spent hunting, start and finish date) and encounters. Switch to another hunt and come back later; a shiny of the target finishes the hunt. |
+| 🎮 **3DS controller** | Press 3DS buttons and tap the touch screen from the PC with [TPPFLUSH](https://github.com/u93132/TPPFLUSH) over Luma3DS InputRedirection. |
+| 📈 **Hunt statistics** | Odds, the chance you'd have found a shiny by now, encounters per hour, ETA and a 24-hour chart, per log or per hunt profile. |
 | 🔔 **Alerts, overlay & remote** | Discord / ntfy phone alerts, a stream overlay for OBS / Streamlabs, and a PIN-protected phone remote. |
 | 🛡️ **Safety** | A system check every minute, a same-Pokémon guard, IP-change detection, keep-awake, automatic backups, and automatic updates from this page. |
 
 <p align="center">
   <img src="docs/images/games.png" width="49%" alt="Game selection">
-  <img src="docs/images/pokedex.png" width="40%" alt="Pokédex window with per-game sprites">
 </p>
 <p align="center">
   <img src="docs/images/hunt-options.png" width="49%" alt="Hunt options">
@@ -105,8 +106,10 @@ Or double-click `Install tools and build.bat`, which installs the SDK and Inno S
 | `ShinyForge.Desktop/` | The macOS / Linux app (Avalonia), sharing `ShinyForge/Core` and `ShinyForge/Services` |
 | `PythonBot/` | The FireRed/LeafGreen Switch hunter (Python), bundled with the app |
 | `external/pokeldn/` | [pokeldn](https://github.com/Decryptu/pokeldn) (git submodule, AGPL-3.0). ShinyForge uses its official release builds |
+| `external/DexTracker/` | [DexTracker](https://github.com/TheNinjask/DexTracker) (git submodule, MIT). `tools/build-dextracker.ps1` builds it into `ShinyForge/Assets/DexTracker` (needs Node.js; the built files are committed) |
+| `external/TPPFLUSH/` | [TPPFLUSH](https://github.com/u93132/TPPFLUSH) (git submodule, MIT). `tppflush.py` is copied into `ShinyForge/Assets/TPPFLUSH` |
 | `installer/` | Inno Setup script |
-| `tools/SelfTest/` | Test harness: `dotnet run -- <workdir> dex health features ...` |
+| `tools/SelfTest/` | Test harness: `dotnet run -- <workdir> dextracker huntprofiles tppflush health features ...` |
 | `tools/*.py` | Scripts that build the artwork and sprite assets from PokeAPI |
 
 ## Credits
@@ -129,13 +132,14 @@ ShinyForge is built on the work of many people. Thank you!
 - **[rcodesign](https://github.com/indygreg/apple-platform-rs)**: Gregory Szorc. Signs the macOS app.
 - **[Checkpoint](https://github.com/BernardoGiordano/Checkpoint)**: Bernardo Giordano (FlagBrew). The save backups ShinyForge reads, on the SD card or over WiFi.
 - **[ftpd](https://github.com/mtheall/ftpd)**: Michael Theall. The FTP server (inside Checkpoint and as its own app) ShinyForge reads the console's SD card through.
-- **[Serebii.net](https://www.serebii.net)**: Joe Merrick. The Pokémon HOME depositable list behind the Living Dex, and the Pokédex pages ShinyForge links to.
-- **Pokémon HOME renders**: © Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokémon Company. The Living Dex pictures.
-- **[PokeAPI](https://github.com/PokeAPI/pokeapi)** and **[PokeAPI/sprites](https://github.com/PokeAPI/sprites)**: Pokédex data and sprites.
+- **[DexTracker](https://github.com/TheNinjask/DexTracker)**: TheNinjask (Tiago Bica), MIT. The Living Dex and Pokédex. Built with [Vite](https://vitejs.dev), [vite-plugin-pwa](https://github.com/vite-pwa/vite-plugin-pwa), [PeerJS](https://peerjs.com) and [node-qrcode](https://github.com/soldair/node-qrcode).
+- **[TPPFLUSH](https://github.com/u93132/TPPFLUSH)**: hlixed (original) and u93132, MIT, building on TuxSH's and Stary2001's InputRedirection clients. The 3DS controller.
+- **[Serebii.net](https://www.serebii.net)** (Joe Merrick) and **[Bulbapedia](https://bulbapedia.bulbagarden.net)** (Bulbagarden): the Pokémon pictures and links DexTracker shows.
+- **[PokeAPI](https://github.com/PokeAPI/pokeapi)** and **[PokeAPI/sprites](https://github.com/PokeAPI/sprites)**: sprites for the stream overlay.
 - **[FFmpeg](https://ffmpeg.org)**, with Windows builds by [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).
 - **[OpenCV](https://opencv.org)**, **[NumPy](https://numpy.org)**, **[python-mss](https://github.com/BoboTiG/python-mss)** and **[PyYAML](https://pyyaml.org)**.
 - **[ntfy](https://ntfy.sh)**: Philipp C. Heckel. **[Inno Setup](https://jrsoftware.org)**: Jordan Russell and Martijn Laan.
-- **Pokédex Tracker spreadsheets**: by Dom, the creator of ShinyForge.
+- **Pokédex Tracker spreadsheets**: by Dom, the creator of ShinyForge (earlier versions; still updated if you have them).
 - The Pokémon RNG research community, for Gen 3 Method 1.
 
 The User Guide has the complete list with licenses.

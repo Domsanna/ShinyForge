@@ -114,8 +114,8 @@
     <li><a href="#saves">9. Saves, HOME folder &amp; Game Info</a></li>
     <li class="sub"><a href="#checkpoint">Checkpoint saves</a></li>
     <li><a href="#trades">10. Wireless trades &amp; Mystery Gift</a></li>
-    <li><a href="#livingdex">11. Living Dex planner</a></li>
-    <li><a href="#stats">12. Hunt statistics</a></li>
+    <li><a href="#livingdex">11. DexTracker (Living Dex &amp; Pokédex)</a></li>
+    <li><a href="#stats">12. Hunt profiles, timer &amp; statistics</a></li>
     <li><a href="#notify">13. Phone &amp; Discord alerts</a></li>
     <li><a href="#overlay">14. Stream overlay &amp; phone remote</a></li>
     <li><a href="#safety">15. Safety features</a></li>
@@ -145,10 +145,10 @@
   <div class="grid">
     <div class="card"><b>✨ Automatic shiny hunting</b><p>Soft resets, wild encounters and fishing on the Switch and 3DS. It stops the moment a shiny (or anything you asked for) appears.</p></div>
     <div class="card"><b>🎥 Recording &amp; clips</b><p>Gap-free recordings split into numbered files, plus an automatic clip of every shiny.</p></div>
-    <div class="card"><b>📋 Pokédex tracker</b><p>Updates your Excel Pokédex spreadsheet from your save, and has a Pokédex window with each game's own sprites.</p></div>
+    <div class="card"><b>📋 Collection tracker</b><p>Marks every Pokémon in your save in DexTracker (and in your Excel Pokédex spreadsheet, if you have one).</p></div>
     <div class="card"><b>💾 Saves &amp; Game Info</b><p>Exports every Pokémon from a save into a folder ready for Pokémon HOME tools, with a readable Game Info report.</p></div>
-    <div class="card"><b>🧬 Living Dex planner</b><p>Combines all your saves and shows which species you own, where, and what's still missing.</p></div>
-    <div class="card"><b>📈 Statistics &amp; alerts</b><p>Odds, encounter rate and time estimates, plus phone and Discord alerts, a stream overlay and a phone remote.</p></div>
+    <div class="card"><b>🧬 DexTracker</b><p>Your Living Dex, Shiny Dex, Form Dex and each Switch game's Pokédex in one place, filled in from your saves.</p></div>
+    <div class="card"><b>📈 Hunts, statistics &amp; alerts</b><p>Hunt profiles with a hunt timer, odds, encounter rate and time estimates, plus phone and Discord alerts, a stream overlay and a phone remote.</p></div>
   </div>
   <div class="callout tip"><strong>Good to know</strong>Nothing risky happens unless you turn it on. Shiny RNG manipulation and auto-catch are <b>off</b> until you switch them on yourself. ShinyForge never changes your save files: it reads copies and makes backups before touching a spreadsheet.</div>
 </section>
@@ -162,7 +162,7 @@
     <tr><td>Best for</td><td>Your main PC</td><td>A USB stick or external drive, or trying it without installing</td></tr>
     <tr><td>Installs to</td><td><code>%LocalAppData%\Programs\ShinyForge</code> (no admin rights needed)</td><td>Wherever you unzip it</td></tr>
     <tr><td>Settings &amp; data</td><td><code>%AppData%\ShinyForge</code></td><td>The <code>Data</code> folder next to <code>ShinyForge.exe</code></td></tr>
-    <tr><td>Pokédex spreadsheets</td><td><code>Documents\ShinyForge\Spreadsheets</code></td><td>The <code>Spreadsheets</code> folder next to the program</td></tr>
+    <tr><td>DexTracker (your dex)</td><td><code>%AppData%\ShinyForge\DexTracker\savefile.json</code></td><td><code>Data\DexTracker\savefile.json</code></td></tr>
     <tr><td>Backup Tools folder</td><td><code>Documents\ShinyForge\Backup Tools</code></td><td>The <code>Backup Tools</code> folder next to the program</td></tr>
   </table></div>
   <h3>Installer</h3>
@@ -237,8 +237,8 @@
     <tr><th>Button</th><th>What it does</th></tr>
     <tr><td><b>Back</b></td><td>Goes back to the game list or the console choice.</td></tr>
     <tr><td><b>Guide</b></td><td>Opens this user guide in your default web browser.</td></tr>
-    <tr><td><b>Hunt stats</b></td><td>Statistics for your current and past hunts (see <a href="#stats">Hunt statistics</a>).</td></tr>
-    <tr><td><b>Living Dex</b></td><td>Your whole collection across every save (see <a href="#livingdex">Living Dex planner</a>).</td></tr>
+    <tr><td><b>Hunts</b></td><td>Your hunt profiles with their timers and statistics (see <a href="#stats">Hunt profiles</a>).</td></tr>
+    <tr><td><b>DexTracker</b></td><td>Your Living Dex and Pokédexes (see <a href="#livingdex">DexTracker</a>).</td></tr>
     <tr><td><b>Tools &amp; Updates</b></td><td>Installs and updates the helper programs (see <a href="#tools">Tools &amp; updates</a>).</td></tr>
     <tr><td><b>Settings</b></td><td>Console IP addresses, folders, notifications, safety, clips, overlay and remote.</td></tr>
   </table></div>
@@ -307,6 +307,13 @@
     <li>For walking, pick <b>Left / Right</b> or <b>Up / Down</b>, then click <b>Start hunting</b>. Every encounter appears in the log on the card.</li>
   </ol>
   <p><b>Stop rules</b> and <b>Statistics</b> work for 3DS hunts too.</p>
+  <h3 id="controller-3ds">3DS controller (TPPFLUSH)</h3>
+  <p>Click <b>3DS controller</b> on any 3DS game's page to play the 3DS from the PC, for example to walk to the right spot before a hunt or to hunt by hand. It uses <a href="https://github.com/u93132/TPPFLUSH">TPPFLUSH</a> and Luma3DS's InputRedirection (Rosalina menu: <b>L + Down + Select → InputRedirection</b>), and needs Python 3.</p>
+  <ul>
+    <li>Click the buttons, or use the keyboard: arrows = D-pad, <b>I J K L</b> = circle pad, <b>X</b> = A, <b>Z</b> = B, <b>S</b> = X, <b>A</b> = Y, <b>Q / E</b> = L / R, <b>1 / 3</b> = ZL / ZR, <b>Enter</b> = START, <b>Backspace</b> = SELECT, <b>H</b> = HOME. A button stays pressed while you hold it.</li>
+    <li>Click the grey <b>touch screen</b> area to tap the 3DS's bottom screen at that spot.</li>
+    <li><b>Let go of everything</b> releases every button. Closing the window gives the 3DS its own buttons back.</li>
+  </ul>
 
   <h3 id="hunt-3ds-vc">Nintendo 3DS Virtual Console: Red, Blue, Yellow, Gold, Silver, Crystal</h3>
   <p>The Game Boy and Game Boy Color games from the 3DS eShop (English versions) work with the same 3DS hunt card.</p>
@@ -419,30 +426,27 @@
 
 <!-- ============================================================ 8 -->
 <section id="tracker">
-  <h2><span class="num">8</span> Pokédex tracker</h2>
-  <p>The <b>Collection Tracker → Pokédex spreadsheet</b> card keeps your Excel Pokédex tracker up to date.</p>
+  <h2><span class="num">8</span> Collection tracker</h2>
+  <p>The <b>Collection Tracker → DexTracker</b> card keeps <a href="#livingdex">DexTracker</a> up to date from your save.</p>
   <ul>
-    <li><b>Auto-recognize</b> finds the right tracker for this game. Your bundled spreadsheets are in a folder named like <code>Gen 3\(10) Fire Red\…</code>. You can also pick one with <b>Choose spreadsheet</b>, or open it with <b>Open</b>.</li>
+    <li><b>Open Pokédex in DexTracker</b> (or <b>DexTracker</b> in the top bar while you're on a game's page) first adds the Pokémon of <b>this game's save</b> (the one shown below), then opens DexTracker on this game's own Pokédex (Let's Go, Sword/Shield, Brilliant Diamond/Shining Pearl, Legends: Arceus, Scarlet/Violet, Legends: Z-A and FireRed/LeafGreen). For the other games it opens the National Dex. A save from a different game (for example a FireRed save on the LeafGreen page) is never added; the log says so.</li>
     <li><b>Save file</b>: ShinyForge finds your save automatically, or you can choose one. For FireRed/LeafGreen on the Switch, it can also read your party and boxes <b>live from the Switch</b>.</li>
-    <li><b>Sync now</b> marks <i>In Box</i>, <i>OT</i> (caught by you) and <i>Shiny</i> as <b>Y</b> for every Pokémon you own.
+    <li><b>Sync now</b> marks every Pokémon in your party and boxes in DexTracker: the National Dex (normal or shiny), the Form Dex (regional forms, female looks, Gigantamax) and the game's own Pokédex.
       <ul>
-        <li>It only ever adds a Y. It never removes your own ticks.</li>
-        <li>Your spreadsheet is backed up first.</li>
+        <li>Only empty slots are filled. Nothing you entered in DexTracker is changed.</li>
+        <li>Each Pokémon's trainer (OT and ID) is looked up in DexTracker's <b>OT Registry</b>, or added to it marked "Added by ShinyForge".</li>
+        <li>DexTracker's file is backed up on every change (see <a href="#files">Where your files live</a>).</li>
       </ul></li>
+    <li><b>Monitor automatically</b> syncs whenever a new save appears in the game folder (or every 5 minutes for the live Switch game).</li>
+  </ul>
+  <h3>Excel spreadsheets (if you already have them)</h3>
+  <p>The Excel Pokédex trackers are no longer downloaded, because DexTracker replaced them. If you already have one, ShinyForge still keeps it up to date on every sync:</p>
+  <ul>
+    <li><b>Auto-recognize</b> finds the right tracker for this game in your spreadsheet folder (named like <code>Gen 3\(10) Fire Red\…</code>). You can also pick one with <b>Choose spreadsheet</b>, or open it with <b>Open</b>.</li>
+    <li>Sync marks <i>In Box</i>, <i>OT</i> (caught by you) and <i>Shiny</i> as <b>Y</b>. It only ever adds a Y, never removes your own ticks, and backs the spreadsheet up first.</li>
     <li><b>Start over (reset tracker)</b>: for when you start the game over. After you confirm, it turns off automatic monitoring for the game, forgets the save file chosen for the tracker (the newest save is found automatically again), and sets every <i>In Box</i>, <i>OT</i> and <i>Shiny</i> mark back to <b>N</b> in the game's tracker spreadsheet(s). Each spreadsheet is backed up first, so the <b>Backups</b> window can bring your old progress back. <i>N/A</i> cells and other columns aren't touched.</li>
   </ul>
-  <p>No tracker for this game yet (portable copy, or the download was skipped during installation)? Click <b>Download tracker</b>. ShinyForge downloads just that game's tracker from its GitHub page into the Spreadsheets folder, checks it, and never overwrites a tracker you already have.</p>
-  <div class="callout"><strong>Excel needed</strong>Syncing uses Microsoft Excel in the background, so Excel must be installed. Close the tracker in Excel before syncing.</div>
-  <h3>Pokédex window (pop-out)</h3>
-  <p>Click <b>Pokédex (pop-out)</b> for a full Pokédex of the game in its own window.</p>
-  <ul>
-    <li>Uses <b>that game's own sprites</b>: Game Boy sprites for Red/Blue, Emerald sprites for Emerald, and so on.</li>
-    <li>Pokémon you own are shown in colour. Missing ones appear as silhouettes.</li>
-    <li>Includes forms, regional variants and visible female differences, where the game has them.</li>
-    <li>Click a Pokémon for its info panel: types, where to find it in this game, how it evolves, and links to Bulbapedia and Serebii.</li>
-    <li><b>Evolution</b> shows the whole family, one line per branch, with the Pokémon you clicked in [brackets]. For example: <i>Pidgey at Lv. 18 &gt; [Pidgeotto] at Lv. 36 &gt; Pidgeot</i>, or <i>Eevee with high friendship at night (level up) &gt; Umbreon</i>. Every method is written out: level, item, friendship, trade (and the held item), known move, time of day, a place in that game (for example Magnezone: Mt. Coronet in Platinum), party members, gender and more. Evolutions a game can't do are marked, such as Espeon and Umbreon in FireRed/LeafGreen, which have no clock.</li>
-    <li>The <b>Serebii</b> link opens Serebii's Pokédex for <b>that game's generation</b>, for example the Gen 3 page with the FireRed/LeafGreen data when you're in LeafGreen. Let's Go uses the Sun/Moon Pokédex, Brilliant Diamond/Shining Pearl and Legends: Arceus the Sword/Shield one, and Legends: Z-A the Scarlet/Violet one, because that's where Serebii keeps them.</li>
-  </ul>
+  <div class="callout"><strong>Excel needed for spreadsheets</strong>Updating a spreadsheet uses Microsoft Excel in the background (Windows only). Close the tracker in Excel before syncing. DexTracker doesn't need Excel.</div>
 </section>
 
 <!-- ============================================================ 9 -->
@@ -515,22 +519,34 @@
 
 <!-- ============================================================ 10 -->
 <section id="livingdex">
-  <h2><span class="num">11</span> Living Dex planner</h2>
-  <p>Click <b>Living Dex</b> in the top bar. ShinyForge reads the saves you've set up for every game and builds one list of <b>every Pokémon you can put in a Pokémon HOME box</b>, in HOME's box order with Pokémon HOME's own pictures:</p>
+  <h2><span class="num">11</span> DexTracker (Living Dex &amp; Pokédex)</h2>
+  <p>Click <b>DexTracker</b> in the top bar. <a href="https://github.com/TheNinjask/DexTracker">DexTracker</a> by TheNinjask is a Pokémon living-dex tracker that comes with ShinyForge. It opens in its own window (Microsoft Edge or Chrome app window, or your web browser), served by ShinyForge on this PC only.</p>
   <ul>
-    <li><b>1,391 slots</b>: all 1,025 species plus every boxable form. That covers regional forms (Alolan, Galarian, Hisuian, Paldean), visible female differences, Unown letters, Vivillon patterns, cap Pikachu, every Alcremie cream and sweet, Minior cores and more. The list follows Serebii's <a href="https://www.serebii.net/pokemonhome/depositablepokemon.shtml">Pokémon HOME depositable Pokémon</a> list and was checked slot by slot. Mega Evolutions, Gigantamax and other battle-only forms aren't included because they can't be put in a box.</li>
-    <li>A slot counts as owned only when the Pokémon matches it exactly: its form, its male or female look where those differ, and its Alcremie sweet. You can see which slots you own, <b>in which game</b> and where in that save.</li>
-    <li>Shiny ones show their <b>shiny</b> HOME picture and a ★.</li>
-    <li><b>In these games</b> lists the games that have that exact form (for example Alolan Vulpix only from Sun/Moon on). Where to find it in a game (its locations) is shown in that game's own Pokédex, not in the Living Dex.</li>
-    <li>Turn off <b>Forms &amp; genders</b> to see one slot per species (1,025) instead.</li>
+    <li><b>Box View</b>: HOME-style boxes for the National Dex, Shiny National Dex, Form Dexes and each Switch game's Pokédex (plus FireRed/LeafGreen). Click a Pokémon to see or edit who caught it.</li>
+    <li><b>Stats</b>, <b>OT Registry</b> (your trainers and where each one comes from), <b>Hall of Fame</b>, <b>Profiles</b>, <b>Tools</b> and <b>Challenges</b> are DexTracker's own pages.</li>
+    <li>ShinyForge fills it in from your saves: <b>Sync now</b> on a game's <a href="#tracker">Collection Tracker</a> card. An open DexTracker window reloads by itself when that happens.</li>
+    <li>Your dex is saved in a file on your PC (<code>Data folder\DexTracker\savefile.json</code>), not only in the browser. Every change you make in DexTracker is saved there right away, with a <code>.bak</code> copy and one dated copy per day in <code>DexTracker\Backups</code>.</li>
+    <li>Already used DexTracker on its website? Use <b>Export</b> there and <b>Import</b> in ShinyForge's DexTracker to bring your savefile over.</li>
   </ul>
-  <p>Click <b>Rescan saves</b> after you've played or added a new save.</p>
+  <div class="callout tip"><strong>Needs ShinyForge running</strong>DexTracker is served by ShinyForge, so keep ShinyForge open while you use it. Pokémon pictures come from the internet (Serebii and Bulbagarden).</div>
 </section>
 
 <!-- ============================================================ 11 -->
 <section id="stats">
-  <h2><span class="num">12</span> Hunt statistics</h2>
-  <p>Open <b>Hunt stats</b> from the top bar, or <b>Statistics</b> on a hunt card. Pick a hunt log at the top.</p>
+  <h2><span class="num">12</span> Hunt profiles, timer &amp; statistics</h2>
+  <h3>Hunt profiles and the hunt timer</h3>
+  <p>Click <b>Hunts</b> in the top bar, or <b>Hunt profiles</b> on a game's hunt card. Each hunt profile is one hunt, for example "Shiny Deoxys in LeafGreen", with its own timer and its own encounters. You can keep as many as you like: start a different hunt and come back to the first one later.</p>
+  <ul>
+    <li><b>New hunt</b>: give it a name, the game and the <b>target Pokémon</b> (or leave the target empty for any shiny).</li>
+    <li>Each game (each bot) has one <b>active</b> hunt. <b>Make active</b> on another hunt switches to it, and the first one waits, paused, with its time and encounters kept. FireRed and LeafGreen share the Python hunter, so they share one active hunt. Hunts on different consoles can run at the same time.</li>
+    <li>The <b>hunt timer</b> counts the time the game's bot is actually hunting (Python hunter, SysBot.exe or the 3DS bot). For a hunt without a bot, click <b>Start timer</b> while you hunt and <b>Stop timer</b> when you take a break. <b>+1 encounter</b> counts encounters by hand.</li>
+    <li>If ShinyForge was closed while a bot kept hunting, the time is added from the bot's encounter log when ShinyForge opens again.</li>
+    <li><b>Hunts are found by themselves.</b> When a bot starts hunting a game that has no active hunt, ShinyForge picks it up within a few seconds: a paused hunt of the same Pokémon is continued, or a new one is made (for example "Deoxys hunt"). A new hunt reads the bot's encounter log: the target is the Pokémon you keep meeting, and the start date, encounters and time spent hunting since your last shiny are filled in. You don't have to make a hunt first.</li>
+    <li>When the bot finds a <b>shiny of the target</b>, the hunt finishes by itself. <b>Found it!</b> finishes it by hand. A finished hunt shows when it was <b>started</b>, when it was <b>finished</b>, the <b>hunting time</b> and the time from start to finish. <b>Reopen</b> continues a finished hunt.</li>
+    <li><b>Edit</b> changes the name, target, notes or the hunting time. The active hunt and its timer are also shown on the game's hunt card.</li>
+  </ul>
+  <h3>Statistics</h3>
+  <p>Click <b>Statistics</b> on a hunt card or in Hunts. Pick a hunt log, or a hunt profile (only that hunt's encounters), at the top.</p>
   <ul>
     <li><b>Encounters</b> in the current hunt, counted since your last shiny.</li>
     <li><b>Shiny odds</b>: 1 in 8,192 up to Gen 5 and 1 in 4,096 from Gen 6. Tick <b>Shiny Charm</b> if you have it (Gen 5 and later).</li>
@@ -572,7 +588,7 @@
   <h3>Stream overlay <span class="badge off">off by default</span></h3>
   <ul>
     <li>In Streamlabs or OBS, add a <b>Browser Source</b> with the address <code>http://localhost:8765/overlay</code>. It shows the Pokémon's sprite, the encounter count, the odds, your chance so far, encounters per hour, shinies found and time hunting. It updates every 2 seconds.</li>
-    <li>Prefer text? Text sources can read the files in <code>Data\Overlay</code>, which update automatically.</li>
+    <li>Prefer text? Text sources can read the files in <code>Data\Overlay</code>, which update automatically. <code>hunt_timer.txt</code> and <code>hunt_name.txt</code> show the active hunt profile's timer and name.</li>
   </ul>
   <h3>Phone remote <span class="badge off">off by default</span></h3>
   <ul>
@@ -710,6 +726,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Settings</td><td><code>Data folder\settings.json</code></td></tr>
     <tr><td>Program log</td><td><code>Data folder\shinyforge.log</code> (also under <b>System check → Open log</b>)</td></tr>
     <tr><td>Backups</td><td><code>Data folder\Backups\Saves</code> and <code>…\Spreadsheets</code></td></tr>
+    <tr><td>DexTracker (your dex)</td><td><code>Data folder\DexTracker\savefile.json</code>, backups in <code>DexTracker\Backups</code></td></tr>
+    <tr><td>Hunt profiles &amp; timers</td><td><code>Data folder\hunt_profiles.json</code></td></tr>
     <tr><td>Shiny clips</td><td>The game's recording folder, or <code>Data folder\Shiny Clips</code></td></tr>
     <tr><td>Overlay text files</td><td><code>Data folder\Overlay</code></td></tr>
     <tr><td>Minor problems</td><td><code>Data folder\issues.log</code> (<b>System check → Show minor issues → Open log</b>)</td></tr>
@@ -718,7 +736,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>pokeldn's own settings</td><td><code>%AppData%\pokeldn</code></td></tr>
     <tr><td>3DS encounter log</td><td><code>3ds_encounters.csv</code> in the data folder</td></tr>
     <tr><td>Switch encounter log</td><td><code>encounters.csv</code> in the Python bot folder (<code>PythonBot</code> next to the program)</td></tr>
-    <tr><td>Pokédex spreadsheets</td><td><code>Documents\ShinyForge\Spreadsheets</code> (installed) or <code>Spreadsheets</code> (portable)</td></tr>
+    <tr><td>Pokédex spreadsheets (if you have them)</td><td><code>Documents\ShinyForge\Spreadsheets</code> (installed) or <code>Spreadsheets</code> (portable), or the folder set in Settings</td></tr>
   </table></div>
 </section>
 
@@ -767,8 +785,10 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>PKHeX.Core</td><td>Kurt (kwsch) and the PKHeX contributors. GPL-3.0</td><td>Reading every save file, Pokémon data, Pokédex, evolution and location data</td></tr>
     <tr><td>.NET &amp; Windows Forms</td><td>Microsoft and the .NET Foundation. MIT</td><td>The application framework</td></tr>
     <tr><td>System.Management</td><td>Microsoft. MIT</td><td>Detecting devices and running programs</td></tr>
-    <tr><td>PokeAPI &amp; PokeAPI/sprites</td><td>The PokeAPI contributors</td><td>Pokédex data tables and the per-game sprite and artwork collections</td></tr>
-    <tr><td>Pokédex Tracker spreadsheets</td><td>Dom, the creator of ShinyForge</td><td>The bundled Excel trackers for every game</td></tr>
+    <tr><td>DexTracker</td><td>TheNinjask (Tiago Bica). MIT</td><td>The Living Dex and Pokédex (bundled, built from <a href="https://github.com/TheNinjask/DexTracker">TheNinjask/DexTracker</a>)</td></tr>
+    <tr><td>Vite, vite-plugin-pwa, PeerJS &amp; node-qrcode</td><td>Evan You and the Vite contributors, Anthony Fu and contributors, the PeerJS contributors, Ryan Day. MIT</td><td>Building DexTracker and its PC ↔ phone savefile sync</td></tr>
+    <tr><td>PokeAPI &amp; PokeAPI/sprites</td><td>The PokeAPI contributors</td><td>Pokémon sprites for the stream overlay</td></tr>
+    <tr><td>Pokédex Tracker spreadsheets</td><td>Dom, the creator of ShinyForge</td><td>The Excel trackers earlier versions came with (still updated if you have them)</td></tr>
   </table></div>
 
   <h3>Hunting &amp; console tools</h3>
@@ -784,6 +804,7 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>Sys-EncounterBot.NET</td><td>Manu098vm and contributors (a SysBot.NET fork)</td><td>Encounter bots for Let's Go, Sword/Shield, BD/SP, plus the FRLG routine</td></tr>
     <tr><td>FRLG RAM research</td><td>Lusamine (SysBot.NET <i>moarencounterbots</i>), also used by LegoFigure11's GRASS</td><td>FireRed/LeafGreen memory locations for the Switch</td></tr>
     <tr><td>Luma3DS &amp; Rosalina</td><td>AuroraWright, TuxSH and contributors. GPL-3.0</td><td>3DS custom firmware: InputRedirection and the debugger used for 3DS hunting</td></tr>
+    <tr><td>TPPFLUSH</td><td>hlixed (original), u93132 (fork used); thanks to TuxSH and Stary2001 for the clients it builds on. MIT</td><td>The <b>3DS controller</b> window: pressing 3DS buttons from the PC through InputRedirection</td></tr>
     <tr><td>3DSShinyHunter</td><td>SirSnorealot. GPL-2.0</td><td>Reference for the InputRedirection and debugger protocols and 3DS memory layout</td></tr>
     <tr><td>PKMN-NTR</td><td>drgoku282 and contributors</td><td>3DS game memory offsets</td></tr>
     <tr><td>pret disassemblies (pokered, pokeyellow, pokegold, pokecrystal)</td><td>The pret contributors</td><td>The Game Boy RAM addresses of the Virtual Console games</td></tr>
@@ -826,9 +847,8 @@ python -m shinybot test IMG...     run the shiny detector on screenshots</code><
     <tr><td>ntfy</td><td>Philipp C. Heckel (binwiederhier). Apache-2.0 / GPL-2.0</td><td>Free phone push notifications</td></tr>
     <tr><td>Discord webhooks</td><td>Discord Inc.</td><td>Discord alerts</td></tr>
     <tr><td>Microsoft Excel</td><td>Microsoft</td><td>Updating the tracker spreadsheets</td></tr>
-    <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>Linked from the Pokédex info panel; Serebii's Pokémon HOME depositable list is the reference for the Living Dex's slots</td></tr>
+    <tr><td>Bulbapedia &amp; Serebii.net</td><td>Bulbagarden, and Joe Merrick (Serebii)</td><td>The Pokémon pictures and links DexTracker shows</td></tr>
     <tr><td>Switch game icons</td><td>© Nintendo / The Pokémon Company (listed in blawar/titledb)</td><td>Recognising the Pokémon games on the Switch's HOME menu</td></tr>
-    <tr><td>Pokémon HOME renders</td><td>© Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokémon Company</td><td>The Living Dex pictures (normal and shiny), shrunk to 128 px</td></tr>
     <tr><td>Inno Setup</td><td>Jordan Russell and Martijn Laan</td><td>The Windows installer</td></tr>
     <tr><td>Segoe UI &amp; Segoe Fluent Icons</td><td>Microsoft (part of Windows)</td><td>Fonts and icons</td></tr>
   </table></div>

@@ -43,10 +43,15 @@ public sealed class MainWindow : Window
         _crumb.VerticalAlignment = VerticalAlignment.Center;
         var guide = new FancyButton("Guide", Skin.GlyphHelp, Skin.PanelHi);
         guide.Click += async (_, _) => await OpenUserGuide();
-        var stats = new FancyButton("Hunt stats", Skin.GlyphInfo, Skin.PanelHi);
-        stats.Click += (_, _) => new HuntStatsWindow().Show(this);
-        var living = new FancyButton("Living Dex", Skin.GlyphSparkle, Skin.Accent2);
-        living.Click += (_, _) => new LivingDexWindow().Show(this);
+        var stats = new FancyButton("Hunts", Skin.GlyphInfo, Skin.PanelHi);
+        stats.Click += (_, _) => new HuntProfilesWindow().Show(this);
+        var living = new FancyButton("DexTracker", Skin.GlyphSparkle, Skin.Accent2);
+        // on a game's page: that game's save and Pokédex; elsewhere the National Dex
+        living.Click += async (_, _) =>
+        {
+            if (CurrentPage is GamePage gp) await gp.OpenDexTrackerForGame();
+            else await OpenDexTracker(this, null);
+        };
         var tools = new FancyButton("Tools & Updates", Skin.GlyphTools, Skin.PanelHi);
         tools.Click += async (_, _) => { await new ToolsWindow(_isSwitch).ShowDialog(this); RefreshUpdateBanner(); };
         var settings = new FancyButton("Settings", Skin.GlyphSettings, Skin.PanelHi);
@@ -86,6 +91,32 @@ public sealed class MainWindow : Window
         Closed += (_, _) => DependencyService.UpdatesChanged -= updatesChanged;
         UpdateHealthLabel();
 
+        // ---- hunt timer: counts each active hunt's time while its bot hunts (or its timer was started by hand)
+        var huntClock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        var ticking = false;
+        huntClock.Tick += (_, _) =>
+        {
+            if (ticking) return;
+            ticking = true;
+            _ = Task.Run(() =>
+            {
+                try { HuntProfiles.Tick(); }
+                catch (Exception ex) { AppPaths.Log("Hunt timer: " + ex.Message); }
+                finally { ticking = false; }
+            });
+        };
+        huntClock.Start();
+        Action<string, bool> found = (species, shiny) =>
+        {
+            if (HuntProfiles.OnFound("python", species, shiny) is { } p)
+                Dialogs.Ui(() => SetStatus($"★ Hunt \"{p.Name}\" finished: shiny {species} after {HuntProfiles.Format(p.Time)} of hunting."));
+        };
+        HuntService.Found += found;
+        Action<HuntProfile> autoHunt = p => Dialogs.Ui(() => SetStatus($"⏱ Hunt \"{p.Name}\" is counting: {HuntProfiles.Format(p.Time)} of hunting so far (Hunts shows it)."));
+        HuntProfiles.AutoStarted += autoHunt;
+        Closed += (_, _) => HuntProfiles.AutoStarted -= autoHunt;
+        Closed += (_, _) => { HuntService.Found -= found; huntClock.Stop(); HuntProfiles.Flush(); };
+
         Navigate(BuildPlatformPage, "", root: true);
         Opened += async (_, _) =>
         {
@@ -112,6 +143,13 @@ public sealed class MainWindow : Window
     }
 
     public Control? CurrentPage => _content.Content as Control;
+
+    /// <summary>Opens DexTracker (the Living Dex / Pokédex) - on a game's own Pokédex when DexTracker has one.</summary>
+    public static async Task OpenDexTracker(Control owner, string? dexId)
+    {
+        try { DexTrackerService.Open(dexId); }
+        catch (Exception ex) { await Dialogs.Info(owner, "Couldn't open DexTracker:\n\n" + ex.Message, "DexTracker"); }
+    }
 
     public void SetStatus(string text)
     {

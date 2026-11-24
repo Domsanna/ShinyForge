@@ -2,6 +2,20 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
+## 1.5.0
+
+### Added
+- **Hunt profiles.** Keep several hunts side by side (**Hunts** in the top bar, or **Hunt profiles** on a game's hunt card): name, game, target Pokémon and notes. Each game's bot has one active hunt; making another hunt active pauses the first with its time and encounters kept, so you can start a different hunt and come back. A shiny of the target finishes the hunt by itself (Python hunter and 3DS bot), or click **Found it!**. Finished hunts can be reopened.
+- **Hunt timer.** Each hunt counts the time its bot actually hunts (Python hunter, SysBot.exe or the 3DS bot), or the time you hunt by hand with **Start timer**. It shows when the hunt was started and finished, the hunting time and the time from start to finish. Time a bot hunted while ShinyForge was closed is added from its encounter log. The active hunt's timer is on the game's hunt card and in the overlay files `hunt_timer.txt` / `hunt_name.txt`. Statistics can be shown per hunt profile.
+- **Hunts are found by themselves.** When a bot starts hunting a game with no active hunt, a paused hunt of the same Pokémon continues, or a new one is made from the encounter log (target, start date, encounters and hunting time since the last shiny).
+- **DexTracker opens for the game you're on**, after adding that game's own save (a save of another game is never added).
+- **DexTracker** ([TheNinjask/DexTracker](https://github.com/TheNinjask/DexTracker), MIT) is built in and replaces the Living Dex planner and the per-game Pokédex window. ShinyForge serves it on this PC only and opens it from the **DexTracker** button or a game's **Open Pokédex in DexTracker** (on that game's own Pokédex). Your dex is saved in `DexTracker\savefile.json` in ShinyForge's data folder with backups, and **Sync now** marks every Pokémon of your save in it (National / Shiny Dex, Form Dex, the game's Pokédex, OT Registry) - only empty slots, nothing you entered is changed.
+- **3DS controller** with [TPPFLUSH](https://github.com/u93132/TPPFLUSH) (MIT): press 3DS buttons, use the circle pad / C-stick and tap the touch screen from the PC (buttons or keyboard) through Luma3DS InputRedirection. On every 3DS game's page.
+
+### Changed
+- The Pokédex tracker spreadsheets are no longer downloaded (not by the installer, not from the game page). Spreadsheets you already have are still updated on every sync.
+- The download is much smaller: the Living Dex pictures (Pokémon HOME renders) and the per-game Pokédex sprite sets are gone.
+
 ## 1.4.2
 
 ### Added
