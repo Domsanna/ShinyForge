@@ -41,6 +41,16 @@ public sealed class ShinyClipService
         Stop();
         var ff = RecordingService.FindFfmpeg();
         if (ff == null || string.IsNullOrWhiteSpace(source)) { LastError = "no FFmpeg or capture source"; return; }
+        // a window source (3DS Capture) that isn't open: FFmpeg would only fail ("Can't find window") and be restarted every
+        // minute. Wait for the window instead - the system check starts the buffer once it's open (GitHub issue #4).
+        if (MissingWindow(source) is { } missing)
+        {
+            if (WaitingForWindow != missing) AppPaths.Log($"Shiny clip buffer waiting: the window \"{missing}\" isn't open.");
+            WaitingForWindow = missing;
+            LastError = $"the window \"{missing}\" isn't open";
+            return;
+        }
+        WaitingForWindow = null;
         _dir = Path.Combine(AppPaths.DataDir, "ClipBuffer", gameId);
         _outFolder = string.IsNullOrWhiteSpace(outFolder) ? DefaultFolder : outFolder;
         StopLeftover(_dir);
@@ -69,6 +79,22 @@ public sealed class ShinyClipService
 
     private const string PidFile = "ffmpeg.pid";
 
+    /// <summary>The capture window the buffer is waiting for (not open yet), else null.</summary>
+    public string? WaitingForWindow { get; private set; }
+
+    /// <summary>The first window of <paramref name="source"/> that isn't open (Windows only; null when all are there).</summary>
+    public static string? MissingWindow(string source)
+    {
+        if (!OsInfo.IsWindows || !source.StartsWith(RecordingService.WindowPrefix)) return null;
+        var windows = source == RecordingService.Both3DS ? new[] { RecordingService.Top3DS, RecordingService.Bottom3DS } : new[] { source };
+        foreach (var w in windows)
+        {
+            var title = w[RecordingService.WindowPrefix.Length..];
+            if (RecordingService.FindWindow(title) == null) return title;
+        }
+        return null;
+    }
+
     /// <summary>
     /// The buffer FFmpeg of an earlier ShinyForge that was closed without stopping it (killed, crashed) still writes into
     /// <paramref name="dir"/>: stops exactly that process (its id is in the folder's ffmpeg.pid; checked to be an FFmpeg
@@ -93,6 +119,7 @@ public sealed class ShinyClipService
     public void Stop()
     {
         _wanted = false;
+        WaitingForWindow = null;
         if (_ff is { HasExited: false })
         {
             try { _ff.StandardInput.WriteLine("q"); if (!_ff.WaitForExit(5000)) _ff.Kill(); } catch { try { _ff.Kill(); } catch { } }

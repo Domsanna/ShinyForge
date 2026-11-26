@@ -1,6 +1,12 @@
 # Builds ShinyForge: self-contained app, portable zip and installer (dist\).
+# Runs the same on a PC and on GitHub Actions (.github/workflows/build.yml), so every release can be rebuilt from the
+# source in the repository. On CI ($env:CI) a missing Inno Setup is an error instead of a warning.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+$onCi = [bool]$env:CI
+# dotnet from PATH (CI, other PCs), else the default install folder
+$dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
+if (-not $dotnet) { $dotnet = "C:\Program Files\dotnet\dotnet.exe" }
 $dist = Join-Path $root "dist"
 $publish = Join-Path $dist "publish"
 # Keep the user's portable Backup Tools folder (FFmpeg, Python, SysBot...) across rebuilds.
@@ -16,8 +22,9 @@ $version = (Get-Content (Join-Path $root "version.txt") -TotalCount 1).Trim()
 if ($version -notmatch '^1\.\d+\.\d+$') { throw "version.txt must hold a version like 1.2.3 (found '$version')" }
 Write-Host "ShinyForge $version"
 
-& "C:\Program Files\dotnet\dotnet.exe" publish (Join-Path $root "ShinyForge\ShinyForge.csproj") -c Release -r win-x64 --self-contained true `
-    -p:PublishReadyToRun=true -p:Version=$version -o $publish -nologo -v q
+# -p:ContinuousIntegrationBuild makes the build deterministic (no local paths baked into the files)
+& $dotnet publish (Join-Path $root "ShinyForge\ShinyForge.csproj") -c Release -r win-x64 --self-contained true `
+    -p:PublishReadyToRun=true -p:Version=$version -p:ContinuousIntegrationBuild=$onCi -o $publish -nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "publish failed" }
 # The Python hunter for FireRed/LeafGreen on the Switch ships with ShinyForge (PythonBot next to ShinyForge.exe).
 Copy-Item (Join-Path $root "PythonBot") (Join-Path $publish "PythonBot") -Recurse
@@ -50,6 +57,12 @@ if ($iscc) {
         Start-Sleep 20
     }
 }
+elseif ($onCi) { throw "Inno Setup not found - the release build needs the installer." }
 else { Write-Warning "Inno Setup not found - installer skipped." }
+
+# Checksums of the downloads, so anyone can check a file is exactly what this build made.
+Get-ChildItem $dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | Sort-Object Name | ForEach-Object {
+    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+} | Set-Content (Join-Path $dist "SHA256SUMS.txt") -Encoding ascii
 
 Get-ChildItem $dist -File | Select-Object Name, @{n="MB";e={[math]::Round($_.Length/1MB,1)}}

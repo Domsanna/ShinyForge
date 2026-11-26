@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Domsanna/ShinyForge/actions/workflows/build.yml"><img alt="Build" src="https://github.com/Domsanna/ShinyForge/actions/workflows/build.yml/badge.svg"></a>
   <a href="https://github.com/Domsanna/ShinyForge/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Domsanna/ShinyForge?label=download&color=6d5dfc"></a>
   <a href="https://github.com/Domsanna/ShinyForge/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Domsanna/ShinyForge/total?color=12b5cb"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/github/license/Domsanna/ShinyForge?color=1f9d55"></a>
@@ -71,7 +72,27 @@ On macOS and Linux everything works except the Windows-only parts:
 
 See the user guide for details.
 
-> Windows SmartScreen may warn that the program is unrecognised, because it isn't code-signed. Click **More info → Run anyway**.
+### Checking a download
+
+Every download is built from this repository's source by [GitHub Actions](.github/workflows/build.yml), with a
+SHA-256 checksum (`SHA256SUMS.txt`) and a signed build-provenance attestation. To check that a file came from that build
+(needs the [GitHub CLI](https://cli.github.com)):
+
+```
+gh attestation verify ShinyForge-Setup.exe --repo Domsanna/ShinyForge
+```
+
+See the [code signing policy](CODE_SIGNING.md) for how releases are built, approved and (soon) signed.
+
+### If Windows blocks the installer
+
+ShinyForge isn't code-signed yet, so Windows may stop the installer the first time:
+
+- **"Windows protected your PC" (SmartScreen):** click **More info**, then **Run anyway**.
+- **No "Run anyway" button, or the file won't open after downloading:** right-click `ShinyForge-Setup.exe` → **Properties**, tick **Unblock** at the bottom of the General tab, click **OK**, and run it again.
+- **"Smart App Control blocked an app that may be unsafe":** Smart App Control blocks every unsigned program (the portable ZIP too) and has no per-app exception. Until there is a signed release, the only way is turning Smart App Control off in Windows Security → App & browser control - that is your choice, and Windows can't turn it back on without a reset.
+
+Your browser may also warn about the download. Choose **Keep** (in Edge: **...** → **Keep** → **Show more** → **Keep anyway**).
 
 ## Requirements
 
@@ -90,9 +111,13 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download), [Inno Setup 6
 ```powershell
 git clone --recurse-submodules https://github.com/Domsanna/ShinyForge.git
 cd ShinyForge
-.\build.ps1        # → dist\ShinyForge-Setup.exe, dist\ShinyForge-Portable.zip
-.\build-unix.ps1   # → dist-unix\ macOS .app zips, Linux .deb and .tar.gz (needs WSL with Ubuntu)
+.\build.ps1        # → dist\ShinyForge-Setup.exe, dist\ShinyForge-Portable.zip, dist\SHA256SUMS.txt
+.\build-unix.ps1   # → dist-unix\ macOS .app zips, Linux .deb and .tar.gz (WSL with Ubuntu on Windows; runs directly on Linux)
 ```
+
+**Releases are built by GitHub Actions** ([`.github/workflows/build.yml`](.github/workflows/build.yml)) with the same two
+scripts: every push and pull request is built on Windows and Linux, and a version tag (`v1.X.Z`, matching `version.txt`)
+also creates a draft release with all downloads, checksums and build-provenance attestations, which is published by hand.
 
 The Windows version uses Windows Forms (`ShinyForge/`). The macOS / Linux version uses an [Avalonia](https://avaloniaui.net) interface (`ShinyForge.Desktop/`) over the same `Core` and `Services` code. `tools/XTest` checks the shared services on macOS / Linux.
 
@@ -111,6 +136,17 @@ Or double-click `Install tools and build.bat`, which installs the SDK and Inno S
 | `installer/` | Inno Setup script |
 | `tools/SelfTest/` | Test harness: `dotnet run -- <workdir> dextracker huntprofiles tppflush health features ...` |
 | `tools/*.py` | Scripts that build the artwork and sprite assets from PokeAPI |
+
+## Code signing policy
+
+ShinyForge's downloads are not code-signed yet. The [code signing policy](CODE_SIGNING.md) describes how releases are
+built from source, who approves them, and how signing will work once it's set up.
+
+## Privacy
+
+ShinyForge has no account, analytics or telemetry. It only connects to other systems for things you start or turn on
+(consoles, notifications, error reports, tool downloads), plus an update check that you can turn off.
+Details: [PRIVACY.md](PRIVACY.md).
 
 ## Credits
 

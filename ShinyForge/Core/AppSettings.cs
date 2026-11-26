@@ -84,6 +84,8 @@ public sealed class AppSettings
     /// card the Switch games record from, else an Elgato / Game Capture card) - see Services.SwitchScreen.
     /// </summary>
     public string SwitchScreenDevice { get; set; } = "";
+    /// <summary>The Pokémon HOME box sorter's options (Services.HomeSorter) - Pokémon Automation's options plus ShinyForge's.</summary>
+    public Services.HomeSorter.HomeSorterOptions HomeSorter { get; set; } = new();
     [JsonIgnore] public bool SwitchUsb => SwitchConnection.Equals("USB", StringComparison.OrdinalIgnoreCase);
     /// <summary>Session-only: remembered while ShinyForge runs, asked again after a restart (never saved to settings.json).</summary>
     [JsonIgnore]

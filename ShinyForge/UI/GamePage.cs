@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using PKHeX.Core;
 using ShinyForge.Core;
 using ShinyForge.Services;
@@ -43,7 +43,7 @@ public sealed class GamePage : UserControl
         {
             Location = new Point(560, 30), Size = new Size(640, 150), ForeColor = Theme.Muted, Font = Theme.Body, BackColor = Theme.Bg,
             Text = game.AutomationOnly
-                ? $"{game.PlatformLabel}\n\nSort your Pokémon HOME boxes automatically with Pokémon Automation's programs."
+                ? $"{game.PlatformLabel}\n\nSort your Pokémon HOME boxes automatically - with ShinyForge's HOME Box Sorter or Pokémon Automation's programs."
                 : $"{game.PlatformLabel}  •  Generation {game.Gen}\n\n" +
                   (game.Bot != BotKind.None ? "★ Automatic shiny hunting available.\n" : "") +
                   "Record gameplay in timed segments, keep your DexTracker Pokédex up to date automatically, " +
@@ -129,6 +129,12 @@ public sealed class GamePage : UserControl
             items.Add(HealthMonitor.Warn($"3DS hunt ({_game.Title})", $"No activity from the 3DS bot for {(int)(DateTime.Now - _last3dsActivity).TotalMinutes} minutes - is the game still running?"));
         if (_trackError != null)
             items.Add(HealthMonitor.Warn($"Collection tracker ({_game.Title})", "Last sync failed: " + _trackError));
+        // the buffer waits for its capture window (3DS Capture) - start it once the window is open
+        if (_clips.WaitingForWindow is { } waiting)
+        {
+            if (ShinyClipService.MissingWindow(RecordingService.WindowPrefix + waiting) == null) Ui(StartClipBuffer);
+            else items.Add(HealthMonitor.Warn($"Shiny clips ({_game.Title})", $"Waiting for the \"{waiting}\" window - open 3DS Capture (or pick another capture source) to save shiny clips."));
+        }
         if (_clips.Problem() is { } cp)
         {
             items.Add(HealthMonitor.Warn($"Shiny clips ({_game.Title})", cp + " - restarting it."));
@@ -270,6 +276,46 @@ public sealed class GamePage : UserControl
         var pa = new FancyButton("Pokémon Automation", Theme.GlyphPlay, Theme.Accent);
         pa.Click += async (_, _) => { if (await SysBotCurrent()) PokemonAutomationMenu(); };
         card.Body.Controls.Add(Row(pa));
+        if (OsInfo.IsWindows)
+        {
+            // ShinyForge's own sorter: same options as Pokémon Automation's plus marking exclusions (same board + capture card)
+            var sorter = new Card(Theme.GlyphSync, "HOME Box Sorter (ShinyForge)") { Location = new Point(646, 222), Size = new Size(600, 210), Margin = new Padding(8) };
+            sorter.Body.Controls.Add(Info("Sort boxes or build a living dex on an unmodded Switch / Switch 2 through your ESP32-S3 (Pokémon Automation's " +
+                                          "firmware) and the capture card. Skips Pokémon by their markings, checks every move. Close Pokémon Automation first."));
+            var open = new FancyButton("Open HOME Box Sorter", Theme.GlyphSync, Theme.Accent2);
+            open.Click += (_, _) =>
+            {
+                if (MessageBox.Show(FindForm(), ShinyForge.Services.HomeSorter.HomeSorterOptions.LongRunWarning, "Organize Pokémon HOME - this can take a long time",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                using var f = new HomeSorterForm();
+                f.ShowDialog(FindForm());
+            };
+            sorter.Body.Controls.Add(Row(open));
+            // keep the Switch / Switch 2 from dimming and sleeping (right-stick nudge through the same board)
+            var awake = new CheckBox
+            {
+                Text = "Keep the console awake", Checked = AppSettings.Current.HomeSorter.KeepAwake, AutoSize = true,
+                ForeColor = Theme.Text, Font = Theme.Body, Margin = new Padding(3, 8, 3, 0),
+            };
+            var awakeStatus = Theme.Label(Services.HomeSorter.ConsoleKeepAwake.Status, Theme.Small, Theme.Muted);
+            awakeStatus.Margin = new Padding(3, 11, 3, 0);
+            awake.CheckedChanged += (_, _) =>
+            {
+                AppSettings.Current.HomeSorter.KeepAwake = awake.Checked;
+                AppSettings.Current.Save();
+                Services.HomeSorter.ConsoleKeepAwake.Apply();
+            };
+            void ShowAwake() { if (!awakeStatus.IsDisposed) awakeStatus.BeginInvoke(() => awakeStatus.Text = Services.HomeSorter.ConsoleKeepAwake.Status); }
+            Services.HomeSorter.ConsoleKeepAwake.StatusChanged += ShowAwake;
+            awakeStatus.Disposed += (_, _) => Services.HomeSorter.ConsoleKeepAwake.StatusChanged -= ShowAwake;
+            sorter.Body.Controls.Add(Row(awake, awakeStatus));
+            sorter.Size = new Size(600, 250);
+            Controls.Add(sorter);
+            // the console's screen, live from the HOME capture card (shared with the sorter, so watching never blocks it)
+            var screen = new Card(Theme.GlyphGame, "Console screen (live)") { Location = new Point(26, 486), Size = new Size(1220, 730), Margin = new Padding(8) };
+            screen.Body.Controls.Add(new HomeScreenView { Size = new Size(1176, 662), Margin = new Padding(0) });
+            Controls.Add(screen);
+        }
         return card;
     }
 
@@ -560,6 +606,19 @@ public sealed class GamePage : UserControl
     // ---------------------------------------------------------------- 3DS hunting (Luma3DS)
     private CancellationTokenSource? _hunt3ds;
     private DateTime _last3dsActivity = DateTime.Now;
+    private readonly List<DateTime> _3dsRestarts = new();
+
+    /// <summary>At most 3 automatic 3DS hunt restarts an hour (a real problem shouldn't loop forever).</summary>
+    private bool Auto3dsRestartAllowed()
+    {
+        lock (_3dsRestarts)
+        {
+            _3dsRestarts.RemoveAll(t => (DateTime.Now - t).TotalHours > 1);
+            if (_3dsRestarts.Count >= 3) return false;
+            _3dsRestarts.Add(DateTime.Now);
+            return true;
+        }
+    }
     private Services.ThreeDS.Bot3DS? _bot3ds;
     public bool IsHunting3DS => _hunt3ds != null;
 
@@ -677,7 +736,17 @@ public sealed class GamePage : UserControl
                     failure?.InnerException is IOException or System.Net.Sockets.SocketException)
                 {
                     HealthMonitor.Report($"3DS hunt ({_game.Title})", HealthState.Error, "Lost the connection to the 3DS: " + failure!.Message);
-                    if (!HealthMonitor.CanReach(AppSettings.Current.ThreeDSIP, 4000, 2500))
+                    var reachable = HealthMonitor.CanReach(AppSettings.Current.ThreeDSIP, 4000, 2500);
+                    // a dropped Wi-Fi link to a 3DS that still answers: start the hunt again by itself (a few times an hour)
+                    // instead of leaving it stopped until someone notices (GitHub issue #4)
+                    if (reachable && !token.IsCancellationRequested && Auto3dsRestartAllowed())
+                    {
+                        Say("Lost the connection to the 3DS, but it still answers - starting the hunt again in 15 s...");
+                        AppPaths.Log($"3DS hunt ({_game.Title}): connection lost ({failure.Message}) - restarting automatically.");
+                        Thread.Sleep(15_000);
+                        Ui(() => { if (_hunt3ds == null) start.PerformClickSafe(); });
+                    }
+                    else if (!reachable)
                         Ui(() =>
                         {
                             if (IpPrompt.Ask(FindForm(), $"Lost the connection to the 3DS at {AppSettings.Current.ThreeDSIP}. " +
@@ -1840,6 +1909,16 @@ public sealed class GamePage : UserControl
         _saveStatus.Text = "Searching for save files...";
         Task.Run(() => SaveService.FindSaves(_gs.GameFolder, _game)).ContinueWith(t => Ui(() =>
         {
+            // a folder that can't be read (permissions, a removed drive) used to crash into an error report here
+            if (t.IsFaulted)
+            {
+                var why = t.Exception!.GetBaseException().Message;
+                AppPaths.Log("Save search: " + why);
+                _save = null;
+                _saveStatus.ForeColor = Theme.Warn;
+                _saveStatus.Text = "Couldn't search that folder for save files: " + why;
+                return;
+            }
             var saves = t.Result;
             _save = saves.FirstOrDefault();
             _saveStatus.ForeColor = _save != null ? Theme.Good : Theme.Warn;

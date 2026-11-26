@@ -256,8 +256,20 @@ public sealed class Bot3DS
     {
         bool flip = false;
         int steps = 0;
+        var since = Environment.TickCount64;
+        var warnAt = since + 5 * 60_000;
         while (!token.IsCancellationRequested)
         {
+            // hours of walking without a single encounter (GitHub issue #4: 166 minutes) means the game isn't where the
+            // hunt needs it (no grass, a menu or message open, the 3DS asleep) - say so instead of walking silently
+            if (Environment.TickCount64 > warnAt)
+            {
+                Warn($"No wild Pokémon appeared in {(Environment.TickCount64 - since) / 60_000} minutes of walking - is the character " +
+                     "standing in grass / a cave, with no menu or message open, and the 3DS awake (lid open)?");
+                warnAt = Environment.TickCount64 + 15 * 60_000;
+                _input!.Press(N3DSButton.B, 100, 300);
+                _input.Press(N3DSButton.B, 100, 300);
+            }
             var dx = _o.WalkHorizontal ? (flip ? -1 : 1) : 0;
             var dy = _o.WalkHorizontal ? 0 : (flip ? -1 : 1);
             _input!.Tilt(dx, dy, _o.WalkMs);

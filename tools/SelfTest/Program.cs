@@ -1,4 +1,4 @@
-using PKHeX.Core;
+﻿using PKHeX.Core;
 using ShinyForge.Core;
 using ShinyForge.Services;
 using ShinyForge.UI;
@@ -2656,5 +2656,534 @@ if (tests.Contains("slverify"))
     }
 }
 
+// HOME sorter: screen reading on real HOME screenshots (Pokémon Automation's error reports in its folder), planner on made-up boxes
+if (tests.Contains("homevision"))
+{
+    ShinyForge.Services.HomeSorter.HomeVision.Ocr = WinOcr.Read;
+    ShinyForge.Services.HomeSorter.HomeVision.OcrAll = WinOcr.ReadAll;
+    ShinyForge.Services.HomeSorter.HomeVision.DecodeRgba = WinOcr.DecodeRgba;
+    var pa = Path.Combine(devFiles, "PA-SerialPrograms-Windows-x64-0.71.6-20261029", "SerialPrograms-0.71.6-Windows-x64");
+    ShinyForge.Services.HomeSorter.HomeVision.References.Folder = Path.Combine(pa, "Resources");
+    Check(ShinyForge.Services.HomeSorter.HomeVision.References.Available, "Pokémon Automation's ball pictures load");
+    var liveShots = Path.Combine(ShinyForge.Services.HomeSorter.HomeSorterRunner.OutputDir, "shots");
+    foreach (var shot in Directory.GetFiles(Path.Combine(pa, "ErrorReportsSent"), "Screenshot.png", SearchOption.AllDirectories).Order()
+                 .Concat(Directory.Exists(liveShots) ? Directory.GetFiles(liveShots, "*.jpg").Order() : Array.Empty<string>()))
+    {
+        var img = GdiImage.Decode(File.ReadAllBytes(shot))!;
+        var name = shot.EndsWith(".jpg") ? Path.GetFileNameWithoutExtension(shot) : Path.GetFileName(Path.GetDirectoryName(shot));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var mon = ShinyForge.Services.HomeSorter.HomeVision.ReadSummary(img, "en", "en");
+        var counter = ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(img);
+        var cursor = ShinyForge.Services.HomeSorter.HomeVision.FindCursor(img);
+        var occ = ShinyForge.Services.HomeSorter.HomeVision.OccupiedSlots(img);
+        Console.WriteLine($"{name} ({sw.ElapsedMilliseconds} ms): go={mon?.FromGo} summary={mon?.ToString() ?? "-"} | ball={mon?.Ball} origin={mon?.OriginMark} lang={mon?.Language} nature={mon?.Nature} ability={mon?.Ability}");
+        Console.WriteLine($"   box counter={counter} cursor={cursor} bar='{ShinyForge.Services.HomeSorter.HomeVision.BarSpecies(img)}' barMarks={string.Join(",", ShinyForge.Services.HomeSorter.HomeVision.BarMarks(img))} occupied={occ.Count(o => o)}");
+    }
+}
+
+// HOME sorter window drawn to a picture (both programs), nothing pressed
+if (tests.Contains("homeform"))
+{
+    InitUi();
+    AppSettings.Current.CheckUpdatesOnStart = false;
+    foreach (var mode in new[] { ShinyForge.Services.HomeSorter.SortMode.LivingDex, ShinyForge.Services.HomeSorter.SortMode.BoxSorter })
+    {
+        AppSettings.Current.HomeSorter.Mode = mode;
+        var form = new HomeSorterForm();
+        form.Show();
+        Application.DoEvents();
+        using var bmp = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+        var file = Path.Combine(work, $"homeform-{mode}.png");
+        bmp.Save(file);
+        form.Hide();
+        form.Dispose();
+        Check(File.Exists(file), $"HOME sorter window ({mode}) -> {file}");
+    }
+}
+
+// HOME sorter on the real console: HS_STEP=check (no buttons) | dry (read box HS_BOX, Box Sorter dry run) |
+// swap (swap HS_BOX slot 1 <-> slot 2, then back). Needs Pokémon Automation closed (it holds the board's COM port).
+if (tests.Contains("homelive"))
+{
+    ShinyForge.Services.HomeSorter.HomeVision.Ocr = WinOcr.Read;
+    ShinyForge.Services.HomeSorter.HomeVision.OcrAll = WinOcr.ReadAll;
+    ShinyForge.Services.HomeSorter.HomeVision.DecodeRgba = WinOcr.DecodeRgba;
+    ConsoleFtpLauncher.Decode = GdiImage.Decode;
+    var pa = Path.Combine(devFiles, "PA-SerialPrograms-Windows-x64-0.71.6-20261029", "SerialPrograms-0.71.6-Windows-x64");
+    ShinyForge.Services.HomeSorter.HomeVision.References.Folder = Path.Combine(pa, "Resources");
+    AppSettings.Current.PokemonAutomationPath = Path.Combine(pa, "SerialPrograms-Windows.cmd");
+    var step = Environment.GetEnvironmentVariable("HS_STEP") ?? "check";
+    // never the real HOME Sorter folder: a test dry run once replaced a real run's saved progress
+    ShinyForge.Services.HomeSorter.HomeSorterRunner.OutputDirOverride = Path.Combine(work, "HOME Sorter (test)");
+    var box = int.Parse(Environment.GetEnvironmentVariable("HS_BOX") ?? "1");
+    var o = new ShinyForge.Services.HomeSorter.HomeSorterOptions
+    {
+        Mode = ShinyForge.Services.HomeSorter.SortMode.BoxSorter, SortStartBox = box, BoxCount = 1, DryRun = true,
+        ComPort = Environment.GetEnvironmentVariable("HS_PORT") ?? "COM7", VideoDelayMs = 400, GameDelayMs = 600, OutputFile = "selftest_box",
+    };
+    Console.WriteLine("ffmpeg: " + RecordingService.FindFfmpeg() + " | cards: " + string.Join(", ", Equipment.VideoSources()));
+    if (step == "ocr")
+    {
+        var img = GdiImage.Decode(File.ReadAllBytes(Path.Combine(work, "home_live.jpg")))!;
+        foreach (var b in new[] { new ShinyForge.Services.HomeSorter.HomeVision.Box(0.085, 0.715, 0.065, 0.05), new ShinyForge.Services.HomeSorter.HomeVision.Box(0.09, 0.715, 0.06, 0.045) })
+            Console.WriteLine(string.Join(" | ", WinOcr.ReadAll(ShinyForge.Services.HomeSorter.HomeVision.Crop(img, b), "en").Select(t => "'" + t + "'")));
+        Console.WriteLine("counter: " + ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(img));
+        Console.WriteLine("glyphs: " + string.Join(" ", ShinyForge.Services.HomeSorter.HomeVision.DebugGlyphs(img)));
+    }
+    if (step == "canon")
+    {
+        foreach (var (t, k) in new[] { ("H a Sty", 0), ("t Swim", 1), ("static", 1), ("• Fire Punch", 2), ("3ust", 2), ("Quirky", 0), ("Rock Head", 1), ("Trick-or-Treat", 2), ("Mud-Slap", 2) })
+            Console.WriteLine($"canon '{t}' -> '{ShinyForge.Services.HomeSorter.HomeVision.GameText.Canon(t, (ShinyForge.Services.HomeSorter.HomeVision.GameText.Kind)k, "en")}'");
+    }
+    if (step == "statseed")
+    {
+        // HS_SEED = "image|13,7,6,5,6,6;image|..."
+        foreach (var part in Environment.GetEnvironmentVariable("HS_SEED")!.Split(';'))
+        {
+            var bits = part.Split('|');
+            ShinyForge.Services.HomeSorter.HomeVision.LearnStats(GdiImage.Decode(File.ReadAllBytes(bits[0]))!, bits[1].Split(',').Select(int.Parse).ToArray());
+        }
+        File.WriteAllText(Path.Combine(work, "stat_seed.json"), ShinyForge.Services.HomeSorter.HomeVision.StatDigits.Dump());
+        // levels: HS_LEVELS = "image|22;image|5"
+        foreach (var part in (Environment.GetEnvironmentVariable("HS_LEVELS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var bits = part.Split('|');
+            var crop = ShinyForge.Services.HomeSorter.HomeVision.Crop(GdiImage.Decode(File.ReadAllBytes(bits[0]))!, new(0.506141, 0.090805, 0.100194, 0.057471));
+            var g = ShinyForge.Services.HomeSorter.HomeVision.LevelGlyphs(crop);
+            Console.WriteLine($"level {bits[1]}: {g.Count} digit glyph(s); all: " + string.Join(" ", ShinyForge.Services.HomeSorter.HomeVision.DigitBook.Cols(crop).Select(x => $"[{x.X0}-{x.X1} y{x.Y0}-{x.Y1}]")) + $" crop {crop.Width}x{crop.Height}");
+            ShinyForge.Services.HomeSorter.HomeVision.LevelDigitShapes.Learn(crop, bits[1], g);
+        }
+        File.WriteAllText(Path.Combine(work, "level_seed.json"), ShinyForge.Services.HomeSorter.HomeVision.LevelDigitShapes.Dump());
+        Console.WriteLine("seed written");
+    }
+    if (step == "dexocr")
+    {
+        var img = GdiImage.Decode(File.ReadAllBytes(Environment.GetEnvironmentVariable("HS_IMG")!))!;
+        Console.WriteLine("dex readings: " + string.Join(" | ", WinOcr.ReadAll(ShinyForge.Services.HomeSorter.HomeVision.Crop(img, new ShinyForge.Services.HomeSorter.HomeVision.Box(0.42, 0.24, 0.08, 0.05)), "en").Select(t => "'" + t + "'")));
+        Console.WriteLine("ReadDex = " + ShinyForge.Services.HomeSorter.HomeVision.ReadDex(img) + " cursor = " + ShinyForge.Services.HomeSorter.HomeVision.FindCursor(img) + " counter = " + ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(img));
+        var mon = ShinyForge.Services.HomeSorter.HomeVision.ReadSummary(img, "en", "en");
+        Console.WriteLine("summary = " + mon); Console.WriteLine("details = " + mon.Details); { var lc = ShinyForge.Services.HomeSorter.HomeVision.Crop(img, new(0.506141, 0.090805, 0.100194, 0.057471)); Console.WriteLine("level by shapes = " + ShinyForge.Services.HomeSorter.HomeVision.LevelDigitShapes.Read(lc, ShinyForge.Services.HomeSorter.HomeVision.LevelGlyphs(lc))); }
+    }
+    if (step == "icon")
+    {
+        // HS_IMG = a box-view picture, HS_SLOT = row,col (0-based), HS_DEX, HS_SHINY=1, HS_GENDER
+        ShinyForge.Services.HomeSorter.HomeVision.DecodeRgba = WinOcr.DecodeRgba;
+        var img = GdiImage.Decode(File.ReadAllBytes(Environment.GetEnvironmentVariable("HS_IMG")!))!;
+        var rc = Environment.GetEnvironmentVariable("HS_SLOT")!.Split(',').Select(int.Parse).ToArray();
+        var icon = ShinyForge.Services.HomeSorter.HomeVision.SlotIcon(img, rc[0], rc[1]);
+        var rank = ShinyForge.Services.HomeSorter.HomeVision.References.FormRanking(icon, int.Parse(Environment.GetEnvironmentVariable("HS_DEX")!),
+            Environment.GetEnvironmentVariable("HS_SHINY") == "1", Environment.GetEnvironmentVariable("HS_GENDER") ?? "");
+        Console.WriteLine("ranking: " + string.Join(", ", rank.Take(6).Select(r => $"{r.Slug} {r.Score:F1}")));
+        Console.WriteLine("counter: " + ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(img) + " glyphs " + string.Join(" ", ShinyForge.Services.HomeSorter.HomeVision.DebugGlyphs(img)));
+    }
+    if (step == "awake")
+    {
+        // which input wakes a dimmed console without doing anything in HOME?
+        using var pad = ShinyForge.Services.HomeSorter.PaBotBase2.Connect(o.ComPort, Console.WriteLine);
+        var device = ShinyForge.Services.HomeSorter.HomeCapture.DefaultDevice()!;
+        using var cam = ShinyForge.Services.HomeSorter.HomeCapture.Start(device);
+        double Bright(RgbImage f) { long t = 0; for (var i = 0; i < f.Pixels.Length; i += 3 * 97) t += f.Pixels[i] + f.Pixels[i + 1] + f.Pixels[i + 2]; return t / (3.0 * (f.Pixels.Length / (3 * 97))); }
+        string State(RgbImage f) => $"counter={ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(f)} cursor={ShinyForge.Services.HomeSorter.HomeVision.FindCursor(f)} bar='{ShinyForge.Services.HomeSorter.HomeVision.BarSpecies(f)}'";
+        var f0 = cam.Grab(400, 15000)!;
+        Console.WriteLine($"start: brightness {Bright(f0):F0} {State(f0)}");
+        foreach (var (name, act) in new (string, Action)[]
+        {
+            ("right stick nudge", () => pad.Hold(ShinyForge.Services.HomeSorter.PaBotBase2.Button.None, 60, 0x800 + 0x380, 0x800)),
+            ("L3 (left stick click)", () => pad.Hold(ShinyForge.Services.HomeSorter.PaBotBase2.Button.LStick, 60)),
+            ("R3 (right stick click)", () => pad.Hold(ShinyForge.Services.HomeSorter.PaBotBase2.Button.RStick, 60)),
+        })
+        {
+            var before = cam.Grab(400)!;
+            act();
+            Thread.Sleep(1500);
+            var after = cam.Grab(400)!;
+            File.WriteAllBytes(Path.Combine(work, $"awake-{name.Split(' ')[0]}.jpg"), cam.LastJpeg()!);
+            Console.WriteLine($"{name}: brightness {Bright(before):F0} -> {Bright(after):F0} | before {State(before)} | after {State(after)}");
+        }
+    }
+    if (step == "check")
+    {
+        using (var pad = ShinyForge.Services.HomeSorter.PaBotBase2.Connect(o.ComPort, Console.WriteLine))
+        {
+            Check(pad.DeviceName.Length > 0, $"board: {pad.DeviceName}, firmware {pad.FirmwareVersion}, protocol {pad.ProtocolVersion}, mode 0x{pad.ControllerMode:x}, " +
+                  $"controllers {string.Join(",", pad.Controllers.Select(c => "0x" + c.ToString("x")))}, console connected: {pad.ConsoleConnected()}");
+        }
+        var device = ShinyForge.Services.HomeSorter.HomeCapture.DefaultDevice()!;
+        using var cam = ShinyForge.Services.HomeSorter.HomeCapture.Start(device);
+        var f = cam.Grab(3000);
+        Check(f != null, $"capture card {device}: {f?.Width}x{f?.Height}");
+        if (cam.LastJpeg() is { } jpg) File.WriteAllBytes(Path.Combine(work, "home_live.jpg"), jpg);
+        if (f != null)
+            Console.WriteLine($"counter={ShinyForge.Services.HomeSorter.HomeVision.ReadBoxCounter(f)} cursor={ShinyForge.Services.HomeSorter.HomeVision.FindCursor(f)} " +
+                              $"bar='{ShinyForge.Services.HomeSorter.HomeVision.BarSpecies(f)}' marks={string.Join(",", ShinyForge.Services.HomeSorter.HomeVision.BarMarks(f))} " +
+                              $"occupied={ShinyForge.Services.HomeSorter.HomeVision.OccupiedSlots(f).Count(x => x)} summary={ShinyForge.Services.HomeSorter.HomeVision.ReadSummary(f, "en", "en")}");
+    }
+    else
+    {
+        if (step == "swap") { o.DryRun = false; }
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+        var runner = new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, Console.WriteLine, cts.Token);
+        if (step == "resume")
+        {
+            // a dry run, then the same dry run continued: the box it read must come from memory
+            var lines1 = new List<string>();
+            new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, l => { lines1.Add(l); Console.WriteLine("1: " + l); }, cts.Token).RunAsync().GetAwaiter().GetResult();
+            var lines2 = new List<string>();
+            new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, l => { lines2.Add(l); Console.WriteLine("2: " + l); }, cts.Token, resume: true).RunAsync().GetAwaiter().GetResult();
+            Check(lines1.Any(l => l.StartsWith($"Reading box {box}")) && lines2.Any(l => l.StartsWith("Continuing the run")) && !lines2.Any(l => l.StartsWith($"Reading box {box}")),
+                  "resume: the second run used the remembered box instead of reading it again");
+        }
+        if (step == "resume")
+        {
+            // a dry run, then the same dry run continued: the box it read must come from memory
+            var lines1 = new List<string>();
+            new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, l => { lines1.Add(l); Console.WriteLine("1: " + l); }, cts.Token).RunAsync().GetAwaiter().GetResult();
+            var lines2 = new List<string>();
+            new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, l => { lines2.Add(l); Console.WriteLine("2: " + l); }, cts.Token, resume: true).RunAsync().GetAwaiter().GetResult();
+            Check(lines1.Any(l => l.StartsWith($"Reading box {box}")) && lines2.Any(l => l.StartsWith("Continuing the run")) && !lines2.Any(l => l.StartsWith($"Reading box {box}")),
+                  "resume: the second run used the remembered box instead of reading it again");
+        }
+        if (step == "wrap")
+        {
+            var after = new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, Console.WriteLine, cts.Token).ProbeWrap().GetAwaiter().GetResult();
+            Console.WriteLine($"L on box 1 -> box {after}");
+        }
+        if (step == "search")
+        {
+            // dex in (empty) box 1, rejects in (empty) box 103: Obstagoon and Zarude must be found by searching the other boxes
+            var tplFile = Path.Combine(work, "search_template.json");
+            File.WriteAllText(tplFile, """
+            [ {"species_slug":"obstagoon","form_slug":"none","natID":862,"primaryType":"dark","secondaryType":"normal","slug":"obstagoon","has_gender_difference":false},
+              {"species_slug":"zarude","form_slug":"none","natID":893,"primaryType":"dark","secondaryType":"grass","slug":"zarude","has_gender_difference":false} ]
+            """);
+            var so = new ShinyForge.Services.HomeSorter.HomeSorterOptions
+            {
+                Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStyle = "custom", CustomDexFile = tplFile, LivingDexStartBox = 1,
+                RejectBoxStart = 103, RejectBoxEnd = 103, DryRun = true, SearchAllBoxes = true, ComPort = o.ComPort, VideoDelayMs = 400, GameDelayMs = 600, OutputFile = "selftest_search",
+            };
+            var sp = new ShinyForge.Services.HomeSorter.HomeSorterRunner(so, Console.WriteLine, cts.Token).RunAsync().GetAwaiter().GetResult();
+            Check(sp != null && sp.Unfilled == 0, $"live search: {sp?.Unfilled} missing after searching; {sp?.Steps.Count} swaps planned: {string.Join("; ", sp?.Steps.Select(x => $"{ShinyForge.Services.HomeSorter.Slot.FromIndex(x.From)} -> {ShinyForge.Services.HomeSorter.Slot.FromIndex(x.To)} {x.What}") ?? Array.Empty<string>())}");
+        }
+        if (step == "rename")
+        {
+            var renamed = new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, Console.WriteLine, cts.Token).RenameEmptyBoxes(box - 1, box - 1).GetAwaiter().GetResult();
+            Check(renamed >= 0, $"rename: {renamed} box(es) renamed");
+        }
+        if (step == "explore")
+        {
+            foreach (var f in Directory.GetFiles(work, "explore-*.jpg")) File.Delete(f);
+            new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, Console.WriteLine, cts.Token)
+                .Explore(box - 1, (Environment.GetEnvironmentVariable("HS_KEYS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries), work).GetAwaiter().GetResult();
+        }
+        if (step == "find")
+        {
+            var found = new ShinyForge.Services.HomeSorter.HomeSorterRunner(o, Console.WriteLine, cts.Token).FindBoxWithPokemon(box - 1, 60).GetAwaiter().GetResult();
+            Check(found >= 0, $"first box with Pokémon from box {box}: {found + 1}");
+            if (found >= 0) File.WriteAllText(Path.Combine(work, "home_box.txt"), (found + 1).ToString());
+        }
+        var plan = step == "dry" ? runner.RunAsync().GetAwaiter().GetResult() : null;
+        if (step == "dry") Check(plan != null, $"dry run: {plan?.Pokemon} Pokémon, {plan?.Empty} empty, {plan?.Steps.Count} swaps planned (files in {ShinyForge.Services.HomeSorter.HomeSorterRunner.OutputDir})");
+        if (step == "swap") Check(runner.SwapTest(box - 1).GetAwaiter().GetResult(), "swap test: slot 1 <-> slot 2 and back, both checked on screen");
+    }
+}
+
+// which Pokémon each game can have (PKHeX's data) - for the HOME sorter's origin mark dex
+if (tests.Contains("pkxprobe"))
+{
+    var asm = typeof(PersonalTable).Assembly;
+    foreach (var t in asm.GetExportedTypes().Where(t => t.Name.Contains("GO")).Take(30)) Console.WriteLine(t.FullName);
+    int Count(IPersonalTable t, int max) { var n = 0; for (ushort sp = 1; sp <= max && sp <= t.MaxSpeciesID; sp++) if (t.IsPresentInGame(sp, 0)) n++; return n; }
+    Console.WriteLine($"SWSH {Count(PersonalTable.SWSH, 1025)} GG {Count(PersonalTable.GG, 1025)} BDSP {Count(PersonalTable.BDSP, 1025)} LA {Count(PersonalTable.LA, 1025)} SV {Count(PersonalTable.SV, 1025)}");
+    foreach (var t in asm.GetTypes().Where(t => t.Name.StartsWith("Encounters") || t.Name.Contains("Area8g") || t.Name.Contains("Area7g")))
+        foreach (var f in t.GetFields(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic).Where(f => f.Name.Contains("GO") || f.Name.Contains("Go")))
+            Console.WriteLine($"{t.FullName}.{f.Name} : {f.FieldType.Name} public={f.IsPublic && t.IsPublic}");
+    foreach (var pr in typeof(PersonalTable).GetFields().Where(f => f.IsStatic)) Console.Write(pr.Name + " ");
+    Console.WriteLine();
+}
+
+if (tests.Contains("homeplan"))
+{
+    var rnd = new Random(7);
+    ShinyForge.Services.HomeSorter.HomeMon Mon(int dex, string sp, bool shiny = false, string g = "male", string t1 = "normal", string t2 = "") =>
+        new() { Dex = dex, Species = sp, Shiny = shiny, Gender = g, PrimaryType = t1, SecondaryType = t2, Level = rnd.Next(1, 100) };
+    // apply the swaps to a copy and return the result
+    Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?> Apply(Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?> start, ShinyForge.Services.HomeSorter.SortPlan plan)
+    {
+        var cur = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>(start);
+        foreach (var st in plan.Steps) (cur[st.From], cur[st.To]) = (cur.GetValueOrDefault(st.To), cur.GetValueOrDefault(st.From));
+        return cur;
+    }
+
+    // ---- Box Sorter: 2 boxes, 40 Pokémon in random order, 20 empty, one red-circle Pokémon that must stay put
+    var o = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.BoxSorter, SortStartBox = 1, BoxCount = 2 };
+    o.MarkRules[0] = ShinyForge.Services.HomeSorter.MarkRule.Red;
+    var slots = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>();
+    var order = Enumerable.Range(0, 60).OrderBy(_ => rnd.Next()).ToList();
+    for (var i = 0; i < 60; i++) slots[order[i]] = i < 40 ? Mon(1 + i % 25, "Mon" + (1 + i % 25)) : null;
+    var marked = slots.First(kv => kv.Value != null).Key;
+    slots[marked]!.Marks[0] = ShinyForge.Services.HomeSorter.MarkColor.Red;
+    var markedMon = slots[marked];
+    var plan = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanBoxSort(slots, o, 0);
+    var end = Apply(slots, plan);
+    var seq = end.OrderBy(kv => kv.Key).Where(kv => kv.Key != marked).Select(kv => kv.Value).ToList();
+    var dexes = seq.TakeWhile(m => m != null).Select(m => m!.Dex).ToList();
+    Check(ReferenceEquals(end[marked], markedMon), "box sort: the red-circle Pokémon didn't move");
+    Check(dexes.Count == 39 && dexes.SequenceEqual(dexes.Order()) && seq.Skip(39).All(m => m == null), $"box sort: 39 Pokémon sorted by dex, empties last ({plan.Steps.Count} swaps)");
+    Check(plan.Steps.All(st => st.From != marked && st.To != marked), "box sort: no swap touches the marked slot");
+    Check(end.Values.Count(v => v != null) == 40, "box sort: no Pokémon lost or duplicated");
+    var plan2 = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanBoxSort(end, o, 0);
+    Check(plan2.Steps.Count == 0, "box sort: sorting sorted boxes again needs no swaps");
+    // ties stay put: two equal Pokémon already in their group's slots are not swapped with each other
+    var tie = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?> { [0] = Mon(5, "A"), [1] = Mon(5, "B"), [2] = Mon(1, "C") };
+    for (var i = 3; i < 30; i++) tie[i] = null;
+    var tplan = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanBoxSort(tie, new() { Mode = ShinyForge.Services.HomeSorter.SortMode.BoxSorter, BoxCount = 1 }, 0);
+    Check(tplan.Steps.Count == 1, $"box sort: equal Pokémon only move as far as needed ({tplan.Steps.Count} swap, the 5 already in a 5-slot stays)");
+
+    // ---- Living dex: template of 5 entries in box 1, reject boxes 3-3
+    var template = new List<ShinyForge.Services.HomeSorter.DexEntry>
+    {
+        new("bulbasaur", "none", 1, "grass", "poison", "bulbasaur", false),
+        new("rattata", "none", 19, "normal", "", "rattata", false),
+        new("rattata", "alola", 19, "dark", "normal", "rattata-alola", false),
+        new("empty", "", 0, "", "", "", false),
+        new("pikachu", "none", 25, "electric", "", "pikachu-female", true),
+    };
+    var lo = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 1, RejectBoxStart = 3, RejectBoxEnd = 3 };
+    lo.MarkRules[4] = ShinyForge.Services.HomeSorter.MarkRule.Any; lo.Marked = ShinyForge.Services.HomeSorter.MarkedBehaviour.MoveAside;
+    var ld = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>();
+    ld[0] = Mon(25, "Pikachu", g: "male", t1: "electric");                    // wrong gender for the slot -> reject
+    ld[1] = Mon(19, "Rattata", t1: "dark", t2: "normal");                    // Alolan -> slot 3
+    ld[2] = Mon(1, "Bulbasaur", t1: "grass", t2: "poison");                  // -> slot 1
+    ld[3] = Mon(150, "Mewtwo", t1: "psychic");                               // not in the template -> reject
+    ld[60] = Mon(19, "Rattata", t1: "normal");                               // from reject -> slot 2
+    ld[61] = Mon(25, "Pikachu", g: "female", t1: "electric");               // star-marked: may not be used
+    ld[61]!.Marks[4] = ShinyForge.Services.HomeSorter.MarkColor.Blue;
+    ld[62] = Mon(25, "Pikachu", g: "female", t1: "electric");               // -> slot 5
+    var lplan = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(ld, template, lo, 0);
+    var lend = Apply(lplan.Target.Keys.ToDictionary(k => k, k => ld.GetValueOrDefault(k)), lplan);
+    Check(lend[0]?.Species == "Bulbasaur" && lend[1]?.PrimaryType == "normal" && lend[2]?.PrimaryType == "dark" && lend[3] == null
+          && ReferenceEquals(lend[4], ld[62]), $"living dex: slots filled right ({lplan.Steps.Count} swaps): {string.Join(", ", Enumerable.Range(0, 5).Select(i => lend[i]?.Species ?? "-"))}");
+    Check(ReferenceEquals(lend[61], ld[61]), "living dex: the star-marked Pikachu wasn't used");
+    var rejects = Enumerable.Range(60, 30).Select(i => lend[i]).OfType<ShinyForge.Services.HomeSorter.HomeMon>().ToList();
+    Check(rejects.Any(m => m.Species == "Mewtwo") && rejects.Any(m => m.Species == "Pikachu" && m.Gender == "male") && Enumerable.Range(5, 25).All(i => lend[i] == null),
+          "living dex: leftovers went to the reject box");
+    Check(lend.Values.Count(v => v != null) == 7, "living dex: no Pokémon lost or duplicated");
+    foreach (var st in lplan.Steps) Console.WriteLine($"   {ShinyForge.Services.HomeSorter.Slot.FromIndex(st.From)} <-> {ShinyForge.Services.HomeSorter.Slot.FromIndex(st.To)}: {st.What}");
+
+    // ---- regular dex first, shiny dex in the next box; leftovers to the nearest reject box (the boxes wrap); GO excluded
+    {
+        var tpl = new List<ShinyForge.Services.HomeSorter.DexEntry>
+        {
+            new("bulbasaur", "none", 1, "grass", "poison", "bulbasaur", false),
+            new("ivysaur", "none", 2, "grass", "poison", "ivysaur", false),
+        };
+        var so = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex,
+            LivingDexStartBox = 1, RejectBoxStart = 250, RejectBoxEnd = 300, ShinyDex = true, ShinyAfterRegular = true, ExcludeGo = true };
+        var layout = ShinyForge.Services.HomeSorter.DexTemplates.Layout(tpl, so);
+        Check(layout.Count == 32 && layout[30].Slug == "bulbasaur" && layout[30].Shiny == true && layout[0].Shiny == false,
+              $"shiny after regular: layout {layout.Count} slots, shiny dex starts in box {ShinyForge.Services.HomeSorter.DexTemplates.ShinyStartBox(tpl, so)}");
+        var sl = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>();
+        sl[0] = Mon(2, "Ivysaur", shiny: true, t1: "grass", t2: "poison");     // shiny Ivysaur in the regular part -> shiny part
+        sl[1] = Mon(1, "Bulbasaur", t1: "grass", t2: "poison");               // regular Bulbasaur -> slot 0
+        sl[5] = Mon(150, "Mewtwo", t1: "psychic");                            // leftover -> nearest reject: box 300 (1 L press from box 1)
+        var near = 299 * 30 + 29;                                             // box 300, last slot: the copy nearest to box 1
+        var far = 249 * 30;                                                   // box 250
+        sl[far] = Mon(2, "Ivysaur", t1: "grass", t2: "poison");
+        sl[near] = Mon(2, "Ivysaur", t1: "grass", t2: "poison");
+        sl[far + 1] = Mon(1, "Bulbasaur", shiny: true, t1: "grass", t2: "poison");
+        sl[far + 2] = Mon(1, "Bulbasaur", shiny: true, t1: "grass", t2: "poison");
+        sl[far + 2]!.FromGo = true;                                           // a GO shiny: must not be used
+        foreach (var lv in sl.Values) if (lv != null) lv.Level = 50;          // equal quality: distance decides
+        var sp = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(sl, layout, so, 0);
+        var se = Apply(sp.Target.Keys.ToDictionary(k => k, k => sl.GetValueOrDefault(k)), sp);
+        Check(se[0]?.Species == "Bulbasaur" && se[0]!.Shiny == false && se[1]?.Species == "Ivysaur" && se[1]!.Shiny == false,
+              "shiny after regular: the regular dex gets non-shinies");
+        Check(se[30]?.Species == "Bulbasaur" && se[30]!.Shiny && !se[30]!.FromGo && se[31]?.Species == "Ivysaur" && se[31]!.Shiny,
+              "shiny after regular: the shiny dex starts in the next box, GO shiny left out");
+        Check(ReferenceEquals(se[1], sl[near]), "least resistance: the Ivysaur copy in box 300 (next to box 1, boxes wrap) was used, not the one in box 250");
+        Check(Enumerable.Range(299 * 30, 30).Any(i => se.GetValueOrDefault(i)?.Species == "Mewtwo"), "least resistance: the leftover Mewtwo went to box 300, the nearest reject box");
+        Check(ShinyForge.Services.HomeSorter.HomeSortPlanner.Distance(0, 299 * 30) == 2, "distance: box 1 -> box 300 is one L press (counted double)");
+        foreach (var st in sp.Steps) Console.WriteLine($"   {ShinyForge.Services.HomeSorter.Slot.FromIndex(st.From)} <-> {ShinyForge.Services.HomeSorter.Slot.FromIndex(st.To)}: {st.What}");
+    }
+
+    // ---- no detours: a Pokémon that belongs in the dex never stops in a reject box on the way
+    // counts Pokémon put in a reject slot that isn't their final slot
+    int Detours(Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?> start, ShinyForge.Services.HomeSorter.SortPlan plan, HashSet<int> reject)
+        {
+            var cur = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>(start);
+            var final = plan.Target.Where(kv => kv.Value != null).ToDictionary(kv => kv.Value!, kv => kv.Key, ReferenceEqualityComparer.Instance);
+            var bad = 0;
+            foreach (var st in plan.Steps)
+            {
+                (cur[st.From], cur[st.To]) = (cur.GetValueOrDefault(st.To), cur.GetValueOrDefault(st.From));
+                foreach (var pos in new[] { st.From, st.To })
+                    if (cur[pos] is { } m && reject.Contains(pos) && final.TryGetValue(m, out var f) && f != pos) bad++;
+            }
+            return bad;
+        }
+        var tpl2 = new List<ShinyForge.Services.HomeSorter.DexEntry>
+        {
+            new("bulbasaur", "none", 1, "grass", "poison", "bulbasaur", false),
+            new("ivysaur", "none", 2, "grass", "poison", "ivysaur", false),
+        };
+        var o2 = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 1, RejectBoxStart = 3, RejectBoxEnd = 3 };
+        var d = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>
+        {
+            [0] = Mon(2, "Ivysaur", t1: "grass", t2: "poison"),    // in the dex boxes, belongs in slot 2
+            [60] = Mon(1, "Bulbasaur", t1: "grass", t2: "poison"), // in a reject box, belongs in slot 1
+        };
+        var dp = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(d, tpl2, o2, 0);
+        var reject = Enumerable.Range(60, 30).ToHashSet();
+        var de = Apply(dp.Target.Keys.ToDictionary(k => k, k => d.GetValueOrDefault(k)), dp);
+        Check(de[0]?.Species == "Bulbasaur" && de[1]?.Species == "Ivysaur" && Detours(dp.Target.Keys.ToDictionary(k => k, k => d.GetValueOrDefault(k)), dp, reject) == 0 && dp.Steps.Count == 2,
+              $"no detour: Ivysaur goes straight to its dex slot, never via the reject box ({dp.Steps.Count} swaps: {string.Join("; ", dp.Steps.Select(x => x.What))})");
+
+        // a big shuffled case: 3 dex boxes, 2 reject boxes, duplicates and Pokémon that don't fit
+        var big = Enumerable.Range(1, 85).Select(n => new ShinyForge.Services.HomeSorter.DexEntry("p" + n, "none", n, "normal", "", "p" + n, false)).ToList();
+        var o3 = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 1, RejectBoxStart = 5, RejectBoxEnd = 6 };
+        var all = Enumerable.Range(0, 90).Concat(Enumerable.Range(120, 60)).OrderBy(_ => rnd.Next()).ToList();
+        var bd = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>();
+        var k2 = 0;
+        foreach (var n in Enumerable.Range(1, 85).Concat(Enumerable.Range(1, 20)).Concat(Enumerable.Range(200, 10))) bd[all[k2++]] = Mon(n, "p" + n, t1: "normal");
+        var bp = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(bd, big, o3, 0);
+        var bstart = bp.Target.Keys.ToDictionary(k => k, k => bd.GetValueOrDefault(k));
+        var bend = Apply(bstart, bp);
+        var detours = Detours(bstart, bp, Enumerable.Range(120, 60).ToHashSet());
+        Check(Enumerable.Range(0, 85).All(i => bend[i]?.Dex == i + 1) && detours == 0,
+              $"no detour (115 shuffled Pokémon): dex complete, {bp.Steps.Count} swaps, {detours} stop(s) in a reject box");
+
+    // ---- Pokémon found in other boxes go straight to the dex; everything else there stays put
+    {
+        var tpl4 = new List<ShinyForge.Services.HomeSorter.DexEntry>
+        {
+            new("bulbasaur", "none", 1, "grass", "poison", "bulbasaur", false),
+            new("ivysaur", "none", 2, "grass", "poison", "ivysaur", false),
+            new("venusaur", "none", 3, "grass", "poison", "venusaur", false),
+        };
+        var o4 = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 1, RejectBoxStart = 3, RejectBoxEnd = 3 };
+        var s4 = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>
+        {
+            [0] = Mon(1, "Bulbasaur", t1: "grass", t2: "poison"),
+            [1] = Mon(150, "Mewtwo", t1: "psychic"),                  // doesn't belong: to the reject box
+            [9 * 30 + 4] = Mon(2, "Ivysaur", t1: "grass", t2: "poison"),    // box 10
+            [9 * 30 + 5] = Mon(25, "Pikachu", t1: "electric"),             // box 10, not wanted: stays
+            [199 * 30] = Mon(3, "Venusaur", t1: "grass", t2: "poison"),     // box 200
+        };
+        var first = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(s4, tpl4, o4, 0);
+        Check(first.Unfilled == 2 && first.MissingEntries.SequenceEqual(new[] { 1, 2 }), $"search: without the other boxes 2 slots are missing ({string.Join(",", first.MissingEntries)})");
+        var outsidePos = new[] { 9 * 30 + 4, 9 * 30 + 5, 199 * 30 };
+        var p4 = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(s4, tpl4, o4, 0, outsidePos);
+        var st4 = p4.Target.Keys.ToDictionary(k => k, k => s4.GetValueOrDefault(k));
+        var e4 = Apply(st4, p4);
+        Check(p4.Unfilled == 0 && e4[0]?.Species == "Bulbasaur" && e4[1]?.Species == "Ivysaur" && e4[2]?.Species == "Venusaur",
+              $"search: Ivysaur (box 10) and Venusaur (box 200) fill the dex ({p4.Steps.Count} swaps: {string.Join("; ", p4.Steps.Select(x => x.What))})");
+        Check(e4[9 * 30 + 5]?.Species == "Pikachu" && p4.Steps.All(x => x.From != 9 * 30 + 5 && x.To != 9 * 30 + 5), "search: the Pikachu in box 10 isn't touched");
+        Check(Enumerable.Range(60, 30).Any(i => e4.GetValueOrDefault(i)?.Species == "Mewtwo") && Detours(st4, p4, Enumerable.Range(60, 30).Concat(outsidePos).ToHashSet()) == 0,
+              "search: Mewtwo goes to the reject box, nothing is parked in a searched box");
+    }
+
+    // ---- origin mark dex: only Pokémon that can have the mark get a slot; others go to the reject boxes
+    {
+        var dexDir2 = Path.Combine(devFiles, "PA-SerialPrograms-Windows-x64-0.71.6-20261029", "SerialPrograms-0.71.6-Windows-x64", "Resources", "PokemonHome", "DexTemplates");
+        var bySpecies = ShinyForge.Services.HomeSorter.DexTemplates.Load(Path.Combine(dexDir2, "living_dex_by_species.json"));
+        foreach (var (mark, expect) in new[] { ("gameboy", 251), ("lgpe", 153), ("bdsp", 493), ("la", 226), ("galar", 664), ("go", -1) })
+        {
+            var oo = new ShinyForge.Services.HomeSorter.HomeSorterOptions { OriginMarkFilter = mark };
+            var lay = ShinyForge.Services.HomeSorter.DexTemplates.Layout(bySpecies, oo);
+            var species = lay.Select(e => e.NatId).Distinct().Count();
+            Check(expect < 0 ? species is > 700 and < 1025 : species == expect, $"origin {mark}: {species} species, {lay.Count} slots = {(lay.Count + 29) / 30} boxes (GO list from PKHeX: {ShinyForge.Services.HomeSorter.OriginMarks.GoListKnown})");
+        }
+        var to = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 1, RejectBoxStart = 3, RejectBoxEnd = 3, OriginMarkFilter = "galar" };
+        var tplG = new List<ShinyForge.Services.HomeSorter.DexEntry> { new("zigzagoon", "none", 263, "normal", "", "zigzagoon", false) };
+        var sg = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>
+        {
+            [0] = Mon(263, "Zigzagoon", t1: "normal"),   // origin GO: wrong mark -> reject box
+            [5] = Mon(263, "Zigzagoon", t1: "normal"),   // origin Galar -> slot 1
+        };
+        sg[0]!.OriginMark = "go"; sg[5]!.OriginMark = "galar";
+        var gp = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(sg, ShinyForge.Services.HomeSorter.DexTemplates.Layout(tplG, to), to, 0);
+        var ge = Apply(gp.Target.Keys.ToDictionary(k => k, k => sg.GetValueOrDefault(k)), gp);
+        Check(ge[0]?.OriginMark == "galar" && Enumerable.Range(60, 30).Any(i => ge.GetValueOrDefault(i)?.OriginMark == "go"),
+              "origin galar: the Galar Zigzagoon takes the slot, the GO one goes to the reject box");
+        var bigO = new ShinyForge.Services.HomeSorter.HomeSorterOptions { LivingDexStartBox = 2, RejectBoxStart = 10, RejectBoxEnd = 300, OriginMarkFilter = "galar" };
+        var gl = ShinyForge.Services.HomeSorter.DexTemplates.Layout(bySpecies, bigO);
+        var gpr = ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(gl.Count, bigO);
+        Check(gpr.Count == 1 && gpr[0].Contains("Reject Box Range Start to"), "origin galar: range check -> " + string.Join(" | ", gpr));
+    }
+
+    // ---- forms: a slot for a particular form only takes a Pokémon whose icon clearly is that form
+    {
+        ShinyForge.Services.HomeSorter.DexEntry E(string species, string form, int nat, string slug) => new(species, form, nat, "psychic", "", slug, false);
+        ShinyForge.Services.HomeSorter.HomeMon F(int nat, string form, bool sure, bool shiny = false) => new() { Dex = nat, Form = form, FormSure = sure, Shiny = shiny };
+        bool Fit(ShinyForge.Services.HomeSorter.DexEntry e, ShinyForge.Services.HomeSorter.HomeMon m) => ShinyForge.Services.HomeSorter.HomeSortPlanner.FormFits(e, m);
+        Check(Fit(E("unown", "i", 201, "unown-i"), F(201, "unown-i", true)) && !Fit(E("unown", "p", 201, "unown-p"), F(201, "unown-i", true)), "forms: Unown I fits the I slot, not the P slot");
+        Check(!Fit(E("unown", "i", 201, "unown-i"), F(201, "unown-i", false)), "forms: an unsure form doesn't fill a form slot");
+        Check(Fit(E("minior", "red-core", 774, "minior-red-core"), F(774, "minior-core", true, shiny: true))
+              && !Fit(E("minior", "meteor", 774, "minior-meteor"), F(774, "minior-core", true, shiny: true)), "forms: shiny Minior core fits any core slot, not Meteor");
+        Check(Fit(E("alcremie", "ruby-swirl-strawberry", 869, "alcremie-ruby-swirl-strawberry"), F(869, "alcremie-ruby-swirl-strawberry", true))
+              && !Fit(E("alcremie", "vanilla-cream-strawberry", 869, "alcremie-vanilla-cream-strawberry"), F(869, "alcremie-ruby-swirl-strawberry", true)),
+              "forms: Ruby Swirl Strawberry Alcremie only fits its own slot");
+        Check(Fit(E("alcremie", "ruby-cream-berry", 869, "alcremie-ruby-cream-berry"), F(869, "alcremie-berry", true, shiny: true))
+              && !Fit(E("alcremie", "ruby-cream-star", 869, "alcremie-ruby-cream-star"), F(869, "alcremie-berry", true, shiny: true)), "forms: a shiny Alcremie only has to match its sweet");
+        Check(Fit(E("rattata", "alolan", 19, "rattata-alolan"), F(19, "rattata", false)) && Fit(E("pikachu", "none", 25, "pikachu-female"), F(25, "pikachu-male", true)),
+              "forms: regional forms go by types, gender differences by the ♂/♀ icon");
+    }
+
+    // ---- box 1 is kept free: its Pokémon may fill the dex, nothing new goes in
+    {
+        var tplB = new List<ShinyForge.Services.HomeSorter.DexEntry>
+        {
+            new("bulbasaur", "none", 1, "grass", "poison", "bulbasaur", false),
+            new("ivysaur", "none", 2, "grass", "poison", "ivysaur", false),
+        };
+        var ob = new ShinyForge.Services.HomeSorter.HomeSorterOptions { Mode = ShinyForge.Services.HomeSorter.SortMode.LivingDex, LivingDexStartBox = 2, RejectBoxStart = 4, RejectBoxEnd = 4 };
+        var sb = new Dictionary<int, ShinyForge.Services.HomeSorter.HomeMon?>
+        {
+            [3] = Mon(2, "Ivysaur", t1: "grass", t2: "poison"),     // a gift in box 1: fills the Ivysaur slot
+            [4] = Mon(150, "Mewtwo", t1: "psychic"),                // a transfer in box 1 that the dex doesn't need: stays
+            [30] = Mon(25, "Pikachu", t1: "electric"),              // in the dex boxes, not in the template: to the reject box
+            [31] = Mon(1, "Bulbasaur", t1: "grass", t2: "poison"),  // -> slot 1 of box 2
+        };
+        for (var i = 0; i < 30; i++) sb.TryAdd(i, null);
+        var b1p = ShinyForge.Services.HomeSorter.HomeSortPlanner.PlanLivingDex(sb, tplB, ob, 0, new[] { 3, 4 });
+        var b1e = Apply(b1p.Target.Keys.ToDictionary(k => k, k => sb.GetValueOrDefault(k)), b1p);
+        Check(b1e[30]?.Species == "Bulbasaur" && b1e[31]?.Species == "Ivysaur" && b1e.GetValueOrDefault(4)?.Species == "Mewtwo",
+              $"box 1: the gifted Ivysaur fills the dex, the Mewtwo stays in box 1 ({b1p.Steps.Count} swaps)");
+        Check(Enumerable.Range(0, 30).All(i => b1e.GetValueOrDefault(i) == null || ReferenceEquals(b1e[i], sb.GetValueOrDefault(i))),
+              "box 1: nothing new is put into box 1");
+        var bad = new ShinyForge.Services.HomeSorter.HomeSorterOptions { LivingDexStartBox = 1, RejectBoxStart = 1, RejectBoxEnd = 300 };
+        var pr1 = ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(60, bad);
+        Check(pr1.Any(x => x.Contains("Living Dex Starting Box to 2")) && pr1.Any(x => x.Contains("Reject Box Range Start to 2")), "box 1: ranges with box 1 are refused -> " + string.Join(" | ", pr1));
+        var bs = new ShinyForge.Services.HomeSorter.HomeSorterOptions { SortStartBox = 1, BoxCount = 3 };
+        Check(ShinyForge.Services.HomeSorter.DexTemplates.SortRangeProblems(bs).Any(x => x.Contains("First Box to Sort to 2")), "box 1: the Box Sorter can't start at box 1");
+    }
+
+    // ---- box range check: what to change the settings to
+    {
+        var r = new ShinyForge.Services.HomeSorter.HomeSorterOptions { LivingDexStartBox = 2, RejectBoxStart = 103, RejectBoxEnd = 300, ShinyDex = true };
+        var pr = ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(3060, r); // AJP Living Form x2 = 102 boxes
+        Check(pr.Count == 1 && pr[0].Contains("Reject Box Range Start to 104"), "range check: overlap -> " + string.Join(" | ", pr));
+        r.RejectBoxStart = 104;
+        Check(ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(3060, r).Count == 0, "range check: start 2, rejects 104-300 fits");
+        r.LivingDexStartBox = 250;
+        pr = ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(3060, r);
+        Check(pr.Count == 1 && pr[0].Contains("Starting Box to 199"), "range check: past box 300 -> " + string.Join(" | ", pr));
+        r.LivingDexStartBox = 2; r.RejectBoxStart = 300; r.RejectBoxEnd = 104;
+        pr = ShinyForge.Services.HomeSorter.DexTemplates.BoxProblems(3060, r);
+        Check(pr.Any(x => x.Contains("Start 104, End 300")), "range check: reversed reject range -> " + string.Join(" | ", pr));
+    }
+
+    // ---- the real PA templates load
+    var dexDir = Path.Combine(devFiles, "PA-SerialPrograms-Windows-x64-0.71.6-20261029", "SerialPrograms-0.71.6-Windows-x64", "Resources", "PokemonHome", "DexTemplates");
+    foreach (var f in Directory.GetFiles(dexDir, "*.json"))
+    {
+        var t = ShinyForge.Services.HomeSorter.DexTemplates.Load(f);
+        Check(t.Count > 0, $"template {Path.GetFileName(f)}: {t.Count} entries");
+    }
+    // ---- CRC32C matches the board's (software table = SSE4.2 instruction; known value of "123456789" with ~0 seed and final ~)
+    var crc = ~ShinyForge.Services.HomeSorter.PaBotBase2.Crc32C(0xFFFFFFFF, "123456789"u8);
+    Check(crc == 0xE3069283, $"CRC32C check value {crc:X8}");
+}
 Console.WriteLine(failures == 0 ? "ALL CHECKS PASSED" : $"{failures} CHECK(S) FAILED");
 return failures;

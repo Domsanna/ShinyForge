@@ -1,0 +1,179 @@
+# Builds every ShinyForge download from the source in this repository, on GitHub's own machines.
+#
+# - Every push to main and every pull request: build Windows + macOS + Linux and keep the files as workflow artifacts
+#   (a check that the source builds).
+# - A version tag (v1.6.0): the same build, then a DRAFT release with all downloads, SHA256SUMS files and a signed
+#   build-provenance attestation (who built each file, from which commit, with which workflow). The draft is published by
+#   hand after checking it - nothing is released without that approval.
+#
+# Anyone can check a download came from this workflow:  gh attestation verify <file> --repo Domsanna/ShinyForge
+# Code signing (SignPath) plugs in at the marked step once it's set up - see CODE_SIGNING.md.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: version.txt (and the tag, for a release)
+        shell: bash
+        run: |
+          version="$(head -n1 version.txt | tr -d '[:space:]')"
+          [[ "$version" =~ ^1\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version.txt must hold 1.X.Z, found '$version'"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$version" ]]; then
+            echo "::error::tag ${GITHUB_REF#refs/tags/} doesn't match version.txt ($version)"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows (installer + portable)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      # DexTracker (MIT, submodule external/DexTracker) is rebuilt from its source here instead of using the copy in
+      # ShinyForge/Assets/DexTracker, so every file in the download comes from source in this build.
+      - name: Build DexTracker from source
+        shell: pwsh
+        run: ./tools/build-dextracker.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build
+        shell: pwsh
+        run: ./build.ps1
+
+      # ---- code signing (SignPath) goes here once the project is accepted - see CODE_SIGNING.md.
+      # It only runs when the repository variable SIGNPATH_ORGANIZATION_ID is set.
+      - name: Upload unsigned files for signing
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && startsWith(github.ref, 'refs/tags/') }}
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: |
+            dist/ShinyForge-Setup.exe
+            dist/ShinyForge-Portable.zip
+      - name: Sign with SignPath (needs approval in SignPath)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && startsWith(github.ref, 'refs/tags/') }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ShinyForge
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist
+      # ---- end of code signing
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/ShinyForge-Setup.exe
+            dist/ShinyForge-Portable.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  unix:
+    name: macOS + Linux
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zip dpkg curl python3-pil
+
+      - name: Build
+        shell: pwsh
+        run: ./build-unix.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unix
+          path: |
+            dist-unix/*.zip
+            dist-unix/*.tar.gz
+            dist-unix/*.deb
+            dist-unix/SHA256SUMS-unix.txt
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, windows, unix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the draft release
+      id-token: write       # sign the build-provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Build provenance (verifiable with gh attestation verify)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            out/*.exe
+            out/*.zip
+            out/*.tar.gz
+            out/*.deb
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          # the release notes are this version's section of CHANGELOG.md (or "Unreleased" if it has no own section yet)
+          section() { awk -v h="$1" '/^## / { if (found) exit; if ($0 == h || $0 == h " " || index($0, h " -") == 1) found = 1; next } found { print }' CHANGELOG.md; }
+          section "## $VERSION" > notes.md
+          [ -s notes.md ] || section "## Unreleased" > notes.md
+          [ -s notes.md ] || echo "ShinyForge $VERSION" > notes.md
+          printf '\n---\nBuilt from %s by GitHub Actions ([run](%s/%s/actions/runs/%s)). Check a download: `gh attestation verify <file> --repo %s`\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY" >> notes.md
+          gh release create "$GITHUB_REF_NAME" out/* --draft --title "ShinyForge $VERSION" --notes-file notes.md

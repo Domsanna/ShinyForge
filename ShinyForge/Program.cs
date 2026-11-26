@@ -1,4 +1,4 @@
-using ShinyForge.Core;
+﻿using ShinyForge.Core;
 using ShinyForge.UI;
 
 namespace ShinyForge;
@@ -45,6 +45,10 @@ internal static class Program
             : Services.HuntService.IsPythonHuntRunning() ? "the Python hunter" : null;
         Services.PowerGuard.Start();
         Services.ConsoleFtpLauncher.Decode = GdiImage.Decode;        // reading Switch screenshots (HOME menu, Homebrew Menu)
+        Services.HomeSorter.HomeVision.Ocr = WinOcr.Read;           // HOME sorter: reading the summary screen
+        Services.HomeSorter.HomeVision.OcrAll = WinOcr.ReadAll;
+        Services.HomeSorter.HomeVision.DecodeRgba = WinOcr.DecodeRgba;
+        Services.HomeSorter.ConsoleKeepAwake.Apply();                 // keep the Switch / Switch 2 awake (if turned on)
         Services.SwitchGameLauncher.ChooseUser = SwitchUserPrompt.Ask; // "Who is using the software?" -> ask which user
         Services.WebServer.Apply();              // stream overlay / phone remote (if turned on)
         var main = new MainForm();
