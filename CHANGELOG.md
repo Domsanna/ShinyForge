@@ -2,7 +2,7 @@
 
 All notable changes to ShinyForge. Versions are `1.X.Z`: `X` goes up for big updates, `Z` for patches and small fixes. Up to 1.0.15 the last number was the build number (the count of git commits), so older entries say "build N" = version 1.0.N.
 
-## Unreleased
+## 1.6.0
 
 ### Added
 - **HOME Box Sorter** (Windows, HOME tile → **Open HOME Box Sorter**). Sorts Pokémon HOME boxes or builds a living dex on an unmodded Switch / Switch 2, through a board flashed with Pokémon Automation's PABotBase2 firmware (your ESP32-S3) as a wired Pro Controller, plus the capture card. It has all of Pokémon Automation's Box Sorter and Box Sorter Living Dex options (filled in from your Pokémon Automation settings the first time), and adds:
