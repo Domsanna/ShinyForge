@@ -78,7 +78,7 @@ public sealed class HuntOptionsWindow : Window
         var pick = new AutoCompleteBox
         {
             Width = 240, FilterMode = AutoCompleteFilterMode.Contains, MinimumPrefixLength = 1,
-            ItemsSource = available.Select(x => $"#{x.Species:000} {x.Name}").ToList(), Watermark = "Pokémon (name or number)",
+            ItemsSource = available.Select(x => $"#{x.Species:000} {x.Name}").ToList(), PlaceholderText = "Pokémon (name or number)",
         };
         var formBox = new ComboBox { Width = 180 };
         var genderBox = new ComboBox { Width = 130, ItemsSource = new[] { "Any gender", "Male", "Female" }, SelectedIndex = 0 };
